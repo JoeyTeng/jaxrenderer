@@ -1,0 +1,20 @@
+[tool.poetry]
+name = "jaxtinyrenderer"
+version = "0.1.0"
+description = "Jax implementation of ssloy/tinyrenderer for brax"
+authors = ["Joey Teng <joey.teng.dev@gmail.com>"]
+license = "MIT License"
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.10"
+jax = "^0.4.1"
+numpy = "^1.24.1"
+
+
+[tool.poetry.group.dev.dependencies]
+matplotlib = "^3.6.2"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
