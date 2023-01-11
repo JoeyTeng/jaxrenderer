@@ -153,6 +153,42 @@ cuda11-cudnn86 = ["jaxlib (==0.4.1+cuda11.cudnn86)"]
 minimum-jaxlib = ["jaxlib (==0.3.22)"]
 tpu = ["jaxlib (==0.4.1)", "libtpu-nightly (==0.1.dev20221212)", "requests"]
 
+[package.source]
+type = "legacy"
+url = "https://storage.googleapis.com/jax-releases/jax_releases.html"
+reference = "jax"
+
+[[package]]
+name = "jaxlib"
+version = "0.4.1"
+description = "XLA library for JAX"
+category = "main"
+optional = false
+python-versions = ">=3.8"
+files = [
+    {file = "jaxlib-0.4.1-cp310-cp310-macosx_10_14_x86_64.whl", hash = "sha256:8bc22e057010e8ae822f916d04bc94b1455ef3d950b1a41cf3f5ddaa84b610bc"},
+    {file = "jaxlib-0.4.1-cp310-cp310-macosx_11_0_arm64.whl", hash = "sha256:89497eadbc7def7402a899fd521e3c045924c5ecb3a370b8d755d8f1d7fa2fa5"},
+    {file = "jaxlib-0.4.1-cp310-cp310-manylinux2014_x86_64.whl", hash = "sha256:9e91ba958cfae9ce61190c78a7beb09c3a1e03253b4b9a80c99d563ae8f4baeb"},
+    {file = "jaxlib-0.4.1-cp311-cp311-macosx_10_14_x86_64.whl", hash = "sha256:6a87ba1e0818e2d72c1ee9ba609d83dc214bbafbfadfc3fb3d73f64a299f3ec0"},
+    {file = "jaxlib-0.4.1-cp311-cp311-macosx_11_0_arm64.whl", hash = "sha256:f7894a395612bf68598026b1f0809f8a3674f5d0f5e6b1b49d82f48b355ec184"},
+    {file = "jaxlib-0.4.1-cp311-cp311-manylinux2014_x86_64.whl", hash = "sha256:194952ffad1c35af95c1e4f513aa0f3a9c7768743e515ee68566c2949045381c"},
+    {file = "jaxlib-0.4.1-cp38-cp38-macosx_10_14_x86_64.whl", hash = "sha256:fa2264882959f24fe50dc62d95ac53a617b94e8c8bb160d5a739eac742e4117f"},
+    {file = "jaxlib-0.4.1-cp38-cp38-macosx_11_0_arm64.whl", hash = "sha256:1437b4ea9f55e0bc8286911bf14382d72e923487fcad054a9685b2f443ff3027"},
+    {file = "jaxlib-0.4.1-cp38-cp38-manylinux2014_x86_64.whl", hash = "sha256:d06e4bf7b65b54e40146a62bf8c8bdece604d6f0f6bbe1667158832f6ff6b046"},
+    {file = "jaxlib-0.4.1-cp39-cp39-macosx_10_14_x86_64.whl", hash = "sha256:5d53435b5655aae03d004e4e90b0f401488baf08836a23e4fabab07e642fc44b"},
+    {file = "jaxlib-0.4.1-cp39-cp39-macosx_11_0_arm64.whl", hash = "sha256:7967ba5c005e1f3ae3c4ea54123ac78290fedd2f0809498eb8e9ef191e293094"},
+    {file = "jaxlib-0.4.1-cp39-cp39-manylinux2014_x86_64.whl", hash = "sha256:5f8988df1a44fcf25d225fb8abbbd3f0c495eaacfefab374ce20bd02948fddb0"},
+]
+
+[package.dependencies]
+numpy = ">=1.20"
+scipy = ">=1.5"
+
+[package.source]
+type = "legacy"
+url = "https://storage.googleapis.com/jax-releases/jax_releases.html"
+reference = "jax"
+
 [[package]]
 name = "kiwisolver"
 version = "1.4.4"
@@ -530,4 +566,4 @@ files = [
 [metadata]
 lock-version = "2.0"
 python-versions = "^3.10"
-content-hash = "efa281a0fcbcffbd8fa6a2f7543a026de9b00bbdc5e291f98806db903ba5ea02"
+content-hash = "fcee0c4815cd6d20c36b57230bbe6e736341e50b759d6d6c054502c1628cdcd2"
