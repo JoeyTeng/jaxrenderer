@@ -2,9 +2,12 @@ import re
 from dataclasses import dataclass, field
 from typing import List, NewType, Tuple
 
+import jax
 import jax.numpy as jnp
 
-# Vec3 = NewType("Vec3", jnp.DeviceArray)
+jax.config.update('jax_array', True)
+
+# Vec3 = NewType("Vec3", jax.Array)
 Vec3 = Tuple[float, float, float]
 
 

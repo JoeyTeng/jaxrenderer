@@ -1,7 +1,10 @@
+import jax
 import jax.numpy as jnp
 import matplotlib.image as mpimg
 
 from renderer.renderer import Canvas, Colour, line
+
+jax.config.update('jax_array', True)
 
 
 def test_line():
