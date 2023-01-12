@@ -5,7 +5,7 @@ import jax.numpy as jnp
 import matplotlib.image as mpimg
 from jax import lax
 
-from renderer.renderer import Canvas, Colour, Vec2i, line
+from renderer.renderer import Canvas, Colour, Vec2i, line, triangle
 from test_resources.utils import Model, make_model
 
 jax.config.update('jax_array', True)
@@ -61,6 +61,29 @@ def test_wireframe_basic():
     mpimg.imsave("test_wireframe_basic.png", canvas, origin='lower')
 
 
+def test_triangle():
+    canvas: Canvas = jnp.zeros((200, 200, 3))
+
+    red: Colour = jnp.array((1., .0, .0))
+    white: Colour = jnp.ones(3)
+    green: Colour = jnp.array((.0, 1., .0))
+
+    triangles = [
+        (((10, 70), (50, 160), (70, 80)), red),
+        (((180, 50), (150, 1), (70, 180)), white),
+        (((180, 150), (120, 160), (130, 180)), green),
+    ]
+
+    for _t, colour in triangles:
+        v0, v1, v2 = tuple(map(jnp.array, _t))
+        canvas = triangle(v0, v1, v2, canvas, colour)
+
+    canvas = lax.transpose(canvas, (1, 0, 2))
+
+    mpimg.imsave("test_triangle.png", canvas, origin='lower')
+
+
 if __name__ == '__main__':
     test_line()
     test_wireframe_basic()
+    test_triangle()
