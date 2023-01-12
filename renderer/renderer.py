@@ -10,17 +10,19 @@ jax.config.update('jax_array', True)
 Canvas = Sequence[Sequence[Sequence[int]]]
 # Colour = NewType("Colour", jax.Array)
 Colour = Sequence[int]
+# Vec2i = NewType("Vec2i", jax.Array)
+Vec2i = Tuple[int, int]
 
 
 @jax.jit
 def line(
-    x0: int,
-    y0: int,
-    x1: int,
-    y1: int,
+    t0: Vec2i,
+    t1: Vec2i,
     canvas: Canvas,
     colour: Colour,
 ) -> Canvas:
+    x0, y0, x1, y1 = t0[0], t0[1], t1[0], t1[1]
+
     steep: bool = lax.abs(x0 - x1) < lax.abs(y0 - y1)
     # if steep, swap x y
     x0, y0, x1, y1 = lax.cond(
