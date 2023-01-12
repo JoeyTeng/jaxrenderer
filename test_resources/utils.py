@@ -33,12 +33,12 @@ def make_model(fileContent: List[str]) -> Model:
     verts: List[Vec3] = []
     faces: List[List[int]] = []
 
-    _decimal = re.compile(r"-?\d+\.?\d*")
+    _float = re.compile(r"(-?\d+\.?\d*(?:e[+-]\d+)?)")
     _integer = re.compile(r"\d+")
     _one_vertex = re.compile(r"\d+/\d*/\d*")
     for line in fileContent:
         if line.startswith("v "):
-            vert: Vec3 = tuple(map(float, _decimal.findall(line, 2)[:3]))
+            vert: Vec3 = tuple(map(float, _float.findall(line, 2)[:3]))
             verts.append(vert)
         elif line.startswith("f "):
             face: List[int] = list(
