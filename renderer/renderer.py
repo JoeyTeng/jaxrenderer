@@ -4,9 +4,11 @@ import jax
 import jax.numpy as jnp
 from jax import lax
 
-# Canvas = NewType("Canvas", jnp.DeviceArray)
+jax.config.update('jax_array', True)
+
+# Canvas = NewType("Canvas", jax.Array)
 Canvas = Sequence[Sequence[Sequence[int]]]
-# Colour = NewType("Colour", jnp.DeviceArray)
+# Colour = NewType("Colour", jax.Array)
 Colour = Sequence[int]
 
 
