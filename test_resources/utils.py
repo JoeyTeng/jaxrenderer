@@ -13,16 +13,20 @@ Vec3 = Tuple[float, float, float]
 
 @dataclass()
 class Model:
-    verts: List[Vec3] = field(default_factory=list)
-    faces: List[List[int]] = field(default_factory=list)
+    verts: jax.Array
+    faces: jax.Array
+
+    def __post_init__(self):
+        assert self.verts.shape[1] == 3
+        assert len(self.faces.shape) == 2
 
     @property
     def nverts(self) -> int:
-        return len(self.verts)
+        return self.verts.shape[0]
 
     @property
     def nfaces(self) -> int:
-        return len(self.faces)
+        return self.faces.shape[0]
 
 
 def make_model(fileContent: List[str]) -> Model:
@@ -47,4 +51,4 @@ def make_model(fileContent: List[str]) -> Model:
                 ))
             faces.append(face)
 
-    return Model(verts, faces)
+    return Model(jnp.array(verts), jnp.array(faces))
