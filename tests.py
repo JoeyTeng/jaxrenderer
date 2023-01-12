@@ -1,7 +1,9 @@
+from typing import Tuple
+
 import jax
 import jax.numpy as jnp
-from jax import lax
 import matplotlib.image as mpimg
+from jax import lax
 
 from renderer.renderer import Canvas, Colour, line
 from test_resources.utils import Model, make_model
@@ -31,25 +33,26 @@ def test_wireframe_basic():
     canvas: Canvas = jnp.zeros((height, width, 3))
     white: Colour = jnp.ones(3)
 
-    def f(i: int, _canvas: Canvas) -> Canvas:
-        face = model.faces[i]
+    def g(j: int, state: Tuple[int, Canvas]) -> Tuple[int, Canvas]:
+        canvas: Canvas
+        i, canvas = state
+        v0 = model.verts[model.faces[i, j]]
+        v1 = model.verts[model.faces[i, (j + 1) % 3]]
+        x0: int = ((v0[0] + 1.) * width / 2.).astype(int)
+        y0: int = ((v0[1] + 1.) * height / 2.).astype(int)
+        x1: int = ((v1[0] + 1.) * width / 2.).astype(int)
+        y1: int = ((v1[1] + 1.) * height / 2.).astype(int)
+        canvas = line(x0, y0, x1, y1, canvas, white)
 
-        def g(j: int, __canvas: Canvas) -> Canvas:
-            v0 = model.verts[face[j]]
-            v1 = model.verts[face[(j + 1) % 3]]
-            x0: int = ((v0[0] + 1.) * width / 2).astype(int)
-            y0: int = ((v0[1] + 1.) * height / 2).astype(int)
-            x1: int = ((v1[0] + 1.) * width / 2).astype(int)
-            y1: int = ((v1[1] + 1.) * height / 2).astype(int)
-            __canvas = line(x0, y0, x1, y1, __canvas, white)
+        return i, canvas
 
-            return __canvas
+    def f(i: int, canvas: Canvas) -> Canvas:
+        canvas = lax.fori_loop(0, 3, g, (i, canvas))[1]
 
-        _canvas = lax.fori_loop(0, 3, g, _canvas)
-
-        return _canvas
+        return canvas
 
     canvas = lax.fori_loop(0, model.nfaces, f, canvas)
+    canvas = lax.transpose(canvas, (1, 0, 2))
 
     mpimg.imsave("test_wireframe_basic.png", canvas, origin='lower')
 
