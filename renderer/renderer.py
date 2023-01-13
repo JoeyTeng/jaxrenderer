@@ -12,6 +12,8 @@ Canvas = Sequence[Sequence[Sequence[int]]]
 Colour = Sequence[int]
 # Vec2i = NewType("Vec2i", jax.Array)
 Vec2i = Tuple[int, int]
+# Vec3f = NewType("Vec3f", jax.Array)
+Vec3f = Tuple[float, float, float]
 # Triangle = NewType("Triangle", jax.Array)
 Triangle = Tuple[Tuple[int, int], Tuple[int, int], Tuple[int, int]]
 
@@ -67,7 +69,71 @@ def line(
 
 
 @jax.jit
+def barycentric(pts: Triangle, p: Vec2i) -> Vec3f:
+    mat: jax.Array = jnp.vstack((
+        pts[2] - pts[0],
+        pts[1] - pts[0],
+        pts[0] - p,
+    ))
+    vec: Vec3f = jnp.cross(mat[:, 0], mat[:, 1])
+    # `pts` and `P` has integer value as coordinates so `abs(u[2])` < 1 means
+    # `u[2]` is 0, that means triangle is degenerate, in this case
+    # return something with negative coordinates
+    vec = lax.cond(
+        jnp.abs(vec[-1]) < 1,
+        lambda: jnp.array((-1, 1, 1)),
+        lambda: vec,
+    )
+    vec = vec / vec[-1]
+    vec = jnp.array((1 - (vec[0] + vec[1]), vec[1], vec[0]))
+
+    return vec
+
+
+@jax.jit
 def triangle(
+    pts: Triangle,
+    canvas: Canvas,
+    colour: Colour,
+) -> Canvas:
+    # min_x, min_y
+    mins: Vec2i = lax.clamp(
+        0,
+        jnp.min(pts, axis=0),
+        jnp.array(canvas.shape[:2]),
+    )
+    # max_x, max_y
+    maxs: Vec2i = lax.clamp(
+        0,
+        jnp.max(pts, axis=0),
+        jnp.array(canvas.shape[:2]),
+    )
+
+    def g(y: int, state: Tuple[int, Canvas]) -> Tuple[int, Canvas]:
+        x: int
+        _canvas: Canvas
+        x, _canvas = state
+        coord: Vec3f = barycentric(pts, jnp.array((x, y)))
+        _canvas = lax.cond(
+            jnp.less(coord, 0.).any(),
+            lambda: _canvas,
+            lambda: _canvas.at[x, y, :].set(colour),
+        )
+
+        return x, _canvas
+
+    def f(x: int, _canvas: Canvas) -> Canvas:
+        _canvas = lax.fori_loop(mins[1], maxs[1] + 1, g, (x, _canvas))[1]
+
+        return _canvas
+
+    canvas = lax.fori_loop(mins[0], maxs[0] + 1, f, canvas)
+
+    return canvas
+
+
+@jax.jit
+def triangle_sweep(
     pts: Triangle,
     canvas: Canvas,
     colour: Colour,
