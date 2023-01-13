@@ -7,9 +7,9 @@ from jax import lax
 jax.config.update('jax_array', True)
 
 # Canvas = NewType("Canvas", jax.Array)
-Canvas = Sequence[Sequence[Sequence[int]]]
+Canvas = Sequence[Sequence[Sequence[float]]]
 # Colour = NewType("Colour", jax.Array)
-Colour = Sequence[int]
+Colour = Sequence[float]
 # Vec2i = NewType("Vec2i", jax.Array)
 Vec2i = Tuple[int, int]
 # Vec3f = NewType("Vec3f", jax.Array)
