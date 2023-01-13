@@ -35,8 +35,8 @@ def test_wireframe_basic():
     height: int = 800
 
     wh_vec: Vec2i = jnp.array((width, height))
-
-    canvas: Canvas = jnp.zeros((height, width, 3))
+    # width, height since it will be transposed in final step
+    canvas: Canvas = jnp.zeros((width, height, 3))
     white: Colour = jnp.ones(3)
 
     def g(j: int, state: Tuple[int, Canvas]) -> Tuple[int, Canvas]:
@@ -62,7 +62,10 @@ def test_wireframe_basic():
 
 
 def test_triangle():
-    canvas: Canvas = jnp.zeros((200, 200, 3))
+    width: int = 200
+    height: int = 200
+    # width, height since it will be transposed in final step
+    canvas: Canvas = jnp.zeros((width, height, 3))
 
     red: Colour = jnp.array((1., .0, .0))
     white: Colour = jnp.ones(3)
