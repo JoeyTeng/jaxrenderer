@@ -6,9 +6,10 @@ import jax.numpy as jnp
 import matplotlib.image as mpimg
 from jax import lax, random
 
-from renderer.renderer import (Canvas, Colour, Triangle, Triangle3D, Vec2i,
-                               Vec3f, ZBuffer, line, triangle, triangle3d)
-from test_resources.utils import Model, make_model
+from renderer.renderer import (Canvas, Colour, Triangle, Triangle3D,
+                               TriangleColours, Vec2i, Vec3f, ZBuffer, line,
+                               triangle, triangle3d, triangle_texture)
+from test_resources.utils import Model, Texture, load_tga, make_model
 
 jax.config.update('jax_array', True)
 
@@ -215,6 +216,76 @@ def test_flat_shading_simple_light_with_zbuffer():
     )
 
 
+def test_flat_shading_texture():
+    obj_path: str = "test_resources/obj/african_head.obj"
+    model: Model = make_model(open(obj_path, 'r').readlines())
+    texture_path: str = "test_resources/tga/african_head_diffuse.tga"
+    texture: Texture = load_tga(texture_path)
+
+    width: int = 800
+    height: int = 800
+
+    # 3 constants for world-to-screen coordinate conversions
+    ws_add = jnp.array((1, 1, 0))
+    ws_mul: Vec2i = jnp.array((width, height, 1))
+    ws_div = jnp.array((2, 2, 1))
+    # 3 constants for world-to-texture coordinate conversions
+    wt_add = jnp.array((1, 1))
+    wt_mul = jnp.array(texture.shape[:2])
+    wt_div = jnp.array((2, 2))
+    # width, height since it will be transposed in final step
+    canvas: Canvas = jnp.zeros((width, height, 3))
+    zbuffer: ZBuffer = (jnp.ones(
+        (width, height), dtype=jnp.single) * jnp.finfo(dtype=jnp.single).min)
+
+    light_dir: Vec3f = jnp.array((0., 0., -1.))
+
+    @jax.jit
+    def f(i: int, state: Tuple[ZBuffer, Canvas]) -> Tuple[ZBuffer, Canvas]:
+        _zbuff: ZBuffer
+        _canvas: Canvas
+        _zbuff, _canvas = state
+
+        world_coords: Triangle3D = model.verts[model.faces[i]].astype(float)
+        screen_coords: Triangle3D = ((world_coords + ws_add) * ws_mul //
+                                     ws_div).at[:, 2].set(world_coords[:, 2])
+        texture_coords: Triangle = ((world_coords[:, 2] + wt_add) * wt_mul //
+                                    wt_div)
+
+        n: Vec3f = jnp.cross(
+            world_coords[2, :] - world_coords[0, :],
+            world_coords[1, :] - world_coords[0, :],
+        )
+        n = n / jnp.linalg.norm(n)
+        intensity: float = jnp.dot(n, light_dir)
+        tex_xs: Vec2i
+        tex_ys: Vec2i
+        tex_xs, tex_ys = texture_coords[:, 0], texture_coords[:, 1]
+        colours: TriangleColours = jnp.vstack((
+            texture[tex_xs[0], tex_ys[0], :],
+            texture[tex_xs[1], tex_ys[1], :],
+            texture[tex_xs[2], tex_ys[2], :],
+        )) * intensity
+
+        # with back-face culling
+        _zbuff, _canvas = lax.cond(
+            intensity > 0,
+            lambda: triangle_texture(screen_coords, _zbuff, _canvas, colours),
+            lambda: (_zbuff, _canvas),
+        )
+
+        return _zbuff, _canvas
+
+    canvas = lax.fori_loop(0, model.nfaces, f, (zbuffer, canvas))[1]
+    canvas = lax.transpose(canvas, (1, 0, 2))
+
+    mpimg.imsave(
+        "test_flat_shading_simple_light_with_zbuffer.png",
+        canvas,
+        origin='lower',
+    )
+
+
 if __name__ == '__main__':
     test_line()
     test_wireframe_basic()
@@ -222,3 +293,4 @@ if __name__ == '__main__':
     test_flat_shading_random_colour()
     test_flat_shading_simple_light()
     test_flat_shading_simple_light_with_zbuffer()
+    test_flat_shading_texture()

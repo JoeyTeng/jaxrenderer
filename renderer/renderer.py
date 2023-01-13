@@ -12,6 +12,8 @@ Canvas = Sequence[Sequence[Sequence[float]]]
 ZBuffer = Sequence[Sequence[float]]
 # Colour = NewType("Colour", jax.Array)
 Colour = Tuple[float, float, float]
+# TriangleColours = NewType("TriangleColours", jax.Array)
+TriangleColours = Tuple[Colour, Colour, Colour]
 # Vec2i = NewType("Vec2i", jax.Array)
 Vec2i = Tuple[int, int]
 # Vec3f = NewType("Vec3f", jax.Array)
@@ -138,6 +140,74 @@ def triangle3d(
             lambda: (
                 _zbuffer.at[x, y].set(z),
                 _canvas.at[x, y, :].set(colour),
+            ),
+        )
+
+        return x, _zbuffer, _canvas
+
+    def f(x: int, state: Tuple[ZBuffer, Canvas]) -> Tuple[ZBuffer, Canvas]:
+        _zbuffer: ZBuffer
+        _canvas: Canvas
+        _zbuffer, _canvas = state
+
+        _, _zbuffer, _canvas = lax.fori_loop(
+            mins[1],
+            maxs[1] + 1,
+            g,
+            (x, _zbuffer, _canvas),
+        )
+
+        return _zbuffer, _canvas
+
+    zbuffer, canvas = lax.fori_loop(mins[0], maxs[0] + 1, f, (zbuffer, canvas))
+
+    return zbuffer, canvas
+
+
+@jax.jit
+def triangle_texture(
+    pts: Triangle3D,
+    zbuffer: ZBuffer,
+    canvas: Canvas,
+    colours: TriangleColours,
+) -> Tuple[ZBuffer, Canvas]:
+    pts_2d: Triangle = pts[:, :2].astype(int)
+    # min_x, min_y
+    mins: Vec2i = lax.clamp(
+        0,
+        jnp.min(pts_2d, axis=0),
+        jnp.array(canvas.shape[:2]),
+    )
+    # max_x, max_y
+    maxs: Vec2i = lax.clamp(
+        0,
+        jnp.max(pts_2d, axis=0),
+        jnp.array(canvas.shape[:2]),
+    )
+    pts_zs = pts[:, 2]  # floats
+
+    def g(
+        y: int,
+        state: Tuple[int, ZBuffer, Canvas],
+    ) -> Tuple[int, ZBuffer, Canvas]:
+        x: int
+        _zbuffer: ZBuffer
+        _canvas: Canvas
+        x, _zbuffer, _canvas = state
+
+        coord: Vec3f = barycentric(pts_2d, jnp.array((x, y)))
+        z: float = jnp.dot(coord, pts_zs)
+
+        _zbuffer, _canvas = lax.cond(
+            jnp.concatenate((
+                jnp.array([_zbuffer[x, y] > z]),
+                jnp.less(coord, 0.),
+            )).any(),
+            lambda: (_zbuffer, _canvas),
+            lambda: (
+                _zbuffer.at[x, y].set(z),
+                # weighted sum of colour; not commutative.
+                _canvas.at[x, y, :].set(coord.dot(colours)),
             ),
         )
 
