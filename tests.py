@@ -75,8 +75,7 @@ def test_triangle():
     ]
 
     for _t, colour in triangles:
-        v0, v1, v2 = tuple(map(jnp.array, _t))
-        canvas = triangle(v0, v1, v2, canvas, colour)
+        canvas = triangle(jnp.array(_t), canvas, colour)
 
     canvas = lax.transpose(canvas, (1, 0, 2))
 

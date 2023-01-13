@@ -12,6 +12,8 @@ Canvas = Sequence[Sequence[Sequence[int]]]
 Colour = Sequence[int]
 # Vec2i = NewType("Vec2i", jax.Array)
 Vec2i = Tuple[int, int]
+# Triangle = NewType("Triangle", jax.Array)
+Triangle = Tuple[Tuple[int, int], Tuple[int, int], Tuple[int, int]]
 
 
 @jax.jit
@@ -66,13 +68,15 @@ def line(
 
 @jax.jit
 def triangle(
-    t0: Vec2i,
-    t1: Vec2i,
-    t2: Vec2i,
+    pts: Triangle,
     canvas: Canvas,
     colour: Colour,
 ) -> Canvas:
     """Line sweeping."""
+    t0: Vec2i = pts[0]
+    t1: Vec2i = pts[1]
+    t2: Vec2i = pts[2]
+
     # sort vertices by ascending y-coordinates
     t0, t1 = lax.cond(t0[1] < t1[1], lambda: (t0, t1), lambda: (t1, t0))
     t0, t2 = lax.cond(t0[1] < t2[1], lambda: (t0, t2), lambda: (t2, t0))
