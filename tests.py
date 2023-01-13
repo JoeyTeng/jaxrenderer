@@ -1,9 +1,10 @@
+from functools import partial
 from typing import Tuple
 
 import jax
 import jax.numpy as jnp
 import matplotlib.image as mpimg
-from jax import lax
+from jax import lax, random
 
 from renderer.renderer import Canvas, Colour, Vec2i, line, triangle
 from test_resources.utils import Model, make_model
@@ -85,7 +86,39 @@ def test_triangle():
     mpimg.imsave("test_triangle.png", canvas, origin='lower')
 
 
+def test_flat_shading_random_colour():
+    file_path: str = "test_resources/obj/african_head.obj"
+    model: Model = make_model(open(file_path, 'r').readlines())
+
+    width: int = 800
+    height: int = 800
+
+    wh_vec: Vec2i = jnp.array((width, height))
+    # width, height since it will be transposed in final step
+    canvas: Canvas = jnp.zeros((width, height, 3))
+
+    key = random.PRNGKey(20230113)
+    key, *subkeys = random.split(key, num=model.nfaces + 1)
+    rand_colour = partial(random.uniform, shape=(3, ))
+    colours = jax.vmap(rand_colour)(jnp.array(subkeys))
+
+    @jax.jit
+    def f(i: int, _canvas: Canvas) -> Canvas:
+        world_coords = model.verts[model.faces[i]]
+        screen_coords = ((world_coords[:, :2] + 1) * wh_vec // 2).astype(int)
+
+        _canvas = triangle(screen_coords, _canvas, colours[i])
+
+        return _canvas
+
+    canvas = lax.fori_loop(0, model.nfaces, f, canvas)
+    canvas = lax.transpose(canvas, (1, 0, 2))
+
+    mpimg.imsave("test_flat_shading_random_colour.png", canvas, origin='lower')
+
+
 if __name__ == '__main__':
     test_line()
     test_wireframe_basic()
     test_triangle()
+    test_flat_shading_random_colour()
