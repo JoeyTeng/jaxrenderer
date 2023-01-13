@@ -1,14 +1,17 @@
 import re
-from dataclasses import dataclass, field
-from typing import List, NewType, Tuple
+from dataclasses import dataclass
+from typing import List, NewType, Sequence, Tuple
 
 import jax
 import jax.numpy as jnp
+from PIL import Image
 
 jax.config.update('jax_array', True)
 
 # Vec3 = NewType("Vec3", jax.Array)
 Vec3 = Tuple[float, float, float]
+# Texture = NewType("Texture", jax.Array)
+Texture = Sequence[Sequence[Tuple[float, float, float]]]
 
 
 @dataclass()
@@ -52,3 +55,15 @@ def make_model(fileContent: List[str]) -> Model:
             faces.append(face)
 
     return Model(jnp.array(verts), jnp.array(faces))
+
+
+def load_tga(path: str) -> Texture:
+    image: Image.Image = Image.open(path)
+    width, height = image.size
+    texture: Texture = jnp.zeros((height, width, 3), dtype=jnp.single)
+
+    for y in range(height):
+        for x in range(width):
+            texture = texture.at[y, x].set(jnp.array(image.getpixel((x, y))))
+
+    return texture
