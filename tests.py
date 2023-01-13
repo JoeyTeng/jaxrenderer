@@ -117,8 +117,50 @@ def test_flat_shading_random_colour():
     mpimg.imsave("test_flat_shading_random_colour.png", canvas, origin='lower')
 
 
+def test_flat_shading_simple_light():
+    file_path: str = "test_resources/obj/african_head.obj"
+    model: Model = make_model(open(file_path, 'r').readlines())
+
+    width: int = 800
+    height: int = 800
+
+    wh_vec: Vec2i = jnp.array((width, height))
+    # width, height since it will be transposed in final step
+    canvas: Canvas = jnp.zeros((width, height, 3))
+
+    light_dir = jnp.array((0., 0., -1.))
+
+    @jax.jit
+    def f(i: int, _canvas: Canvas) -> Canvas:
+        world_coords = model.verts[model.faces[i]]
+        screen_coords = ((world_coords[:, :2] + 1) * wh_vec // 2).astype(int)
+
+        n = jnp.cross(
+            world_coords[2, :] - world_coords[0, :],
+            world_coords[1, :] - world_coords[0, :],
+        )
+        n = n / jnp.linalg.norm(n)
+        intensity: float = jnp.dot(n, light_dir)
+        colour = jnp.ones(3) * intensity
+
+        # with back-face culling
+        _canvas = lax.cond(
+            intensity > 0,
+            lambda: triangle(screen_coords, _canvas, colour),
+            lambda: _canvas,
+        )
+
+        return _canvas
+
+    canvas = lax.fori_loop(0, model.nfaces, f, canvas)
+    canvas = lax.transpose(canvas, (1, 0, 2))
+
+    mpimg.imsave("test_flat_shading_simple_light.png", canvas, origin='lower')
+
+
 if __name__ == '__main__':
     test_line()
     test_wireframe_basic()
     test_triangle()
     test_flat_shading_random_colour()
+    test_flat_shading_simple_light()
