@@ -8,6 +8,8 @@ jax.config.update('jax_array', True)
 
 # Canvas = NewType("Canvas", jax.Array)
 Canvas = Sequence[Sequence[Sequence[float]]]
+# ZBuffer = NewType("ZBuffer", jax.Array)
+ZBuffer = Sequence[Sequence[float]]
 # Colour = NewType("Colour", jax.Array)
 Colour = Sequence[float]
 # Vec2i = NewType("Vec2i", jax.Array)
@@ -16,6 +18,9 @@ Vec2i = Tuple[int, int]
 Vec3f = Tuple[float, float, float]
 # Triangle = NewType("Triangle", jax.Array)
 Triangle = Tuple[Tuple[int, int], Tuple[int, int], Tuple[int, int]]
+# Triangle3D = NewType("Triangle3D", jax.Array)
+Triangle3D = Tuple[Tuple[float, float, float], Tuple[float, float, float],
+                   Tuple[float, float, float]]
 
 
 @jax.jit
@@ -75,19 +80,86 @@ def barycentric(pts: Triangle, p: Vec2i) -> Vec3f:
         pts[1] - pts[0],
         pts[0] - p,
     ))
-    vec: Vec3f = jnp.cross(mat[:, 0], mat[:, 1])
+    vec: Vec3f = jnp.cross(mat[:, 0], mat[:, 1]).astype(float)
     # `pts` and `P` has integer value as coordinates so `abs(u[2])` < 1 means
     # `u[2]` is 0, that means triangle is degenerate, in this case
     # return something with negative coordinates
     vec = lax.cond(
         jnp.abs(vec[-1]) < 1,
-        lambda: jnp.array((-1, 1, 1)),
+        lambda: jnp.array((-1., 1., 1.)),
         lambda: vec,
     )
     vec = vec / vec[-1]
     vec = jnp.array((1 - (vec[0] + vec[1]), vec[1], vec[0]))
 
     return vec
+
+
+@jax.jit
+def triangle3d(
+    pts: Triangle3D,
+    zbuffer: ZBuffer,
+    canvas: Canvas,
+    colour: Colour,
+) -> Tuple[ZBuffer, Canvas]:
+    pts_2d: Triangle = pts[:, :2].astype(int)
+    # min_x, min_y
+    mins: Vec2i = lax.clamp(
+        0,
+        jnp.min(pts_2d, axis=0),
+        jnp.array(canvas.shape[:2]),
+    )
+    # max_x, max_y
+    maxs: Vec2i = lax.clamp(
+        0,
+        jnp.max(pts_2d, axis=0),
+        jnp.array(canvas.shape[:2]),
+    )
+    pts_zs = pts[:, 2]  # floats
+
+    def g(
+        y: int,
+        state: Tuple[int, ZBuffer, Canvas],
+    ) -> Tuple[int, ZBuffer, Canvas]:
+        x: int
+        _zbuffer: ZBuffer
+        _canvas: Canvas
+        x, _zbuffer, _canvas = state
+
+        coord: Vec3f = barycentric(pts_2d, jnp.array((x, y)))
+        z: float = jnp.dot(coord, pts_zs)
+
+        _zbuffer, _canvas = lax.cond(
+            jnp.concatenate((
+                jnp.array([_zbuffer[x, y] > z]),
+                jnp.less(coord, 0.),
+            )).any(),
+            lambda: (_zbuffer, _canvas),
+            lambda: (
+                _zbuffer.at[x, y].set(z),
+                _canvas.at[x, y, :].set(colour),
+            ),
+        )
+
+        return x, _zbuffer, _canvas
+
+    def f(x: int, state: Tuple[ZBuffer, Canvas]) -> Tuple[ZBuffer, Canvas]:
+        _zbuffer: ZBuffer
+        _canvas: Canvas
+        _zbuffer, _canvas = state
+
+        _, _zbuffer, _canvas = lax.fori_loop(
+            mins[1],
+            maxs[1] + 1,
+            g,
+            (x, _zbuffer, _canvas),
+        )
+
+        return _zbuffer, _canvas
+
+    zbuffer, canvas = lax.fori_loop(mins[0], maxs[0] + 1, f, (zbuffer, canvas))
+
+    return zbuffer, canvas
 
 
 @jax.jit
