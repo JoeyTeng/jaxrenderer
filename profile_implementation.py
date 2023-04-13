@@ -4,7 +4,8 @@ from typing import Any, Callable, NewType, Optional
 import jax
 import jax.numpy as jnp
 
-from renderer.renderer import (Canvas, Colour, Vec2i, line, line_vectorized)
+from renderer.original_implementation import (Canvas, Colour, Vec2i, line)
+from renderer.renderer import line as line_vectorized
 
 jax.config.update('jax_array', True)
 
