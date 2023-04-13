@@ -4,6 +4,7 @@ from typing import List, NewType, Sequence, Tuple
 
 import jax
 import jax.numpy as jnp
+import numpy as np
 from PIL import Image
 
 jax.config.update('jax_array', True)
@@ -60,10 +61,12 @@ def make_model(fileContent: List[str]) -> Model:
 def load_tga(path: str) -> Texture:
     image: Image.Image = Image.open(path)
     width, height = image.size
-    texture: Texture = jnp.zeros((height, width, 3), dtype=jnp.single)
+    buffer = np.zeros((width, height, 3))
 
     for y in range(height):
         for x in range(width):
-            texture = texture.at[y, x].set(jnp.array(image.getpixel((x, y))))
+            buffer[y, x] = np.array(image.getpixel((x, y)))
+
+    texture: Texture = jnp.array(buffer, dtype=jnp.single)
 
     return texture
