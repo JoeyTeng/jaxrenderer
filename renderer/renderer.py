@@ -38,6 +38,13 @@ def line(
     canvas: Canvas,
     colour: Colour,
 ) -> Canvas:
+    """Paint a line using `colour` onto `canvas`. Returns the updated `canvas`.
+
+    Parameters:
+      - t0, t1: jax array, int, shape (2, ) (x-y dimension)
+      - canvas: jax array, float, shape (w, h, c) (w, h, 3 colour channels)
+      - colour: jax array, float, shape (c, ) (3 colour channels)
+    """
     x0, y0, x1, y1 = t0[0], t0[1], t1[0], t1[1]
 
     def set_mask(mask: CanvasMask, x: int, y: int) -> CanvasMask:
@@ -91,3 +98,80 @@ def line(
     canvas = jnp.where(lax.expand_dims(mask, [2]), colour, canvas)
 
     return canvas
+
+
+@jax.jit
+def barycentric(pts: Triangle, p: Vec2i) -> Vec3f:
+    """Compute the barycentric coordinate of `p`.
+        Returns u[-1] < 0 if `p` is outside of the triangle.
+    """
+    mat: jax.Array = jnp.vstack((
+        pts[2] - pts[0],
+        pts[1] - pts[0],
+        pts[0] - p,
+    ))
+    vec: Vec3f = jnp.cross(mat[:, 0], mat[:, 1]).astype(float)
+    # `pts` and `P` has integer value as coordinates so `abs(u[2])` < 1 means
+    # `u[2]` is 0, that means triangle is degenerate, in this case
+    # return something with negative coordinates
+    vec = lax.cond(
+        jnp.abs(vec[-1]) < 1,
+        lambda: jnp.array((-1., 1., 1.)),
+        lambda: vec,
+    )
+    vec = vec / vec[-1]
+    vec = jnp.array((1 - (vec[0] + vec[1]), vec[1], vec[0]))
+
+    return vec
+
+
+@jax.jit
+def triangle3d_vectorized(
+    pts: Triangle3D,
+    zbuffer: ZBuffer,
+    canvas: Canvas,
+    colour: Colour,
+) -> Tuple[ZBuffer, Canvas]:
+    """Paint a triangle using `colour`, respect `zbuffer` onto `canvas`.
+        Returns the updated `zbuffer` and `canvas`.
+
+    Parameters:
+      - pts: jax array, float, shape (3, 3) (number of points, x-y-z dimension)
+      - zbuffer: jax array, float, shape (w, h)
+      - canvas: jax array, float, shape (w, h, c) (w, h, 3 colour channels)
+      - colour: jax array, float, shape (c, ) (3 colour channels)
+    """
+    pts_2d: Triangle = pts[:, :2].astype(int)
+    pts_zs = pts[:, 2]  # floats
+
+    def compute_u(x: int, y: int) -> Vec3f:
+        """Compute barycentric coordinate u."""
+        return barycentric(pts_2d, jnp.array((x, y)))
+
+    coordinates = jax.vmap(jax.vmap(compute_u, (0, 0), 0), (0, 0), 0)(
+        *jnp.broadcast_arrays(
+            # various x, along first axis
+            lax.expand_dims(jnp.arange(jnp.size(canvas, 0)), [1]),
+            # various y, along second axis
+            lax.expand_dims(jnp.arange(jnp.size(canvas, 1)), [0]),
+        ))
+
+    def f(coord: jax.Array) -> jax.Array:
+        """Compute z using barycentric coordinates."""
+        return jnp.dot(coord, pts_zs)
+
+    # in / on triangle if barycentric coordinate is non-negative
+    valid_coords = jnp.where(jnp.less_equal(0, coordinates), True, False)
+    valid_coords = valid_coords.all(axis=2, keepdims=False)
+
+    _zbuffer: ZBuffer = jax.vmap(jax.vmap(f, (0, ), 0), (0, ), 0)(coordinates)
+    # z value >= existing marks (in `zbuffer`) are visible.
+    visible_mask = jnp.where(jnp.greater_equal(_zbuffer, zbuffer), True, False)
+    visible_mask = jnp.logical_and(visible_mask, valid_coords)
+    # expand to colour channel dimension
+    visible_mask = jnp.expand_dims(visible_mask, axis=2)
+
+    canvas = jnp.where(visible_mask, colour, canvas)
+    zbuffer = jnp.where(visible_mask, _zbuffer, zbuffer)
+
+    return zbuffer, canvas
