@@ -251,8 +251,8 @@ def test_flat_shading_texture():
         world_coords: Triangle3D = model.verts[model.faces[i]].astype(float)
         screen_coords: Triangle3D = ((world_coords + ws_add) * ws_mul //
                                      ws_div).at[:, 2].set(world_coords[:, 2])
-        texture_coords: Triangle = ((world_coords[:, 2] + wt_add) * wt_mul //
-                                    wt_div)
+        texture_coords: Triangle = ((world_coords[:, :2] + wt_add) * wt_mul //
+                                    wt_div).astype(jnp.int32)
 
         n: Vec3f = jnp.cross(
             world_coords[2, :] - world_coords[0, :],
@@ -267,7 +267,7 @@ def test_flat_shading_texture():
             texture[tex_xs[0], tex_ys[0], :],
             texture[tex_xs[1], tex_ys[1], :],
             texture[tex_xs[2], tex_ys[2], :],
-        )) * intensity
+        )) * intensity / 255.0
 
         # with back-face culling
         _zbuff, _canvas = lax.cond(
