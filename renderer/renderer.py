@@ -126,7 +126,7 @@ def barycentric(pts: Triangle, p: Vec2i) -> Vec3f:
 
 
 @jax.jit
-def triangle3d_vectorized(
+def triangle3d(
     pts: Triangle3D,
     zbuffer: ZBuffer,
     canvas: Canvas,
@@ -168,10 +168,9 @@ def triangle3d_vectorized(
     # z value >= existing marks (in `zbuffer`) are visible.
     visible_mask = jnp.where(jnp.greater_equal(_zbuffer, zbuffer), True, False)
     visible_mask = jnp.logical_and(visible_mask, valid_coords)
-    # expand to colour channel dimension
-    visible_mask = jnp.expand_dims(visible_mask, axis=2)
 
-    canvas = jnp.where(visible_mask, colour, canvas)
+    # visible_mask: expand to colour channel dimension
+    canvas = jnp.where(jnp.expand_dims(visible_mask, axis=2), colour, canvas)
     zbuffer = jnp.where(visible_mask, _zbuffer, zbuffer)
 
     return zbuffer, canvas
