@@ -174,3 +174,64 @@ def triangle3d(
     zbuffer = jnp.where(visible_mask, _zbuffer, zbuffer)
 
     return zbuffer, canvas
+
+
+@jax.jit
+def triangle_texture(
+    pts: Triangle3D,
+    zbuffer: ZBuffer,
+    canvas: Canvas,
+    colours: TriangleColours,
+) -> Tuple[ZBuffer, Canvas]:
+    """Paint a triangle using `colours`, respect `zbuffer` onto `canvas`.
+        The colour painted onto each pixel is interpolated using 3 colours
+        in vertices. Returns the updated `zbuffer` and `canvas`.
+
+    Parameters:
+      - pts: jax array, float, shape (3, 3) (number of points, x-y-z dimension)
+      - zbuffer: jax array, float, shape (w, h)
+      - canvas: jax array, float, shape (w, h, c) (w, h, 3 colour channels)
+      - colours: jax array, float, shape (c, ) (3 colour channels)
+    """
+    pts_2d: Triangle = pts[:, :2].astype(int)
+    pts_zs = pts[:, 2]  # floats
+
+    def compute_u(x: int, y: int) -> Vec3f:
+        """Compute barycentric coordinate u."""
+        return barycentric(pts_2d, jnp.array((x, y)))
+
+    coordinates = jax.vmap(jax.vmap(compute_u, (0, 0), 0), (0, 0), 0)(
+        *jnp.broadcast_arrays(
+            # various x, along first axis
+            lax.expand_dims(jnp.arange(jnp.size(canvas, 0)), [1]),
+            # various y, along second axis
+            lax.expand_dims(jnp.arange(jnp.size(canvas, 1)), [0]),
+        ))
+
+    def compute_z(coord: jax.Array) -> jax.Array:
+        """Compute z using barycentric coordinates."""
+        return jnp.dot(coord, pts_zs)
+
+    # in / on triangle if barycentric coordinate is non-negative
+    valid_coords = jnp.where(jnp.less_equal(0, coordinates), True, False)
+    valid_coords = valid_coords.all(axis=2, keepdims=False)
+
+    # set to 0 to reduce computations maybe?
+    coordinates = jnp.where(jnp.expand_dims(valid_coords, 2), coordinates, 0)
+
+    _zbuffer: ZBuffer = jax.vmap(jax.vmap(compute_z))(coordinates)
+    # z value >= existing marks (in `zbuffer`) are visible.
+    visible_mask = jnp.where(jnp.greater_equal(_zbuffer, zbuffer), True, False)
+    visible_mask = jnp.logical_and(visible_mask, valid_coords)
+
+    def compute_colour(coord: jax.Array) -> jax.Array:
+        """Compute colours using barycentric coordinates."""
+        return coord.dot(colours)
+
+    _canvas: Canvas = jax.vmap(jax.vmap(compute_colour))(coordinates)
+
+    # visible_mask: expand to colour channel dimension
+    canvas = jnp.where(jnp.expand_dims(visible_mask, axis=2), _canvas, canvas)
+    zbuffer = jnp.where(visible_mask, _zbuffer, zbuffer)
+
+    return zbuffer, canvas
