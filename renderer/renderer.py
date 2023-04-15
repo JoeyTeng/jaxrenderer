@@ -1,34 +1,13 @@
 """Vectorized implementations."""
 
-from typing import NewType, Sequence, Tuple
-
 import jax
 import jax.numpy as jnp
 from jax import lax
 
-jax.config.update('jax_array', True)
+from .types import (BatchCanvasMask, Canvas, CanvasMask, Colour, Triangle,
+                    Triangle3D, TriangleColours, Vec2i, Vec3f, ZBuffer)
 
-# CanvasMask = NewType("CanvasMask", jax.Array)
-CanvasMask = Sequence[Sequence[bool]]
-# BatchCanvasMask = NewType("CanvasMask", jax.Array)
-BatchCanvasMask = Sequence[Sequence[Sequence[bool]]]
-# Canvas = NewType("Canvas", jax.Array)
-Canvas = Sequence[Sequence[Sequence[float]]]
-# ZBuffer = NewType("ZBuffer", jax.Array)
-ZBuffer = Sequence[Sequence[float]]
-# Colour = NewType("Colour", jax.Array)
-Colour = Tuple[float, float, float]
-# TriangleColours = NewType("TriangleColours", jax.Array)
-TriangleColours = Tuple[Colour, Colour, Colour]
-# Vec2i = NewType("Vec2i", jax.Array)
-Vec2i = Tuple[int, int]
-# Vec3f = NewType("Vec3f", jax.Array)
-Vec3f = Tuple[float, float, float]
-# Triangle = NewType("Triangle", jax.Array)
-Triangle = Tuple[Tuple[int, int], Tuple[int, int], Tuple[int, int]]
-# Triangle3D = NewType("Triangle3D", jax.Array)
-Triangle3D = Tuple[Tuple[float, float, float], Tuple[float, float, float],
-                   Tuple[float, float, float]]
+jax.config.update('jax_array', True)
 
 
 @jax.jit
@@ -131,7 +110,7 @@ def triangle3d(
     zbuffer: ZBuffer,
     canvas: Canvas,
     colour: Colour,
-) -> Tuple[ZBuffer, Canvas]:
+) -> tuple[ZBuffer, Canvas]:
     """Paint a triangle using `colour`, respect `zbuffer` onto `canvas`.
         Returns the updated `zbuffer` and `canvas`.
 
@@ -182,7 +161,7 @@ def triangle_texture(
     zbuffer: ZBuffer,
     canvas: Canvas,
     colours: TriangleColours,
-) -> Tuple[ZBuffer, Canvas]:
+) -> tuple[ZBuffer, Canvas]:
     """Paint a triangle using `colours`, respect `zbuffer` onto `canvas`.
         The colour painted onto each pixel is interpolated using 3 colours
         in vertices. Returns the updated `zbuffer` and `canvas`.
