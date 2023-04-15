@@ -1,32 +1,11 @@
-from typing import NewType, Sequence, Tuple
-
 import jax
 import jax.numpy as jnp
 from jax import lax
 
-jax.config.update('jax_array', True)
+from .types import (Canvas, Colour, Triangle, Triangle3D, TriangleColours,
+                    Vec2i, Vec3f, ZBuffer)
 
-# CanvasMask = NewType("CanvasMask", jax.Array)
-CanvasMask = Sequence[Sequence[bool]]
-# BatchCanvasMask = NewType("CanvasMask", jax.Array)
-BatchCanvasMask = Sequence[Sequence[Sequence[bool]]]
-# Canvas = NewType("Canvas", jax.Array)
-Canvas = Sequence[Sequence[Sequence[float]]]
-# ZBuffer = NewType("ZBuffer", jax.Array)
-ZBuffer = Sequence[Sequence[float]]
-# Colour = NewType("Colour", jax.Array)
-Colour = Tuple[float, float, float]
-# TriangleColours = NewType("TriangleColours", jax.Array)
-TriangleColours = Tuple[Colour, Colour, Colour]
-# Vec2i = NewType("Vec2i", jax.Array)
-Vec2i = Tuple[int, int]
-# Vec3f = NewType("Vec3f", jax.Array)
-Vec3f = Tuple[float, float, float]
-# Triangle = NewType("Triangle", jax.Array)
-Triangle = Tuple[Tuple[int, int], Tuple[int, int], Tuple[int, int]]
-# Triangle3D = NewType("Triangle3D", jax.Array)
-Triangle3D = Tuple[Tuple[float, float, float], Tuple[float, float, float],
-                   Tuple[float, float, float]]
+jax.config.update('jax_array', True)
 
 
 @jax.jit
@@ -57,7 +36,7 @@ def line(
     incY: int = lax.cond(y1 > y0, lambda: 1, lambda: -1)
     derror2: int = lax.abs(dy) * 2
 
-    def f(x: int, state: Tuple[int, int, Canvas]) -> Tuple[int, int, Canvas]:
+    def f(x: int, state: tuple[int, int, Canvas]) -> tuple[int, int, Canvas]:
         y, error2, _canvas = state
         _canvas = lax.cond(
             steep,
@@ -107,7 +86,7 @@ def triangle3d(
     zbuffer: ZBuffer,
     canvas: Canvas,
     colour: Colour,
-) -> Tuple[ZBuffer, Canvas]:
+) -> tuple[ZBuffer, Canvas]:
     pts_2d: Triangle = pts[:, :2].astype(int)
     # min_x, min_y
     mins: Vec2i = lax.clamp(
@@ -125,8 +104,8 @@ def triangle3d(
 
     def g(
         y: int,
-        state: Tuple[int, ZBuffer, Canvas],
-    ) -> Tuple[int, ZBuffer, Canvas]:
+        state: tuple[int, ZBuffer, Canvas],
+    ) -> tuple[int, ZBuffer, Canvas]:
         x: int
         _zbuffer: ZBuffer
         _canvas: Canvas
@@ -149,7 +128,7 @@ def triangle3d(
 
         return x, _zbuffer, _canvas
 
-    def f(x: int, state: Tuple[ZBuffer, Canvas]) -> Tuple[ZBuffer, Canvas]:
+    def f(x: int, state: tuple[ZBuffer, Canvas]) -> tuple[ZBuffer, Canvas]:
         _zbuffer: ZBuffer
         _canvas: Canvas
         _zbuffer, _canvas = state
@@ -174,7 +153,7 @@ def triangle_texture(
     zbuffer: ZBuffer,
     canvas: Canvas,
     colours: TriangleColours,
-) -> Tuple[ZBuffer, Canvas]:
+) -> tuple[ZBuffer, Canvas]:
     pts_2d: Triangle = pts[:, :2].astype(int)
     # min_x, min_y
     mins: Vec2i = lax.clamp(
@@ -192,8 +171,8 @@ def triangle_texture(
 
     def g(
         y: int,
-        state: Tuple[int, ZBuffer, Canvas],
-    ) -> Tuple[int, ZBuffer, Canvas]:
+        state: tuple[int, ZBuffer, Canvas],
+    ) -> tuple[int, ZBuffer, Canvas]:
         x: int
         _zbuffer: ZBuffer
         _canvas: Canvas
@@ -217,7 +196,7 @@ def triangle_texture(
 
         return x, _zbuffer, _canvas
 
-    def f(x: int, state: Tuple[ZBuffer, Canvas]) -> Tuple[ZBuffer, Canvas]:
+    def f(x: int, state: tuple[ZBuffer, Canvas]) -> tuple[ZBuffer, Canvas]:
         _zbuffer: ZBuffer
         _canvas: Canvas
         _zbuffer, _canvas = state
@@ -255,7 +234,7 @@ def triangle(
         jnp.array(canvas.shape[:2]),
     )
 
-    def g(y: int, state: Tuple[int, Canvas]) -> Tuple[int, Canvas]:
+    def g(y: int, state: tuple[int, Canvas]) -> tuple[int, Canvas]:
         x: int
         _canvas: Canvas
         x, _canvas = state
@@ -306,7 +285,7 @@ def triangle_sweep(
     canvas = line(t1, t2, canvas, colour)
     canvas = line(t0, t2, canvas, colour)
 
-    def fill_colour(x: int, state: Tuple[int, Canvas]) -> Tuple[int, Canvas]:
+    def fill_colour(x: int, state: tuple[int, Canvas]) -> tuple[int, Canvas]:
         _canvas: Canvas
         y, _canvas = state
         _canvas = _canvas.at[x, y, :].set(colour)
@@ -315,8 +294,8 @@ def triangle_sweep(
 
     def draw_row(
         y: int,
-        state: Tuple[Vec2i, int, int, Canvas],
-    ) -> Tuple[Vec2i, int, int, Canvas]:
+        state: tuple[Vec2i, int, int, Canvas],
+    ) -> tuple[Vec2i, int, int, Canvas]:
         t: Vec2i
         dx: int
         dy: int

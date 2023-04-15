@@ -6,11 +6,10 @@ import jax.numpy as jnp
 import matplotlib.image as mpimg
 from jax import lax, random
 
-from renderer.original_implementation import (Canvas, Colour, Triangle,
-                                              Triangle3D, TriangleColours,
-                                              Vec2i, Vec3f, ZBuffer, line,
-                                              triangle, triangle3d,
+from renderer.original_implementation import (line, triangle, triangle3d,
                                               triangle_texture)
+from renderer.types import (Canvas, Colour, Triangle, Triangle3D,
+                            TriangleColours, Vec2i, Vec3f, ZBuffer)
 from test_resources.utils import Model, Texture, load_tga, make_model
 
 jax.config.update('jax_array', True)

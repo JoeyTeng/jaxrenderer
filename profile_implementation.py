@@ -5,10 +5,10 @@ import jax
 import jax.numpy as jnp
 from jax import lax
 
-from renderer.original_implementation import (Canvas, Colour, Triangle3D,
-                                              Vec2i, ZBuffer, line, triangle3d)
+from renderer.original_implementation import line, triangle3d
 from renderer.renderer import line as line_vectorized
 from renderer.renderer import triangle3d as triangle3d_vectorized
+from renderer.types import Canvas, Colour, Triangle3D, Vec2i, ZBuffer
 
 jax.config.update('jax_array', True)
 
