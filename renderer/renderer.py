@@ -1,15 +1,23 @@
 """Vectorized implementations."""
 
+from functools import partial
+from typing import Callable, NewType, Optional, Union
+
 import jax
 import jax.numpy as jnp
 from jax import lax
+from jaxtyping import Array, Float, Integer, jaxtyped
 
-from .types import (BatchCanvasMask, Canvas, CanvasMask, Colour, Triangle,
-                    Triangle3D, TriangleColours, Vec2i, Vec3f, ZBuffer)
+from .geometry import compute_normals, to_homogeneous
+from .types import (BatchCanvasMask, Canvas, CanvasMask, Colour, FaceIndices,
+                    Index, Texture, Triangle, Triangle3D, TriangleBarycentric,
+                    TriangleColours, Vec2i, Vec3f, Vertices, World2Screen,
+                    ZBuffer)
 
 jax.config.update('jax_array', True)
 
 
+@jaxtyped
 @jax.jit
 def line(
     t0: Vec2i,
@@ -26,7 +34,7 @@ def line(
     """
     x0, y0, x1, y1 = t0[0], t0[1], t1[0], t1[1]
 
-    def set_mask(mask: CanvasMask, x: int, y: int) -> CanvasMask:
+    def set_mask(mask: CanvasMask, x: Index, y: Index) -> CanvasMask:
         return mask.at[x, y].set(True)
 
     batch_set_mask = jax.vmap(set_mask, in_axes=0, out_axes=0)
@@ -79,6 +87,7 @@ def line(
     return canvas
 
 
+@jaxtyped
 @jax.jit
 def barycentric(pts: Triangle, p: Vec2i) -> Vec3f:
     """Compute the barycentric coordinate of `p`.
@@ -104,7 +113,8 @@ def barycentric(pts: Triangle, p: Vec2i) -> Vec3f:
     return vec
 
 
-@jax.jit
+@jaxtyped
+@partial(jax.jit, donate_argnums=(1, 2))
 def triangle3d(
     pts: Triangle3D,
     zbuffer: ZBuffer,
@@ -121,40 +131,43 @@ def triangle3d(
       - colour: jax array, float, shape (c, ) (3 colour channels)
     """
     pts_2d: Triangle = pts[:, :2].astype(int)
-    pts_zs = pts[:, 2]  # floats
+    pts_zs: Vec3f = pts[:, 2]  # floats
 
-    def compute_u(x: int, y: int) -> Vec3f:
+    def compute_u(x: Index, y: Index) -> Vec3f:
         """Compute barycentric coordinate u."""
         return barycentric(pts_2d, jnp.array((x, y)))
 
-    coordinates = jax.vmap(jax.vmap(compute_u, (0, 0), 0), (0, 0), 0)(
-        *jnp.broadcast_arrays(
-            # various x, along first axis
-            lax.expand_dims(jnp.arange(jnp.size(canvas, 0)), [1]),
-            # various y, along second axis
-            lax.expand_dims(jnp.arange(jnp.size(canvas, 1)), [0]),
-        ))
+    # barycentric coordinate for all pixels
+    coordinates: Float[Array, "width height 3"] = jax.vmap(
+        jax.vmap(compute_u))(
+            *jnp.broadcast_arrays(
+                # various x, along first axis
+                lax.expand_dims(jnp.arange(jnp.size(canvas, 0)), [1]),
+                # various y, along second axis
+                lax.expand_dims(jnp.arange(jnp.size(canvas, 1)), [0]),
+            ))
 
-    def f(coord: jax.Array) -> jax.Array:
+    def compute_z(coord: Float[Array, "3"]) -> Float[Array, ""]:
         """Compute z using barycentric coordinates."""
         return jnp.dot(coord, pts_zs)
 
-    # in / on triangle if barycentric coordinate is non-negative
-    valid_coords = jnp.where(jnp.less_equal(0, coordinates), True, False)
-    valid_coords = valid_coords.all(axis=2, keepdims=False)
+    _zbuffer: ZBuffer = jax.vmap(jax.vmap(compute_z))(coordinates)
 
-    _zbuffer: ZBuffer = jax.vmap(jax.vmap(f, (0, ), 0), (0, ), 0)(coordinates)
-    # z value >= existing marks (in `zbuffer`) are visible.
-    visible_mask = jnp.where(jnp.greater_equal(_zbuffer, zbuffer), True, False)
-    visible_mask = jnp.logical_and(visible_mask, valid_coords)
+    visible_mask = jnp.logical_and(
+        # z value >= existing marks (in `zbuffer`) are visible.
+        _zbuffer >= zbuffer,
+        # in / on triangle if barycentric coordinate is non-negative
+        (coordinates >= 0).all(axis=2, keepdims=False),
+    )
 
     # visible_mask: expand to colour channel dimension
     canvas = jnp.where(jnp.expand_dims(visible_mask, axis=2), colour, canvas)
-    zbuffer = jnp.where(visible_mask, _zbuffer, zbuffer)
+    zbuffer = lax.select(visible_mask, _zbuffer, zbuffer)
 
     return zbuffer, canvas
 
 
+@jaxtyped
 @jax.jit
 def triangle_texture(
     pts: Triangle3D,
@@ -175,11 +188,11 @@ def triangle_texture(
     pts_2d: Triangle = pts[:, :2].astype(int)
     pts_zs = pts[:, 2]  # floats
 
-    def compute_u(x: int, y: int) -> Vec3f:
+    def compute_u(x: Index, y: Index) -> Vec3f:
         """Compute barycentric coordinate u."""
         return barycentric(pts_2d, jnp.array((x, y)))
 
-    coordinates = jax.vmap(jax.vmap(compute_u, (0, 0), 0), (0, 0), 0)(
+    coordinates = jax.vmap(jax.vmap(compute_u))(
         *jnp.broadcast_arrays(
             # various x, along first axis
             lax.expand_dims(jnp.arange(jnp.size(canvas, 0)), [1]),
@@ -187,23 +200,21 @@ def triangle_texture(
             lax.expand_dims(jnp.arange(jnp.size(canvas, 1)), [0]),
         ))
 
-    def compute_z(coord: jax.Array) -> jax.Array:
+    def compute_z(coord: TriangleBarycentric) -> Vec3f:
         """Compute z using barycentric coordinates."""
         return jnp.dot(coord, pts_zs)
 
     # in / on triangle if barycentric coordinate is non-negative
-    valid_coords = jnp.where(jnp.less_equal(0, coordinates), True, False)
-    valid_coords = valid_coords.all(axis=2, keepdims=False)
+    valid_coords = (coordinates >= 0).all(axis=2, keepdims=False)
 
     # set to 0 to reduce computations maybe?
     coordinates = jnp.where(jnp.expand_dims(valid_coords, 2), coordinates, 0)
 
     _zbuffer: ZBuffer = jax.vmap(jax.vmap(compute_z))(coordinates)
     # z value >= existing marks (in `zbuffer`) are visible.
-    visible_mask = jnp.where(jnp.greater_equal(_zbuffer, zbuffer), True, False)
-    visible_mask = jnp.logical_and(visible_mask, valid_coords)
+    visible_mask = jnp.logical_and(_zbuffer >= zbuffer, valid_coords)
 
-    def compute_colour(coord: jax.Array) -> jax.Array:
+    def compute_colour(coord: TriangleBarycentric) -> TriangleColours:
         """Compute colours using barycentric coordinates."""
         return coord.dot(colours)
 
@@ -211,6 +222,264 @@ def triangle_texture(
 
     # visible_mask: expand to colour channel dimension
     canvas = jnp.where(jnp.expand_dims(visible_mask, axis=2), _canvas, canvas)
-    zbuffer = jnp.where(visible_mask, _zbuffer, zbuffer)
+    zbuffer = lax.select(visible_mask, _zbuffer, zbuffer)
 
     return zbuffer, canvas
+
+
+_Colours = NewType(
+    "_Colours",
+    # either (3 ) for triangle3d or (3 3) for texture
+    Union[Colour, TriangleColours],
+)
+_BatchColours = NewType(
+    "_BatchColours",
+    # either (3 ) for triangle3d or (3 3) for texture
+    Union[Float[Array, "faces 3"], Float[Array, "faces 3 3"]],
+)
+
+
+@jaxtyped
+@partial(jax.jit, static_argnames=("triangle_renderer"))
+def _batched_rendering(
+    triangle_renderer: Callable[[Triangle3D, ZBuffer, Canvas, _Colours],
+                                tuple[ZBuffer, Canvas]],
+    screen_coords: Float[Array, "faces 3 3"],
+    zbuffer: ZBuffer,
+    canvas: Canvas,
+    # either (faces 3) for triangle3d or (faces 3 3) for texture
+    colours: _BatchColours,
+) -> tuple[ZBuffer, Canvas]:
+    faces: int = int(jnp.size(colours, 0))
+
+    def _render_one_batch(
+        i: Integer[Array, ""],
+        carry: tuple[ZBuffer, Canvas],
+    ) -> tuple[ZBuffer, Canvas]:
+        _zbuffer, _canvas = carry
+
+        # with back-face culling
+        _zbuffer, _canvas = lax.cond(
+            (colours[i] >= 0).all(),
+            lambda __zbuffer, __canvas: triangle_renderer(
+                screen_coords[i],
+                __zbuffer,
+                __canvas,
+                colours[i],
+            ),
+            lambda __zbuffer, __canvas: (__zbuffer, __canvas),
+            _zbuffer,
+            _canvas,
+        )
+
+        return _zbuffer, _canvas
+
+    zbuffer, canvas = lax.fori_loop(
+        0,
+        faces,
+        _render_one_batch,
+        (zbuffer, canvas),
+    )
+
+    return zbuffer, canvas
+
+
+@jaxtyped
+@jax.jit
+def _render_with_simple_light(
+    canvas: Canvas,
+    zbuffer: ZBuffer,
+    screen_coords: Float[Array, "faces 3 3"],
+    intensities: Float[Array, " faces"],
+    light_colour: Colour,
+) -> tuple[ZBuffer, Canvas]:
+    colours: Float[Array, "faces channel"]
+    colours = intensities[:, None] * light_colour[None, :]
+    assert isinstance(colours, Float[Array, "faces channel"])
+
+    zbuffer, canvas = _batched_rendering(
+        triangle_renderer=triangle3d,
+        screen_coords=screen_coords,
+        zbuffer=zbuffer,
+        canvas=canvas,
+        colours=colours,
+    )
+    assert isinstance(zbuffer, ZBuffer)
+    assert isinstance(canvas, Canvas)
+
+    return zbuffer, canvas
+
+
+@jaxtyped
+@jax.jit
+def _render_with_texture(
+    canvas: Canvas,
+    zbuffer: ZBuffer,
+    world_coords: Float[Array, "faces 3 3"],
+    screen_coords: Float[Array, "faces 3 3"],
+    intensities: Float[Array, " faces"],
+    light_colour: Colour,
+    texture: Texture,
+) -> tuple[ZBuffer, Canvas]:
+    assert texture is not None
+    texture = lax.cond(
+        texture.max() > 1.0,
+        # normalise texture values to [0...1] if it is 8-bit [0...255]
+        lambda: texture / 255.,
+        lambda: texture,
+    )
+
+    world2texture: Float[Array, "3 2"] = (
+        # 4. divide by half to center
+        (jnp.identity(2) * 0.5)
+        # 3. multiply by width, height to map to whole texture map
+        @ (jnp.diag(texture.shape[:2]))
+        # 2. homogeneous coordinate to cartesian x-y
+        @ jnp.eye(2, 3)
+        # 1. add 1 to ensure all coordinates are positive
+        @ jnp.identity(3).at[:2, -1].set(1))
+
+    texture_coords: Integer[Array, "faces 3 2"]
+    # set "z" as 1 to 1) eliminate z dim, & 2) make it 2D homogeneous coords
+    texture_coords = (world2texture @ world_coords.at[..., -1].set(1).swapaxes(
+        1, 2)).swapaxes(1, 2).astype(int)
+    assert isinstance(texture_coords, Integer[Array, "faces 3 2"])
+
+    @jaxtyped
+    @jax.jit
+    def get_colour(texture_coord: Vec2i) -> Colour:
+        return texture[texture_coord[0], texture_coord[1], :]
+
+    # colours of each vertex
+    colours: Float[Array, "faces 3 channel"]
+    # first map along faces axis, then along 3 (3 verts per triangle)
+    colours = jax.vmap(jax.vmap(get_colour))(texture_coords)
+    colours = colours * intensities[:, None, None] * light_colour
+    assert isinstance(colours, Float[Array, "faces 3 channel"])
+
+    zbuffer, canvas = _batched_rendering(
+        triangle_renderer=triangle_texture,
+        screen_coords=screen_coords,
+        zbuffer=zbuffer,
+        canvas=canvas,
+        colours=colours,
+    )
+    assert isinstance(zbuffer, ZBuffer)
+    assert isinstance(canvas, Canvas)
+
+    return zbuffer, canvas
+
+
+@jaxtyped
+@partial(jax.jit, static_argnames=("canvas_size", ))
+def render(
+    canvas_size: tuple[int, int],
+    faces: FaceIndices,
+    verts: Vertices,
+    light_direction: Vec3f,
+    light_colour: Colour,
+    background_colour: Optional[Colour] = None,
+    world2screen: Optional[World2Screen] = None,
+    texture: Optional[Texture] = None,
+    dtype: Optional[jnp.dtype] = None,
+) -> tuple[ZBuffer, Canvas]:
+    """Render triangulated object under simple light with/without texture.
+
+    Noted that the rendered result will be a ZBuffer and a Canvas, both in
+    (width, height, *) shape. To render them properly, the width and height
+    dimensions may need to be swapped.
+
+    Parameters:
+      - canvas_size: tuple[int, int]. Width, height of the resultant image.
+      - faces: FaceIndices (Integer[Array, "faces 3"]). Vertex indices of each
+        triangle.
+      - verts: Vertices (Float[Array, "vertices 3"]). Cartesian coordinates of
+        each vertex.
+      - light_direction: Vec3f. Vector indicating the direction of the light.
+      - light_colour: Colour. Indicating the colour of light (that will be
+        multiplied onto the intensity).
+      - background_colour: Optional[Colour]. Used to fill the canvas before anything being rendered. If not given (or None), using
+        `jnp.zeros_like(light_colour)`, which will resulting in a black
+        background.
+      - world2screen: Optional[World2Screen] (Float[Array, "4 3"]). Used to
+        convert model coordinates to screen/canvas coordinates. If not given,
+        it assumes all model coordinates are in [-1...0] and will transform
+        them into ([0...canvas width], [0...canvas height], [-1...0]).
+      - texture: Optional[Texture]
+      - dtype: dtype for canvas. If not given, the dtype of the light_colour
+        will be used
+      - render_batch_size: int = 0. If <= 0, render all triangles
+        in one batch; otherwise render them in batches. This can be used to
+        reduce memory usage to avoid OOM.
+
+    Returns: tuple[ZBuffer, Canvas]
+      - ZBuffer: Num[Array, "width height"], with dtype being the same as
+        light_direction
+      - Canvas: Num[Array, "width height channel"], with dtype being the same
+        as the given one, or light_colour. "channel" is given by the size of
+        light_colour.
+    """
+    assert jnp.ndim(light_direction) == 1, "light direction must be 1D vector"
+
+    width, height = canvas_size
+    channel: int = light_colour.shape[0]
+    dtype = jax.dtypes.result_type(light_colour) if dtype is None else dtype
+    coord_dtype = jax.dtypes.result_type(light_direction)
+    background_colour = (jnp.zeros_like(light_colour)
+                         if background_colour is None else background_colour)
+
+    canvas: Canvas = jnp.full(
+        (width, height, channel),
+        background_colour,
+        dtype=dtype,
+    )
+    zbuffer: ZBuffer = jnp.full(
+        canvas_size,
+        jnp.finfo(dtype=coord_dtype).min,
+        dtype=coord_dtype,
+    )
+    _world2screen: World2Screen = (
+        jnp.eye(3, 4)  # 4. project to cartesian
+        # 3. div by half to centering
+        @ jnp.identity(4).at[0, 0].set(.5).at[1, 1].set(.5)
+        # 2. mul by width, height
+        @ jnp.identity(4).at[0, 0].set(width).at[1, 1].set(height)
+        # 1. Add by 1 to make values positive
+        @ jnp.identity(4).at[:2, -1].set(1)
+    ) if world2screen is None else world2screen
+
+    # faces, verts per face, x-y-z
+    world_coords: Float[Array, "faces 3 3"] = verts[faces].astype(coord_dtype)
+
+    screen_coords: Float[Array, "faces 3 3"]
+    screen_coords = (
+        _world2screen @ to_homogeneous(world_coords).swapaxes(1, 2)).swapaxes(
+            1, 2)
+    # ensure coords are at the actual pixels
+    screen_coords = screen_coords.at[..., :2].set(
+        lax.floor(screen_coords.at[..., :2].get()))
+    assert isinstance(screen_coords, Float[Array, "faces 3 3"])
+
+    normals: Float[Array, "faces 3"] = compute_normals(world_coords)
+    assert isinstance(normals, Float[Array, "faces 3"])
+
+    intensities: Float[Array, " faces"] = jnp.dot(normals, light_direction)
+
+    if texture is None:
+        return _render_with_simple_light(
+            canvas=canvas,
+            zbuffer=zbuffer,
+            screen_coords=screen_coords,
+            intensities=intensities,
+            light_colour=light_colour,
+        )
+
+    return _render_with_texture(
+        canvas=canvas,
+        zbuffer=zbuffer,
+        world_coords=world_coords,
+        screen_coords=screen_coords,
+        intensities=intensities,
+        light_colour=light_colour,
+        texture=texture,
+    )
