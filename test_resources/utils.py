@@ -1,24 +1,25 @@
 import re
 from dataclasses import dataclass
-from typing import List, NewType, Sequence, Tuple
+from typing import List
 
 import jax
 import jax.numpy as jnp
+from jaxtyping import Array, Float, Integer
 import numpy as np
 from PIL import Image
 
 jax.config.update('jax_array', True)
 
-# Vec3 = NewType("Vec3", jax.Array)
-Vec3 = Tuple[float, float, float]
-# Texture = NewType("Texture", jax.Array)
-Texture = Sequence[Sequence[Tuple[float, float, float]]]
+FaceIndices = Integer[Array, "faces 3"]
+Vertices = Float["vertices 3"]
+Texture = Float[Array, "textureWidth textureHeight channel"]
+Vec3 = Float[Array, "3"]
 
 
 @dataclass()
 class Model:
-    verts: jax.Array
-    faces: jax.Array
+    verts: Vertices
+    faces: FaceIndices
 
     def __post_init__(self):
         assert self.verts.shape[1] == 3
