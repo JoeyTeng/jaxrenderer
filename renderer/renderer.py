@@ -240,7 +240,7 @@ _BatchColours = NewType(
 
 
 @jaxtyped
-@partial(jax.jit, static_argnames=("triangle_renderer"))
+@partial(jax.jit, static_argnames=("triangle_renderer"), donate_argnums=(2, 3))
 def _batched_rendering(
     triangle_renderer: Callable[[Triangle3D, ZBuffer, Canvas, _Colours],
                                 tuple[ZBuffer, Canvas]],
@@ -285,7 +285,7 @@ def _batched_rendering(
 
 
 @jaxtyped
-@jax.jit
+@partial(jax.jit, donate_argnums=(0, 1))
 def _render_with_simple_light(
     canvas: Canvas,
     zbuffer: ZBuffer,
@@ -311,7 +311,7 @@ def _render_with_simple_light(
 
 
 @jaxtyped
-@jax.jit
+@partial(jax.jit, donate_argnums=(0, 1))
 def _render_with_texture(
     canvas: Canvas,
     zbuffer: ZBuffer,
@@ -371,17 +371,16 @@ def _render_with_texture(
 
 
 @jaxtyped
-@partial(jax.jit, static_argnames=("canvas_size", ))
+@partial(jax.jit, donate_argnums=(0, 1))
 def render(
-    canvas_size: tuple[int, int],
+    zbuffer: ZBuffer,
+    canvas: Canvas,
     faces: FaceIndices,
     verts: Vertices,
     light_direction: Vec3f,
     light_colour: Colour,
-    background_colour: Optional[Colour] = None,
-    world2screen: Optional[World2Screen] = None,
+    world2screen: World2Screen,
     texture: Optional[Texture] = None,
-    dtype: Optional[jnp.dtype] = None,
 ) -> tuple[ZBuffer, Canvas]:
     """Render triangulated object under simple light with/without texture.
 
@@ -390,7 +389,9 @@ def render(
     dimensions may need to be swapped.
 
     Parameters:
-      - canvas_size: tuple[int, int]. Width, height of the resultant image.
+      - zbuffer: ZBuffer, should be in shape of (width, height).
+      - canvas: Canvas, should in shape of (width, height, channel), with
+        `channel` be the same as the size of `light_colour`.
       - faces: FaceIndices (Integer[Array, "faces 3"]). Vertex indices of each
         triangle.
       - verts: Vertices (Float[Array, "vertices 3"]). Cartesian coordinates of
@@ -398,62 +399,24 @@ def render(
       - light_direction: Vec3f. Vector indicating the direction of the light.
       - light_colour: Colour. Indicating the colour of light (that will be
         multiplied onto the intensity).
-      - background_colour: Optional[Colour]. Used to fill the canvas before anything being rendered. If not given (or None), using
-        `jnp.zeros_like(light_colour)`, which will resulting in a black
-        background.
-      - world2screen: Optional[World2Screen] (Float[Array, "4 3"]). Used to
-        convert model coordinates to screen/canvas coordinates. If not given,
-        it assumes all model coordinates are in [-1...0] and will transform
-        them into ([0...canvas width], [0...canvas height], [-1...0]).
+      - world2screen: World2Screen (Float[Array, "4 3"]). Used to convert model
+        coordinates to screen/canvas coordinates. If not given, it assumes all
+        model coordinates are in [-1...0] and will transform them into
+        ([0...canvas width], [0...canvas height], [-1...0]).
       - texture: Optional[Texture]
-      - dtype: dtype for canvas. If not given, the dtype of the light_colour
-        will be used
-      - render_batch_size: int = 0. If <= 0, render all triangles
-        in one batch; otherwise render them in batches. This can be used to
-        reduce memory usage to avoid OOM.
 
     Returns: tuple[ZBuffer, Canvas]
-      - ZBuffer: Num[Array, "width height"], with dtype being the same as
-        light_direction
-      - Canvas: Num[Array, "width height channel"], with dtype being the same
-        as the given one, or light_colour. "channel" is given by the size of
-        light_colour.
+      - ZBuffer: Num[Array, "width height"], same as `zbuffer` given.
+      - Canvas: Num[Array, "width height channel"], same as `canvas` given.
     """
     assert jnp.ndim(light_direction) == 1, "light direction must be 1D vector"
 
-    width, height = canvas_size
-    channel: int = light_colour.shape[0]
-    dtype = jax.dtypes.result_type(light_colour) if dtype is None else dtype
-    coord_dtype = jax.dtypes.result_type(light_direction)
-    background_colour = (jnp.zeros_like(light_colour)
-                         if background_colour is None else background_colour)
-
-    canvas: Canvas = jnp.full(
-        (width, height, channel),
-        background_colour,
-        dtype=dtype,
-    )
-    zbuffer: ZBuffer = jnp.full(
-        canvas_size,
-        jnp.finfo(dtype=coord_dtype).min,
-        dtype=coord_dtype,
-    )
-    _world2screen: World2Screen = (
-        jnp.eye(3, 4)  # 4. project to cartesian
-        # 3. div by half to centering
-        @ jnp.identity(4).at[0, 0].set(.5).at[1, 1].set(.5)
-        # 2. mul by width, height
-        @ jnp.identity(4).at[0, 0].set(width).at[1, 1].set(height)
-        # 1. Add by 1 to make values positive
-        @ jnp.identity(4).at[:2, -1].set(1)
-    ) if world2screen is None else world2screen
-
+    coord_dtype = jax.dtypes.result_type(zbuffer)
     # faces, verts per face, x-y-z
     world_coords: Float[Array, "faces 3 3"] = verts[faces].astype(coord_dtype)
 
-    screen_coords: Float[Array, "faces 3 3"]
-    screen_coords = (
-        _world2screen @ to_homogeneous(world_coords).swapaxes(1, 2)).swapaxes(
+    screen_coords: Float[Array, "faces 3 3"] = (
+        world2screen @ to_homogeneous(world_coords).swapaxes(1, 2)).swapaxes(
             1, 2)
     # ensure coords are at the actual pixels
     screen_coords = screen_coords.at[..., :2].set(
