@@ -30,6 +30,16 @@ TriangleBarycentric = Float[Array, "3 3"]
 # The result of x-y values in screen space may be float, and thus further
 # conversion to integers are needed.
 World2Screen = Float[Array, "4 4"]
+# Transform all coordinates from model space to view space, with camera at
+# origin. (Object Coordinates -> Eye Coordinates)
+ModelView = Float[Array, "4 4"]
+# Transform all coordinates from view space to viewing volume.
+# (Eye Coordinates -> Clip Coordinates)
+Projection = Float[Array, "4 4"]
+# Transform all coordinates from model space in a bi-unit cube ([-1...1]^3) to
+# a screen cube ([x, x+width] * [y, y+height] * [0, depth]) in view space.
+# (Normalised Device Coordinates -> Window Coordinates)
+Viewport = Float[Array, "4 4"]
 
 # each face has 3 vertices
 FaceIndices = Integer[Array, "faces 3"]
