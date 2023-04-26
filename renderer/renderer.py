@@ -8,7 +8,7 @@ import jax.numpy as jnp
 from jax import lax
 from jaxtyping import Array, Float, Integer, jaxtyped
 
-from .geometry import compute_normals, to_homogeneous
+from .geometry import compute_normals, to_cartesian, to_homogeneous
 from .types import (BatchCanvasMask, Canvas, CanvasMask, Colour, FaceIndices,
                     Index, Texture, Triangle, Triangle3D, TriangleBarycentric,
                     TriangleColours, Vec2i, Vec3f, Vertices, World2Screen,
@@ -399,7 +399,7 @@ def render(
       - light_direction: Vec3f. Vector indicating the direction of the light.
       - light_colour: Colour. Indicating the colour of light (that will be
         multiplied onto the intensity).
-      - world2screen: World2Screen (Float[Array, "4 3"]). Used to convert model
+      - world2screen: World2Screen (Float[Array, "4 4"]). Used to convert model
         coordinates to screen/canvas coordinates. If not given, it assumes all
         model coordinates are in [-1...0] and will transform them into
         ([0...canvas width], [0...canvas height], [-1...0]).
@@ -415,9 +415,9 @@ def render(
     # faces, verts per face, x-y-z
     world_coords: Float[Array, "faces 3 3"] = verts[faces].astype(coord_dtype)
 
-    screen_coords: Float[Array, "faces 3 3"] = (
+    screen_coords: Float[Array, "faces 3 3"] = (to_cartesian(
         world2screen @ to_homogeneous(world_coords).swapaxes(1, 2)).swapaxes(
-            1, 2)
+            1, 2))
     # ensure coords are at the actual pixels
     screen_coords = screen_coords.at[..., :2].set(
         lax.floor(screen_coords.at[..., :2].get()))

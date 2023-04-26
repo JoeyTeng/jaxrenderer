@@ -15,12 +15,11 @@ def world_to_screen_matrix(width: int, height: int) -> World2Screen:
     It assumes all model coordinates are in [-1...1] and will transform them
     into ([0...width], [0...height], [-1...1]).
 
-    Return: World2Screen (Float[Array, "4, 3"])
+    Return: World2Screen (Float[Array, "4 4"])
     """
     world2screen: World2Screen = (
-        jnp.eye(3, 4)  # 4. project to cartesian
         # 3. div by half to centering
-        @ jnp.identity(4).at[0, 0].set(.5).at[1, 1].set(.5)
+        jnp.identity(4).at[0, 0].set(.5).at[1, 1].set(.5)
         # 2. mul by width, height
         @ jnp.identity(4).at[0, 0].set(width).at[1, 1].set(height)
         # 1. Add by 1 to make values positive

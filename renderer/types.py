@@ -29,7 +29,7 @@ TriangleBarycentric = Float[Array, "3 3"]
 #
 # The result of x-y values in screen space may be float, and thus further
 # conversion to integers are needed.
-World2Screen = Float[Array, "4 3"]
+World2Screen = Float[Array, "4 4"]
 
 # each face has 3 vertices
 FaceIndices = Integer[Array, "faces 3"]
