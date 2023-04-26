@@ -67,7 +67,7 @@ def to_homogeneous(
 
 @jaxtyped
 @jax.jit
-def scale_homogeneous(
+def normalise_homogeneous(
     coordinates: Float[Array, "*batch dim"], ) -> Float[Array, "*batch dim"]:
     """Transform the homogenous coordinates to make the scale factor equals to
         either 1 or 0, by divide every element with the last element on the
@@ -89,4 +89,4 @@ def to_cartesian(
     Noted that when a coordinate is 0 and divides by 0, it will produce a nan;
     for non-zero elements divides by 0, a inf will be produced.
     """
-    return scale_homogeneous(coordinates)[..., :-1]
+    return normalise_homogeneous(coordinates)[..., :-1]
