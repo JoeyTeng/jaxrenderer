@@ -24,6 +24,8 @@ def model_view_matrix(
 ) -> ModelView:
     """Compute ModelView matrix as defined by OpenGL / tinyrenderer.
 
+    Same as `lookAt` in OpenGL / tinyrenderer.
+
     Parameters:
       - eye: the position of camera, in world space
       - centre: the centre of the frame, where the camera points to, in world
