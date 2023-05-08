@@ -1,4 +1,3 @@
-import dataclasses
 from jaxtyping import Array, Bool, Float, Integer
 
 import jax
@@ -16,11 +15,14 @@ Colour = Float[Array, "channel"]
 TriangleColours = Float[Array, "3 channel"]
 Vec2i = Integer[Array, "2"]
 Vec3i = Integer[Array, "3"]
+Vec2f = Float[Array, "2"]
 Vec3f = Float[Array, "3"]
+# usually used only for 3D homogeneous coordinates
+Vec4f = Float[Array, "4"]
 # 3 vertices, with each vertex defined in Vec2i in screen(canvas) space
-Triangle = Integer[Array, "3 2"]
+Triangle2D = Integer[Array, "3 2"]
 # 3 vertices, each vertex defined in Vec2i in 3d (world/model) space + Float z
-Triangle3D = Float[Array, "3 3"]
+Triangle = Float[Array, "3 4"]
 # Barycentric coordinates has 3 components
 TriangleBarycentric = Float[Array, "3 3"]
 
@@ -48,7 +50,6 @@ Vertices = Float[Array, "vertices 3"]
 Texture = Float[Array, "textureWidth textureHeight channel"]
 
 
-@dataclasses.dataclass(frozen=True, kw_only=True)
-class LightSource:
+class LightSource(NamedTuple):
     light_direction: Vec3f = jax.numpy.array((0., 0., -1.))
     light_colour: Colour = jax.numpy.ones(3)
