@@ -1,6 +1,7 @@
-from jaxtyping import Array, Bool, Float, Integer
+from typing import NamedTuple
 
 import jax
+from jaxtyping import Array, Bool, Float, Integer
 
 jax.config.update('jax_array', True)
 
