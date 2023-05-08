@@ -1,11 +1,118 @@
 from functools import partial
+import enum
 
 import jax
 import jax.numpy as jnp
-from jax import lax
+import jax.lax as lax
 from jaxtyping import jaxtyped, Array, Float, Integer, Num
 
 from .types import ModelView, Projection, Vec3f, Viewport, World2Screen
+
+
+class Interpolation(enum.Enum):
+    """Interpolation methods for rasterisation.
+
+    References:
+      - [Interpolation qualifiers](https://www.khronos.org/opengl/wiki/Type_Qualifier_(GLSL)#Interpolation_qualifiers)
+    """
+    FLAT = 0
+    NOPERSPECTIVE = 1
+    SMOOTH = 2
+
+    def __call__(
+        self,
+        barycentric_screen: Vec3f,
+        barycentric_clip: Vec3f,
+        values: Num[Array, "3 *valueDimensions"],
+    ) -> Num[Array, "*valueDimensions"]:
+        """Interpolation, using barycentric coordinates.
+
+        Parameters:
+          - barycentric_screen: barycentric coordinates in screen space of the
+            point to interpolate
+          - barycentric_clip: barycentric coordinates in clip space of the
+            point to interpolate
+          - values: values at the vertices of the triangle, with axis 0 being
+            the batch axis.
+        """
+        method = [self._flat, self._noperspective, self._smooth][self.value]
+        interpolated = method(barycentric_screen, barycentric_clip, values)
+
+        return interpolated
+
+    @jaxtyped
+    @jax.jit
+    @staticmethod
+    def _flat(
+        barycentric_screen: Vec3f,
+        barycentric_clip: Vec3f,
+        values: Num[Array, "3 *valueDimensions"],
+    ) -> Num[Array, "*valueDimensions"]:
+        """Flat interpolation, uses first value.
+
+        Parameters:
+          - barycentric_screen: barycentric coordinates in screen space of the
+            point to interpolate
+          - barycentric_clip: barycentric coordinates in clip space of the
+            point to interpolate
+          - values: values at the vertices of the triangle, with axis 0 being
+            the batch axis.
+        """
+        return values[0]
+
+    @jaxtyped
+    @jax.jit
+    @staticmethod
+    def _noperspective(
+        barycentric_screen: Vec3f,
+        barycentric_clip: Vec3f,
+        values: Num[Array, "3 *valueDimensions"],
+    ) -> Num[Array, "*valueDimensions"]:
+        """No perspective interpolation, uses barycentric coordinates.
+
+        Parameters:
+          - barycentric_screen: barycentric coordinates in screen space of the
+            point to interpolate
+          - barycentric_clip: barycentric coordinates in clip space of the
+            point to interpolate
+          - values: values at the vertices of the triangle, with axis 0 being
+            the batch axis.
+        """
+        dtype = jax.dtypes.result_type(barycentric_screen, values)
+        interpolated = lax.dot_general(
+            barycentric_screen.astype(dtype),
+            values.astype(dtype),
+            (((0, ), (0, )), ([], [])),
+        )
+
+        return interpolated
+
+    @jaxtyped
+    @jax.jit
+    @staticmethod
+    def _smooth(
+        barycentric_screen: Vec3f,
+        barycentric_clip: Vec3f,
+        values: Num[Array, "3 *valueDimensions"],
+    ) -> Num[Array, "*valueDimensions"]:
+        """Smooth (perspective) interpolation, uses barycentric coordinates.
+
+        Parameters:
+          - barycentric_screen: barycentric coordinates in screen space of the
+            point to interpolate
+          - barycentric_clip: barycentric coordinates in clip space of the
+            point to interpolate
+          - values: values at the vertices of the triangle, with axis 0 being
+            the batch axis.
+        """
+        dtype = jax.dtypes.result_type(barycentric_clip, values)
+        interpolated = lax.dot_general(
+            barycentric_clip.astype(dtype),
+            values.astype(dtype),
+            (((0, ), (0, )), ([], [])),
+        )
+
+        return interpolated
 
 
 @jaxtyped
