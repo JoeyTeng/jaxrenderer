@@ -15,10 +15,15 @@ class Interpolation(enum.Enum):
     References:
       - [Interpolation qualifiers](https://www.khronos.org/opengl/wiki/Type_Qualifier_(GLSL)#Interpolation_qualifiers)
     """
+    # Flat shading: use the value of the first vertex of the primitive
     FLAT = 0
+    # No perspective correction: linear interpolation in screen space
     NOPERSPECTIVE = 1
+    # Perspective correction: linear interpolation in clip space
     SMOOTH = 2
 
+    @jaxtyped
+    @partial(jax.jit, static_argnames=("self", ))
     def __call__(
         self,
         barycentric_screen: Vec3f,
@@ -35,79 +40,25 @@ class Interpolation(enum.Enum):
           - values: values at the vertices of the triangle, with axis 0 being
             the batch axis.
         """
-        method = [self._flat, self._noperspective, self._smooth][self.value]
-        interpolated = method(barycentric_screen, barycentric_clip, values)
-
-        return interpolated
-
-    @jaxtyped
-    @jax.jit
-    @staticmethod
-    def _flat(
-        barycentric_screen: Vec3f,
-        barycentric_clip: Vec3f,
-        values: Num[Array, "3 *valueDimensions"],
-    ) -> Num[Array, "*valueDimensions"]:
-        """Flat interpolation, uses first value.
-
-        Parameters:
-          - barycentric_screen: barycentric coordinates in screen space of the
-            point to interpolate
-          - barycentric_clip: barycentric coordinates in clip space of the
-            point to interpolate
-          - values: values at the vertices of the triangle, with axis 0 being
-            the batch axis.
-        """
-        return values[0]
-
-    @jaxtyped
-    @jax.jit
-    @staticmethod
-    def _noperspective(
-        barycentric_screen: Vec3f,
-        barycentric_clip: Vec3f,
-        values: Num[Array, "3 *valueDimensions"],
-    ) -> Num[Array, "*valueDimensions"]:
-        """No perspective interpolation, uses barycentric coordinates.
-
-        Parameters:
-          - barycentric_screen: barycentric coordinates in screen space of the
-            point to interpolate
-          - barycentric_clip: barycentric coordinates in clip space of the
-            point to interpolate
-          - values: values at the vertices of the triangle, with axis 0 being
-            the batch axis.
-        """
-        dtype = jax.dtypes.result_type(barycentric_screen, values)
-        interpolated = lax.dot_general(
-            barycentric_screen.astype(dtype),
-            values.astype(dtype),
-            (((0, ), (0, )), ([], [])),
+        dtype = jax.dtypes.result_type(
+            barycentric_screen,
+            barycentric_clip,
+            values,
         )
+        coef: Vec3f
+        # branches are ok because `self` is static: decided at compile time
+        if self is Interpolation.FLAT:
+            with jax.ensure_compile_time_eval():
+                coef = jnp.array([1, 0, 0], dtype=dtype)
+        elif self is Interpolation.NOPERSPECTIVE:
+            coef = barycentric_screen
+        elif self is Interpolation.SMOOTH:
+            coef = barycentric_clip
+        else:
+            raise ValueError(f"Unknown interpolation method {self}")
 
-        return interpolated
-
-    @jaxtyped
-    @jax.jit
-    @staticmethod
-    def _smooth(
-        barycentric_screen: Vec3f,
-        barycentric_clip: Vec3f,
-        values: Num[Array, "3 *valueDimensions"],
-    ) -> Num[Array, "*valueDimensions"]:
-        """Smooth (perspective) interpolation, uses barycentric coordinates.
-
-        Parameters:
-          - barycentric_screen: barycentric coordinates in screen space of the
-            point to interpolate
-          - barycentric_clip: barycentric coordinates in clip space of the
-            point to interpolate
-          - values: values at the vertices of the triangle, with axis 0 being
-            the batch axis.
-        """
-        dtype = jax.dtypes.result_type(barycentric_clip, values)
         interpolated = lax.dot_general(
-            barycentric_clip.astype(dtype),
+            coef.astype(dtype),
             values.astype(dtype),
             (((0, ), (0, )), ([], [])),
         )
