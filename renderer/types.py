@@ -24,27 +24,12 @@ Vec3f = Float[Array, "3"]
 Vec4f = Float[Array, "4"]
 # 3 vertices, with each vertex defined in Vec2i in screen(canvas) space
 Triangle2D = Integer[Array, "3 2"]
+# 3 vertices, with each vertex defined in Vec2f
+Triangle2Df = Float[Array, "3 2"]
 # 3 vertices, each vertex defined in Vec2i in 3d (world/model) space + Float z
 Triangle = Float[Array, "3 4"]
 # Barycentric coordinates has 3 components
 TriangleBarycentric = Float[Array, "3 3"]
-
-# Transform matrix that takes a batch of homogeneous 3D vertices and transform
-# them into 2D cartesian vertices in screen space + Z value (making it 3D)
-#
-# The result of x-y values in screen space may be float, and thus further
-# conversion to integers are needed.
-World2Screen = Float[Array, "4 4"]
-# Transform all coordinates from model space to view space, with camera at
-# origin. (Object Coordinates -> Eye Coordinates)
-ModelView = Float[Array, "4 4"]
-# Transform all coordinates from view space to viewing volume.
-# (Eye Coordinates -> Clip Coordinates)
-Projection = Float[Array, "4 4"]
-# Transform all coordinates from model space in a bi-unit cube ([-1...1]^3) to
-# a screen cube ([x, x+width] * [y, y+height] * [0, depth]) in view space.
-# (Normalised Device Coordinates -> Window Coordinates)
-Viewport = Float[Array, "4 4"]
 
 # each face has 3 vertices
 FaceIndices = Integer[Array, "faces 3"]

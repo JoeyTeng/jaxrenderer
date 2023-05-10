@@ -1,12 +1,37 @@
-from functools import partial
 import enum
+from functools import partial
+from typing import NamedTuple
 
 import jax
-import jax.numpy as jnp
 import jax.lax as lax
-from jaxtyping import jaxtyped, Array, Float, Integer, Num
+import jax.numpy as jnp
+from jaxtyping import Array, Float, Integer, Num, jaxtyped
 
-from .types import ModelView, Projection, Vec3f, Viewport, World2Screen
+from .types import Triangle2Df, Vec2f, Vec3f
+
+# Transform matrix that takes a batch of homogeneous 3D vertices and transform
+# them into 2D cartesian vertices in screen space + Z value (making it 3D)
+#
+# The result of x-y values in screen space may be float, and thus further
+# conversion to integers are needed.
+World2Screen = Float[Array, "4 4"]
+# Transform all coordinates from model space to view space, with camera at
+# origin. (Object Coordinates -> Eye Coordinates)
+ModelView = Float[Array, "4 4"]
+# Transform all coordinates from view space to viewing volume.
+# (Eye Coordinates -> Clip Coordinates)
+Projection = Float[Array, "4 4"]
+# Transform all coordinates from model space in a bi-unit cube ([-1...1]^3) to
+# a screen cube ([x, x+width] * [y, y+height] * [0, depth]) in view space.
+# (Normalised Device Coordinates -> Window Coordinates)
+Viewport = Float[Array, "4 4"]
+
+
+@jaxtyped
+@partial(jax.jit, donate_argnums=(0, ))
+def normalise(vector: Float[Array, "dim"]) -> Float[Array, "dim"]:
+    """normalise vector in-place."""
+    return vector / jnp.linalg.norm(vector)
 
 
 class Interpolation(enum.Enum):
@@ -66,121 +91,165 @@ class Interpolation(enum.Enum):
         return interpolated
 
 
-@jaxtyped
-@partial(jax.jit, donate_argnums=(0, ))
-def normalise(vector: Float[Array, "dim"]) -> Float[Array, "dim"]:
-    """normalise vector in-place."""
-    return vector / jnp.linalg.norm(vector)
+class Camera(NamedTuple):
+    model_view: ModelView
+    viewport: Viewport
+    projection: Projection
 
+    @classmethod
+    @jaxtyped
+    @partial(jax.jit, static_argnames=("cls", ))
+    def create(
+        cls,
+        eye: Vec3f,
+        centre: Vec3f,
+        up: Vec3f,
+        lowerbound: Num[Array, "2"],
+        viewport_dimension: Integer[Array, "2"],
+        depth: Num[Array, ""],
+    ) -> "Camera":
+        """Create a camera with the given parameters.
 
-@jaxtyped
-@jax.jit
-def model_view_matrix(
-    eye: Vec3f,
-    centre: Vec3f,
-    up: Vec3f,
-) -> ModelView:
-    """Compute ModelView matrix as defined by OpenGL / tinyrenderer.
+        Parameters:
+          - eye: the position of camera, in world space
+          - centre: the centre of the frame, where the camera points to, in
+            world space
+          - up: the direction vector with start point at "eye", indicating the
+            "up" direction of the camera frame.
+          - lowerbound: the lowerbound of the viewport, in screen space
+          - viewport_dimension: the dimension of the viewport, in screen space
+          - depth: the depth of the viewport, in screen space
+        """
+        model_view: ModelView = cls.model_view_matrix(eye, centre, up)
+        projection: Projection = cls.perspective_projection_matrix(eye, centre)
+        viewport: Viewport = cls.viewport_matrix(
+            lowerbound,
+            viewport_dimension,
+            depth,
+        )
+        assert isinstance(model_view, ModelView)
+        assert isinstance(projection, Projection)
+        assert isinstance(viewport, Viewport)
 
-    Same as `lookAt` in OpenGL / tinyrenderer.
+        return cls(
+            model_view=model_view,
+            viewport=viewport,
+            projection=projection,
+        )
 
-    Parameters:
-      - eye: the position of camera, in world space
-      - centre: the centre of the frame, where the camera points to, in world
-        space
-      - up: the direction vector with start point at "eye", indicating the "up"
-        direction of the camera frame.
-    """
-    z: Vec3f = normalise(eye - centre)
-    x: Vec3f = normalise(jnp.cross(up, z))
-    y: Vec3f = normalise(jnp.cross(x, z))
+    @staticmethod
+    @jaxtyped
+    @jax.jit
+    def model_view_matrix(
+        eye: Vec3f,
+        centre: Vec3f,
+        up: Vec3f,
+    ) -> ModelView:
+        """Compute ModelView matrix as defined by OpenGL / tinyrenderer.
 
-    # M inverse
-    m_inv = jnp.identity(4).at[0, :].set(x).at[1, :].set(y).at[2, :].set(z)
-    tr = jnp.identity(4).at[:, 3].set(-eye)
+        Same as `lookAt` in OpenGL / tinyrenderer.
 
-    model_view: ModelView = m_inv @ tr
+        Parameters:
+          - eye: the position of camera, in world space
+          - centre: the centre of the frame, where the camera points to, in
+            world space
+          - up: the direction vector with start point at "eye", indicating the
+            "up" direction of the camera frame.
+        """
+        z: Vec3f = normalise(eye - centre)
+        x: Vec3f = normalise(jnp.cross(up, z))
+        y: Vec3f = normalise(jnp.cross(x, z))
 
-    return model_view
+        # M inverse
+        m_inv = (
+            jnp.identity(4).at[0, :3].set(x).at[1, :3].set(y).at[2, :3].set(z))
+        tr = jnp.identity(4).at[:3, 3].set(-eye)
 
+        model_view: ModelView = m_inv @ tr
 
-@jaxtyped
-@jax.jit
-def perspective_projection_matrix(
-    eye: Vec3f,
-    centre: Vec3f,
-    dtype: jnp.dtype = jnp.single,
-) -> Projection:
-    """Create a projection matrix to map the model in the camera frame (eye
-        coordinates) onto the viewing volume (clip coordinates), using
-        perspective transformation.
+        return model_view
 
-    Parameters:
-      - eye: the position of camera, in world space
-      - centre: the centre of the frame, where the camera points to, in world
-        space
-      - dtype: the dtype for the projection matrix.
+    @staticmethod
+    @jaxtyped
+    @jax.jit
+    def perspective_projection_matrix(
+        eye: Vec3f,
+        centre: Vec3f,
+        dtype: jnp.dtype = jnp.single,
+    ) -> Projection:
+        """Create a projection matrix to map the model in the camera frame (eye
+            coordinates) onto the viewing volume (clip coordinates), using
+            perspective transformation.
 
-    Return: Projection, (4, 4) matrix.
-    """
-    projection: Projection = (jnp.identity(4, dtype=dtype).at[3, 2].set(
-        -1 / jnp.linalg.norm(eye - centre)))
+        Parameters:
+          - eye: the position of camera, in world space
+          - centre: the centre of the frame, where the camera points to, in
+            world space
+          - dtype: the dtype for the projection matrix.
 
-    return projection
+        Return: Projection, (4, 4) matrix.
+        """
+        projection: Projection = (
+            jnp.identity(4, dtype=dtype)  #
+            .at[3, 2].set(-1 / jnp.linalg.norm(eye - centre))  #
+        )
 
+        return projection
 
-@jaxtyped
-@jax.jit
-def viewport_matrix(
-    lowerbound: Num[Array, "2"],
-    viewport_dimension: Integer[Array, "2"],
-    depth: Num[Array, ""],
-    dtype: jnp.dtype = jnp.single,
-) -> Viewport:
-    """Create a viewport matrix to map the model in bi-unit cube ([-1...1]^3)
-        onto the screen cube ([x, x+w]*[y, y+h]*[0, d]). The result matrix is
-        the viewport matrix as defined in OpenGL / tinyrenderer.
+    @staticmethod
+    @jaxtyped
+    @jax.jit
+    def viewport_matrix(
+        lowerbound: Num[Array, "2"],
+        viewport_dimension: Integer[Array, "2"],
+        depth: Num[Array, ""],
+        dtype: jnp.dtype = jnp.single,
+    ) -> Viewport:
+        """Create a viewport matrix to map the model in bi-unit cube
+            ([-1...1]^3) onto the screen cube ([x, x+w]*[y, y+h]*[0, d]). The
+            result matrix is the viewport matrix as defined in OpenGL /
+            tinyrenderer.
 
-    Parameters:
-      - lowerbound: x-y of the lower left corner of the viewport, in screen
-        space.
-      - viewport_dimension: width, height of the viewport, in screen space.
-      - depth: the depth of the viewport in screen space, for zbuffer
-      - dtype: the dtype for the viewport matrix.
+        Parameters:
+          - lowerbound: x-y of the lower left corner of the viewport, in screen
+            space.
+          - viewport_dimension: width, height of the viewport, in screen space.
+          - depth: the depth of the viewport in screen space, for zbuffer
+          - dtype: the dtype for the viewport matrix.
 
-    Return: Viewport, (4, 4) matrix.
-    """
-    width, height = viewport_dimension
-    viewport: Viewport = (
-        jnp.identity(4, dtype=dtype)  #
-        .at[:2, 3].set(lowerbound + viewport_dimension / 2)  #
-        .at[0, 0].set(width / 2).at[1, 1].set(height / 2)  #
-        .at[2, 2:].set(depth / 2)  #
-    )
+        Return: Viewport, (4, 4) matrix.
+        """
+        width, height = viewport_dimension
+        viewport: Viewport = (
+            jnp.identity(4, dtype=dtype)  #
+            .at[:2, 3].set(lowerbound + viewport_dimension / 2)  #
+            .at[0, 0].set(width / 2).at[1, 1].set(height / 2)  #
+            .at[2, 2:].set(depth / 2)  #
+        )
 
-    return viewport
+        return viewport
 
+    @staticmethod
+    @jaxtyped
+    @jax.jit
+    def world_to_screen_matrix(width: int, height: int) -> World2Screen:
+        """Generate the projection matrix to convert model coordinates to
+            screen/canvas coordinates.
 
-@jaxtyped
-@jax.jit
-def world_to_screen_matrix(width: int, height: int) -> World2Screen:
-    """Generate the projection matrix to convert model coordinates to
-        screen/canvas coordinates.
+        It assumes all model coordinates are in [-1...1] and will transform them
+        into ([0...width], [0...height], [-1...1]).
 
-    It assumes all model coordinates are in [-1...1] and will transform them
-    into ([0...width], [0...height], [-1...1]).
+        Return: World2Screen (Float[Array, "4 4"])
+        """
+        world2screen: World2Screen = (
+            # 3. div by half to centering
+            jnp.identity(4).at[0, 0].set(.5).at[1, 1].set(.5)
+            # 2. mul by width, height
+            @ jnp.identity(4).at[0, 0].set(width).at[1, 1].set(height)
+            # 1. Add by 1 to make values positive
+            @ jnp.identity(4).at[:2, -1].set(1))
 
-    Return: World2Screen (Float[Array, "4 4"])
-    """
-    world2screen: World2Screen = (
-        # 3. div by half to centering
-        jnp.identity(4).at[0, 0].set(.5).at[1, 1].set(.5)
-        # 2. mul by width, height
-        @ jnp.identity(4).at[0, 0].set(width).at[1, 1].set(height)
-        # 1. Add by 1 to make values positive
-        @ jnp.identity(4).at[:2, -1].set(1))
-
-    return world2screen
+        return world2screen
 
 
 @jaxtyped
@@ -245,3 +314,28 @@ def to_cartesian(
     for non-zero elements divides by 0, a inf will be produced.
     """
     return normalise_homogeneous(coordinates)[..., :-1]
+
+
+@jaxtyped
+@jax.jit
+def barycentric(pts: Triangle2Df, p: Vec2f) -> Vec3f:
+    """Compute the barycentric coordinate of `p`.
+        Returns u[-1] < 0 if `p` is outside of the triangle.
+    """
+    mat: Float[Array, "3 2"] = jnp.vstack((
+        pts[2] - pts[0],
+        pts[1] - pts[0],
+        pts[0] - p,
+    ))
+    vec: Vec3f = jnp.cross(mat[:, 0], mat[:, 1])
+    # `u[2]` is 0, that means triangle is degenerate, in this case
+    # return something with negative coordinates
+    vec = lax.cond(
+        jnp.abs(vec[-1]) < 1e-10,
+        lambda: jnp.array((-1., 1., 1.)),
+        lambda: vec,
+    )
+    vec = vec / vec[-1]
+    vec = jnp.array((1 - (vec[0] + vec[1]), vec[1], vec[0]))
+
+    return vec
