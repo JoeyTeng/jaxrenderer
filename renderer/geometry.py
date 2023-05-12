@@ -300,7 +300,7 @@ def normalise_homogeneous(
     Noted that when a coordinate is 0 and divides by 0, it will produce a nan;
     for non-zero elements divides by 0, a inf will be produced.
     """
-    return coordinates / coordinates[..., -1]
+    return coordinates / coordinates[..., -1:]
 
 
 @jaxtyped
