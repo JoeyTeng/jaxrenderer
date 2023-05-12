@@ -144,6 +144,11 @@ cuda12-pip = ["jaxlib (==0.4.7+cuda12.cudnn88)", "nvidia-cublas-cu12", "nvidia-c
 minimum-jaxlib = ["jaxlib (==0.4.7)"]
 tpu = ["jaxlib (==0.4.7)", "libtpu-nightly (==0.1.dev20230327)", "requests"]
 
+[package.source]
+type = "legacy"
+url = "https://storage.googleapis.com/jax-releases/jax_releases.html"
+reference = "jax"
+
 [[package]]
 name = "jaxlib"
 version = "0.4.7"
@@ -178,14 +183,14 @@ reference = "jax"
 
 [[package]]
 name = "jaxtyping"
-version = "0.2.15"
+version = "0.2.19"
 description = "Type annotations and runtime checking for shape and dtype of JAX arrays, and PyTrees."
 category = "main"
 optional = false
 python-versions = "~=3.8"
 files = [
-    {file = "jaxtyping-0.2.15-py3-none-any.whl", hash = "sha256:57f434439df79ea141c7e6d3bbbfd2576cf70bf3f7c9aa10d1f833590f26fd94"},
-    {file = "jaxtyping-0.2.15.tar.gz", hash = "sha256:19f56208d495ee5c7d041012d260e088998e4385d8156a2ea084b90819871c64"},
+    {file = "jaxtyping-0.2.19-py3-none-any.whl", hash = "sha256:651352032799d422987e783fd1b77699b53c3bb28ffa644bbca5f75ec4fbb843"},
+    {file = "jaxtyping-0.2.19.tar.gz", hash = "sha256:21ff4c3caec6781cadfe980b019dde856c1011e17d11dfe8589298040056325a"},
 ]
 
 [package.dependencies]
