@@ -47,9 +47,17 @@ class Buffers(NamedTuple):
     zbuffer: ZBuffer
     canvas: Canvas
 
-    @jaxtyped
-    @partial(jax.jit, static_argnames=("canvas_size", ))
     @classmethod
+    @jaxtyped
+    @partial(
+        jax.jit,
+        static_argnames=(
+            "cls",
+            "canvas_size",
+            "canvas_dtype",
+            "zbuffer_dtype",
+        ),
+    )
     def create(
         cls,
         canvas_size: tuple[int, int],
@@ -76,7 +84,9 @@ class Buffers(NamedTuple):
 
         Returns: Buffers[ZBuffer, Canvas]
           - ZBuffer: Num[Array, "width height"], with dtype being the same as
-            `zbuffer_dtype` or `jnp.single` if not given.
+            `zbuffer_dtype` or `jnp.single` if not given. The initial value is a
+            `finfo.min` if given Float or `iinfo.min`; -inf is not used to
+            allows later pipeline to use it as a mask (indicating "discarded").
           - Canvas: Num[Array, "width height channel"], with dtype being the
             same as the given one, or `background_colour`. "channel" is given
             by the size of `background_colour`.
@@ -92,7 +102,7 @@ class Buffers(NamedTuple):
             dtype=canvas_dtype,
         )
         min_z = (jnp.finfo(dtype=zbuffer_dtype).min if jnp.issubdtype(
-            zbuffer_dtype, jnp.floating) else jnp.iinfo(dtype=zbuffer_dtype))
+            zbuffer_dtype, jnp.floating) else jnp.iinfo(zbuffer_dtype).min)
         zbuffer: ZBuffer = jnp.full(
             canvas_size,
             min_z,
