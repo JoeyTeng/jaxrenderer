@@ -91,6 +91,25 @@ class Interpolation(enum.Enum):
         return interpolated
 
 
+@jaxtyped
+@partial(jax.jit, static_argnames=("mode", ))
+def interpolate(
+    values: Num[Array, "3 *valueDimensions"],
+    barycentric_screen: Vec3f,
+    barycentric_clip: Vec3f,
+    mode: Interpolation = Interpolation.SMOOTH,
+) -> Num[Array, "*valueDimensions"]:
+    """Convenient wrapper, see `Interpolation.__call__`.
+
+    Default mode is `Interpolation.SMOOTH`.
+    """
+    interpolated: Num[Array, "*valueDimensions"]
+    interpolated = mode(barycentric_screen, barycentric_clip, values)
+    assert isinstance(interpolated, Num[Array, "*valueDimensions"])
+
+    return interpolated
+
+
 class Camera(NamedTuple):
     model_view: ModelView
     viewport: Viewport
