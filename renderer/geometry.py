@@ -72,12 +72,12 @@ class Interpolation(enum.Enum):
         )
         coef: Vec3f
         # branches are ok because `self` is static: decided at compile time
-        if self is Interpolation.FLAT:
+        if self == Interpolation.FLAT:
             with jax.ensure_compile_time_eval():
                 coef = jnp.array([1, 0, 0], dtype=dtype)
-        elif self is Interpolation.NOPERSPECTIVE:
+        elif self == Interpolation.NOPERSPECTIVE:
             coef = barycentric_screen
-        elif self is Interpolation.SMOOTH:
+        elif self == Interpolation.SMOOTH:
             coef = barycentric_clip
         else:
             raise ValueError(f"Unknown interpolation method {self}")
