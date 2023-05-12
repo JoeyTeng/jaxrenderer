@@ -115,12 +115,10 @@ class Shader(NamedTuple):
         raise NotImplementedError()
 
     def interpolate(
-        self: _ShaderT,
+        values: VaryingT,
         barycentric_screen: Vec3f,
         barycentric_clip: Vec3f,
-        values: ToInterpolate,
-        factory: Callable[[Iterable[Any]], _InterpolatedT] = PerVertex._make,
-    ) -> tuple[_ShaderT, _InterpolatedT]:
+    ) -> VaryingT:
         """Override this to customise the interpolation of user-defined inputs.
 
         The default implementation is to interpolate all the fields of given
@@ -128,13 +126,16 @@ class Shader(NamedTuple):
         GLSL.
 
         Parameters:
+          - values: values at the vertices of the triangle, with axis 0 being
+            the batch axis. It is expected to be a tuple of multiple batched
+            values.
           - barycentric_screen: barycentric coordinates in screen space of the
             point to interpolate
           - barycentric_clip: barycentric coordinates in clip space of the
             point to interpolate
-          - values: values at the vertices of the triangle, with axis 0 being
-            the batch axis. It is expected to be a tuple of multiple batched
-            values.
+
+        Return: interpolated values for fragment shader process, with same
+            structure (order of members) as `values`
         """
         f = partial(Interpolation.SMOOTH, barycentric_screen, barycentric_clip)
 

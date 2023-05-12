@@ -51,19 +51,19 @@ class Interpolation(enum.Enum):
     @partial(jax.jit, static_argnames=("self", ))
     def __call__(
         self,
+        values: Num[Array, "3 *valueDimensions"],
         barycentric_screen: Vec3f,
         barycentric_clip: Vec3f,
-        values: Num[Array, "3 *valueDimensions"],
     ) -> Num[Array, "*valueDimensions"]:
         """Interpolation, using barycentric coordinates.
 
         Parameters:
+          - values: values at the vertices of the triangle, with axis 0 being
+            the batch axis.
           - barycentric_screen: barycentric coordinates in screen space of the
             point to interpolate
           - barycentric_clip: barycentric coordinates in clip space of the
             point to interpolate
-          - values: values at the vertices of the triangle, with axis 0 being
-            the batch axis.
         """
         dtype = jax.dtypes.result_type(
             barycentric_screen,
