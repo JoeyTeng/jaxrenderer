@@ -114,6 +114,7 @@ class Camera(NamedTuple):
     model_view: ModelView
     viewport: Viewport
     projection: Projection
+    world_to_screen: World2Screen
 
     @classmethod
     @jaxtyped
@@ -154,7 +155,42 @@ class Camera(NamedTuple):
             model_view=model_view,
             viewport=viewport,
             projection=projection,
+            world_to_screen=viewport @ projection @ model_view,
         )
+
+    @jaxtyped
+    @jax.jit
+    def transform(
+        self,
+        points: Num[Array, "*N 4"],
+    ) -> Num[Array, "*N 4"]:
+        """Transform points from model space to screen space.
+
+        Parameters:
+          - points: shape (4, ) or (N, 4). points in model space, with axis 0
+            being the batch axis. Batch axis can be omitted. Points must be
+            in homogeneous coordinate.
+
+        Returns: points in screen space, with axis 0 being the batch axis, if
+            given in batch. The dtype may be promoted.
+        """
+        assert len(points.shape) < 3
+        assert (((len(points.shape) == 2) and (points.shape[1] == 4))
+                or ((len(points.shape) == 1) and (points.shape[0] == 4)))
+
+        with jax.ensure_compile_time_eval():
+            lhs_contract_axis = 1 if len(points.shape) == 2 else 0
+            dtype = jax.dtypes.result_type(points, self.world_to_screen)
+
+        # put `points` at lhs to keep batch axis at axis 0 in the result.
+        screen_space: Num[Array, "*N 4"] = lax.dot_general(
+            points.astype(dtype),
+            self.world_to_screen.astype(dtype),
+            (((lhs_contract_axis, ), (1, )), ([], [])),
+        )
+        assert isinstance(screen_space, Num[Array, "*N 4"])
+
+        return screen_space
 
     @staticmethod
     @jaxtyped
