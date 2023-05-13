@@ -475,15 +475,18 @@ def barycentric(pts: Triangle2Df, p: Vec2f) -> Vec3f:
         pts[1] - pts[0],
         pts[0] - p,
     ))
-    vec: Vec3f = jnp.cross(mat[:, 0], mat[:, 1])
+    v: Vec3f = jnp.cross(mat[:, 0], mat[:, 1])
     # `u[2]` is 0, that means triangle is degenerate, in this case
     # return something with negative coordinates
-    vec = lax.cond(
-        jnp.abs(vec[-1]) < 1e-10,
+    v = lax.cond(
+        jnp.abs(v[-1]) < 1e-10,
         lambda: jnp.array((-1., 1., 1.)),
-        lambda: vec,
+        lambda: jnp.array((
+            1 - (v[0] + v[1]) / v[2],
+            v[1] / v[2],
+            v[0] / v[2],
+        )),
     )
-    vec = vec / vec[-1]
-    vec = jnp.array((1 - (vec[0] + vec[1]), vec[1], vec[0]))
+    assert isinstance(v, Vec3f)
 
-    return vec
+    return v
