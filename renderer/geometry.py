@@ -1,6 +1,6 @@
 import enum
 from functools import partial
-from typing import NamedTuple
+from typing import Any, NamedTuple
 
 import jax
 import jax.lax as lax
@@ -111,9 +111,20 @@ def interpolate(
 
 
 class Camera(NamedTuple):
+    """Camera parameters.
+
+    - model_view: transform from model space to view space
+    - projection: transform from view space to clip space
+    - viewport: transform from NDC (normalised device coordinate) space to
+      screen space. Noticed that this is NDC space in OpenGL, which has range
+      [-1, 1]^3.
+    - world_to_clip: transform from model space to clip space
+    - world_to_screen: transform from model space to screen space
+    """
     model_view: ModelView
-    viewport: Viewport
     projection: Projection
+    viewport: Viewport
+    world_to_clip: Projection
     world_to_screen: World2Screen
 
     @classmethod
@@ -121,46 +132,63 @@ class Camera(NamedTuple):
     @partial(jax.jit, static_argnames=("cls", ))
     def create(
         cls,
-        eye: Vec3f,
-        centre: Vec3f,
-        up: Vec3f,
-        lowerbound: Num[Array, "2"],
-        viewport_dimension: Integer[Array, "2"],
-        depth: Num[Array, ""],
+        model_view: ModelView,
+        projection: Projection,
+        viewport: Viewport,
     ) -> "Camera":
         """Create a camera with the given parameters.
 
         Parameters:
-          - eye: the position of camera, in world space
-          - centre: the centre of the frame, where the camera points to, in
-            world space
-          - up: the direction vector with start point at "eye", indicating the
-            "up" direction of the camera frame.
-          - lowerbound: the lowerbound of the viewport, in screen space
-          - viewport_dimension: the dimension of the viewport, in screen space
-          - depth: the depth of the viewport, in screen space
+          - model_view: transform from model space to view space
+          - projection: transform from view space to clip space
+          - viewport: transform from NDC (normalised device coordinate) space to
         """
-        model_view: ModelView = cls.model_view_matrix(eye, centre, up)
-        projection: Projection = cls.perspective_projection_matrix(eye, centre)
-        viewport: Viewport = cls.viewport_matrix(
-            lowerbound,
-            viewport_dimension,
-            depth,
-        )
-        assert isinstance(model_view, ModelView)
-        assert isinstance(projection, Projection)
-        assert isinstance(viewport, Viewport)
-
         return cls(
             model_view=model_view,
             viewport=viewport,
             projection=projection,
+            world_to_clip=projection @ model_view,
             world_to_screen=viewport @ projection @ model_view,
         )
 
+    @staticmethod
     @jaxtyped
     @jax.jit
-    def transform(
+    def apply(
+        points: Num[Array, "*N 4"],
+        matrix: Num[Array, "4 4"],
+    ) -> Num[Array, "*N 4"]:
+        """Transform points from model space to screen space.
+
+        Parameters:
+          - points: shape (4, ) or (N, 4). points in model space, with axis 0
+            being the batch axis. Batch axis can be omitted. Points must be
+            in homogeneous coordinate.
+          - matrix: shape (4, 4) transformation matrix
+
+        Returns: coordinates transformed
+        """
+        assert len(points.shape) < 3
+        assert (((len(points.shape) == 2) and (points.shape[1] == 4))
+                or ((len(points.shape) == 1) and (points.shape[0] == 4)))
+
+        with jax.ensure_compile_time_eval():
+            lhs_contract_axis = 1 if len(points.shape) == 2 else 0
+            dtype = jax.dtypes.result_type(points, matrix)
+
+        # put `points` at lhs to keep batch axis at axis 0 in the result.
+        transformed: Num[Array, "*N 4"] = lax.dot_general(
+            points.astype(dtype),
+            matrix.astype(dtype),
+            (((lhs_contract_axis, ), (1, )), ([], [])),
+        )
+        assert isinstance(transformed, Num[Array, "*N 4"])
+
+        return transformed
+
+    @jaxtyped
+    @jax.jit
+    def to_screen(
         self,
         points: Num[Array, "*N 4"],
     ) -> Num[Array, "*N 4"]:
@@ -172,25 +200,38 @@ class Camera(NamedTuple):
             in homogeneous coordinate.
 
         Returns: points in screen space, with axis 0 being the batch axis, if
-            given in batch. The dtype may be promoted.
+            given in batch. The dtype may be promoted. The homogeneous
+            coordinates are normalised.
         """
-        assert len(points.shape) < 3
-        assert (((len(points.shape) == 2) and (points.shape[1] == 4))
-                or ((len(points.shape) == 1) and (points.shape[0] == 4)))
-
-        with jax.ensure_compile_time_eval():
-            lhs_contract_axis = 1 if len(points.shape) == 2 else 0
-            dtype = jax.dtypes.result_type(points, self.world_to_screen)
-
-        # put `points` at lhs to keep batch axis at axis 0 in the result.
-        screen_space: Num[Array, "*N 4"] = lax.dot_general(
-            points.astype(dtype),
-            self.world_to_screen.astype(dtype),
-            (((lhs_contract_axis, ), (1, )), ([], [])),
-        )
+        screen_space = self.apply(points, self.world_to_screen)
         assert isinstance(screen_space, Num[Array, "*N 4"])
 
-        return screen_space
+        normalised = normalise_homogeneous(screen_space)
+        assert isinstance(normalised, Num[Array, "*N 4"])
+
+        return normalised
+
+    @jaxtyped
+    @jax.jit
+    def to_clip(
+        self,
+        points: Num[Array, "*N 4"],
+    ) -> Num[Array, "*N 4"]:
+        """Transform points from model space to screen space.
+
+        Parameters:
+          - points: shape (4, ) or (N, 4). points in model space, with axis 0
+            being the batch axis. Batch axis can be omitted. Points must be
+            in homogeneous coordinate.
+
+        Returns: points in clip space, with axis 0 being the batch axis, if
+            given in batch. The dtype may be promoted. The homogeneous
+            coordinates are not normalized.
+        """
+        clip_space = self.apply(points, self.world_to_clip)
+        assert isinstance(clip_space, Num[Array, "*N 4"])
+
+        return clip_space
 
     @staticmethod
     @jaxtyped
@@ -210,17 +251,26 @@ class Camera(NamedTuple):
             world space
           - up: the direction vector with start point at "eye", indicating the
             "up" direction of the camera frame.
+
+        Reference:
+          - [gluLookAt](https://registry.khronos.org/OpenGL-Refpages/gl2.1/xhtml/gluLookAt.xml)
+          - [glTranslate](https://registry.khronos.org/OpenGL-Refpages/gl2.1/xhtml/glTranslate.xml)
+          - [GluLookAt Code](https://www.khronos.org/opengl/wiki/GluLookAt_code)
         """
-        z: Vec3f = normalise(eye - centre)
-        x: Vec3f = normalise(jnp.cross(up, z))
-        y: Vec3f = normalise(jnp.cross(x, z))
+        forward: Vec3f = normalise(centre - eye)
+        up = normalise(up)
+        side: Vec3f = normalise(jnp.cross(forward, up))
+        up = jnp.cross(side, forward)
 
-        # M inverse
-        m_inv = (
-            jnp.identity(4).at[0, :3].set(x).at[1, :3].set(y).at[2, :3].set(z))
-        tr = jnp.identity(4).at[:3, 3].set(-eye)
+        m: ModelView = (
+            jnp.identity(4)  #
+            .at[0, :3].set(side)  #
+            .at[1, :3].set(up)  #
+            .at[2, :3].set(-forward)  #
+        )
+        translation: ModelView = jnp.identity(4).at[:3, 3].set(-eye)
 
-        model_view: ModelView = m_inv @ tr
+        model_view: ModelView = m @ translation
 
         return model_view
 
@@ -228,6 +278,49 @@ class Camera(NamedTuple):
     @jaxtyped
     @jax.jit
     def perspective_projection_matrix(
+        fovy: jnp.floating[Any],
+        aspect: jnp.floating[Any],
+        z_near: jnp.floating[Any],
+        z_far: jnp.floating[Any],
+    ) -> Projection:
+        """Create a projection matrix to map the model in the camera frame (eye
+            coordinates) onto the viewing volume (clip coordinates), using
+            perspective transformation. This follows the implementation in
+            OpenGL (gluPerspective)
+
+        Parameters:
+          - fovy: Specifies the field of view angle, in degrees, in the y
+            direction.
+          - aspect: Specifies the aspect ratio that determines the field of
+            view in the x direction. The aspect ratio is the ratio of x (width)
+            to y (height).
+          - z_near: Specifies the distance from the viewer to the near clipping
+            plane (always positive).
+          - z_far: Specifies the distance from the viewer to the far clipping
+            plane (always positive).
+
+        Return: Projection, (4, 4) matrix.
+
+        Reference:
+          - [gluPerspective](https://registry.khronos.org/OpenGL-Refpages/gl2.1/xhtml/gluPerspective.xml)
+        """
+        f: jnp.single = 1. / lax.tan(fovy.astype(jnp.single) / 2.)
+        projection: Projection = (
+            jnp.zeros((4, 4), dtype=jnp.single)  #
+            .at[0, 0].set(f / aspect)  #
+            .at[1, 1].set(f)  #
+            .at[2, 2].set((z_far + z_near) / (z_near - z_far))  #
+            # translate z
+            .at[2, 3].set((2. * z_far * z_near) / (z_near - z_far))  #
+            .at[3, 2].set(-1.)  # let \omega be -z
+        )
+
+        return projection
+
+    @staticmethod
+    @jaxtyped
+    @jax.jit
+    def perspective_projection_matrix_tinyrenderer(
         eye: Vec3f,
         centre: Vec3f,
         dtype: jnp.dtype = jnp.single,
@@ -256,7 +349,7 @@ class Camera(NamedTuple):
     @jax.jit
     def viewport_matrix(
         lowerbound: Num[Array, "2"],
-        viewport_dimension: Integer[Array, "2"],
+        dimension: Integer[Array, "2"],
         depth: Num[Array, ""],
         dtype: jnp.dtype = jnp.single,
     ) -> Viewport:
@@ -268,16 +361,16 @@ class Camera(NamedTuple):
         Parameters:
           - lowerbound: x-y of the lower left corner of the viewport, in screen
             space.
-          - viewport_dimension: width, height of the viewport, in screen space.
+          - dimension: width, height of the viewport, in screen space.
           - depth: the depth of the viewport in screen space, for zbuffer
           - dtype: the dtype for the viewport matrix.
 
         Return: Viewport, (4, 4) matrix.
         """
-        width, height = viewport_dimension
+        width, height = dimension
         viewport: Viewport = (
             jnp.identity(4, dtype=dtype)  #
-            .at[:2, 3].set(lowerbound + viewport_dimension / 2)  #
+            .at[:2, 3].set(lowerbound + dimension / 2)  #
             .at[0, 0].set(width / 2).at[1, 1].set(height / 2)  #
             .at[2, 2:].set(depth / 2)  #
         )
