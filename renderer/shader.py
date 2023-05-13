@@ -1,64 +1,64 @@
-from functools import partial
-from typing import Any, Callable, Iterable, NamedTuple, Optional, TypeVar
+from abc import ABC, abstractmethod
+from typing import Any, NamedTuple
 
-from jaxtyping import Array, Bool, Float, Integer
 import jax
+import jax.lax as lax
+import jax.numpy as jnp
+from jax.tree_util import Partial, tree_map
+from jaxtyping import Array, Bool, Float, Integer, jaxtyped
 
-from .geometry import Interpolation
-from .types import Colour, Vec2f, Vec3f, Vec4f
+from .geometry import Camera, Interpolation, interpolate
+from .types import NAN_ARRAY, TRUE_ARRAY, Vec2f, Vec3f, Vec4f
 
 jax.config.update('jax_array', True)
 
 ID = Integer[Array, ""]
 
 
-class VertexShaderInput(NamedTuple):
-    pass
-
-
 class PerVertex(NamedTuple):
+    """Built-in output from Vertex Shader.
+
+    gl_Position is in clip-space.
+    """
     gl_Position: Vec4f
     # gl_PointSize is meaningful only when rendering point primitives.
-    gl_PointSize: Float[Array, ""]
-
-
-class ToInterpolate(NamedTuple):
-    """Used for Shader.interpolate. The 0-th axis is the batch axis"""
-    gl_Position: Float[Array, "3 4"]
-    # gl_PointSize is meaningful only when rendering point primitives.
-    gl_PointSize: Float[Array, "3"]
-
-
-# Used for Shader.interpolate
-_InterpolatedT = TypeVar("_InterpolatedT", bound=PerVertex)
+    # not supported for now
+    # gl_PointSize: Float[Array, ""]
 
 
 class PerFragment(NamedTuple):
-    """Output from Fragment Shader.
+    """Built-in Output from Fragment Shader.
 
-    If gl_FragDepth is not set, gl_FragCoord[3] will be used later by default.
+    If gl_FragDepth is not set (or being nan), gl_FragCoord[3] will be used
+    later by default.
     """
-    gl_FragDepth: Optional[Float[Array, ""]] = None
+    gl_FragDepth: Float[Array, ""] = NAN_ARRAY
+    # not discard
+    keeps: Bool[Array, ""] = TRUE_ARRAY
 
 
-class DefaultPerFragment(PerFragment):
-    """When render to only one buffer, for simplicity.
+VaryingT = tuple
+"""The user-defined input and second (extra) output of fragment shader."""
 
-    Reference:
-      - https://stackoverflow.com/questions/51459596/using-gl-fragcolor-vs-out-vec4-color
+MixedExtraT = tuple
+"""The user-defined second (extra) output of mix shader."""
+
+
+class MixerOutput(NamedTuple):
+    """Built-in output from `Shader.mix`.
+
+    keep: bool, whether the output should be used to update buffers
+    zbuffer: store depth value, and the result is used to set zbuffer.
     """
-    gl_FragDepth: Optional[Float[Array, ""]] = None
-    gl_FragColor: Colour
+    keep: Bool[Array, ""]
+    zbuffer: Float[Array, ""]
 
 
-_ShaderT = TypeVar("_ShaderT", bound=NamedTuple)
-
-
-class Shader(NamedTuple):
+class Shader(ABC):
     """Base class for customised shader.
 
-    Since JAX is pure functional (stateless), the state will be maintained by
-    returning and passing the updated instance of `Shader` using `self.replace`.
+    Since JAX is pure functional (stateless), the state will be passed by
+    returned values in each process.
 
     In one rendering process, `vertex` will be called for all primitives
     concurrently and thus they share same state when being called. The state in
@@ -66,18 +66,21 @@ class Shader(NamedTuple):
     additional input of a fragment shader or the output of a vertex shader.
     """
 
+    @staticmethod
+    @jaxtyped
+    @jax.jit
+    @abstractmethod
     def vertex(
-        self: _ShaderT,
-        *,
-        gl_VertexID: ID,
-        gl_InstanceID: ID,
-        **kwargs,
-    ) -> tuple[_ShaderT, PerVertex]:
+            gl_VertexID: ID,
+            gl_InstanceID: ID,
+            camera: Camera,
+            extra: tuple[Any, ...] = tuple(),
+    ) -> tuple[PerVertex, VaryingT]:
         """Override this to implement the vertex shader as defined by OpenGL.
 
         The meaning of the inputs follows the definitions in OpenGL. Additional
         named parameters can be defined and passed in if you need, as defined
-        in `**kwargs`.
+        in `inputs`.
 
         If any internal state of this shader needs to be updated (in a
         per-vertex basis), it must be updated using `self.replace` method and
@@ -98,9 +101,14 @@ class Shader(NamedTuple):
             rendering. The instance count always starts at 0, even when using
             base instance calls. When not using instanced rendering, this value
             will be 0.
+          - camera: Camera [extra input, not in GLSL]
+            contains model_view, viewport, and projection matrices.
+          - extra: Camera [extra input, not in GLSL]
+            contains model_view, viewport, and projection matrices.
 
-        Return: a tuple of updated shader instance and PerVertex, used for
-            internals.
+
+        Return: PerVertex (used for internals) and ExtraPerVertexOutput to be
+            interpolated and used by downstream pipelines.
           - gl_Position
             the clip-space output position of the current vertex.
           - gl_PointSize
@@ -114,6 +122,9 @@ class Shader(NamedTuple):
         """
         raise NotImplementedError()
 
+    @staticmethod
+    @jaxtyped
+    @jax.jit
     def interpolate(
         values: VaryingT,
         barycentric_screen: Vec3f,
@@ -137,67 +148,108 @@ class Shader(NamedTuple):
         Return: interpolated values for fragment shader process, with same
             structure (order of members) as `values`
         """
-        f = partial(Interpolation.SMOOTH, barycentric_screen, barycentric_clip)
+        varying: VaryingT = tree_map(
+            Partial(
+                interpolate,
+                barycentric_screen=barycentric_screen,
+                barycentric_clip=barycentric_clip,
+                mode=Interpolation.SMOOTH,
+            ),
+            values,
+        )
 
-        return self, factory((f(value) for value in values))
+        return varying
 
+    @staticmethod
+    @jaxtyped
+    @jax.jit
     def fragment(
-        self: _ShaderT,
-        *,
         gl_FragCoord: Vec4f,
         gl_FrontFacing: Bool[Array, ""],
         gl_PointCoord: Vec2f,
-        **kwargs,
-    ) -> tuple[_ShaderT, PerFragment]:
+        extra: VaryingT,
+    ) -> tuple[PerFragment, VaryingT]:
         """Override this to implement the vertex shader as defined by OpenGL.
 
         This is optional. The default implementation writes nothing and thus
-        `gl_FragDepth` further down the pipeline will use `gl_FragCoord[3]`.
+        `gl_FragDepth` further down the pipeline will use `gl_FragCoord[2]`.
+        For the `extra` input, it will be returned directly untouched.
 
         Parameters:
           - gl_FragCoord: homogeneous coordinates in screen device space.
           - gl_FrontFacing: True if the primitive is NOT back facing.
           - gl_PointCoord: 2d coordinates in screen device space.
+          - extra: interpolated values from `Shader.interpolate`; these are
+            generated from `Shader.vertex`.
 
-        Return: Return PerFragment for further blending process. Return an
-            (updated) instance of `self` to keep some states for further draw
-            command.
-          - gl_FragDepth: if not set (remains None), gl_FragCoord[3] will be
+        Return: PerFragment for depth test and further mixing process.
+          - gl_FragDepth: if not set (remains None), gl_FragCoord[2] will be
             used later.
+          - extra: defined by user, passed as `extra` in `Shader.mix`.
+            **NOTE** the return type must be the same type as `values` in
+            `Shader.interpolate`, as that will be used as the dummy value for
+            this return value, when `PerFragment` suggests `keeps` is False.
 
         Reference:
           - [Fragment Shader/Defined Inputs](https://www.khronos.org/opengl/wiki/Fragment_Shader/Defined_Inputs)
           - [Fragment Shader#Outputs](https://www.khronos.org/opengl/wiki/Fragment_Shader#Outputs)
         """
-        return self, PerFragment()
+        return PerFragment(), extra
 
-    def blender(
-        self: _ShaderT,
-        *,
-        source: Colour,
-        destination: Colour,
-    ) -> tuple[_ShaderT, Colour]:
-        """Override this to define the customised behaviour for colour blending
-            as defined by OpenGL.
+    @staticmethod
+    @jaxtyped
+    @jax.jit
+    def mix(
+        gl_FragDepth: Float[Array, "primitives"],
+        keeps: Bool[Array, "primitives"],
+        extra: VaryingT,
+    ) -> tuple[MixerOutput, MixedExtraT]:
+        """Override this to customise the mixing behaviour per fragment over
+            different primitives (triangles).
 
-        Blending happens independently for fragment shader output with type
-        `Colour`. This means different fragments results will not affect each
-        other, nor the different outputs for the same fragment.
+        Use this to implement the `blending` behaviour if needed.
 
-        This is optional. The default implementation writes simply returns the
-        source colour.
+        For the default behaviour, the values from fragment with maximum
+        `gl_FragDepth` value AND `keeps` being True will be used as the output.
+        In the default implementation, if no fragment has `keeps` being True,
+        then mixed value will be the first fragment's value for both
+        `gl_FragDepth` and `extra`.
 
-        Parameters:
-          - source: the source colour, which is the output of the fragment
-            shader.
-          - destination: the destination colour, which is the colour already in
-            the framebuffer.
-
-        Return: Return Colour to be written to the framebuffer. Return an
-            (updated) instance of `self` to keep some states for further draw
-            command.
+        Returns: Built-in MixerOutput and user-defined extras.
+          - MixerOutput:
+            - keep: bool, whether uses this value to set the corresponding
+              pixel in the buffers
+            - zbuffer, the value used to update the zbuffer
+          - User-defined outputs, must be a tuple (can be NamedTuple)
+            Each field must be defined as same order as in the class `Buffers`.
+            The values will be directly set to the `Buffers` **in the same
+            order of the given definition** as if a usual `tuple`, but not
+            based on field name.
 
         Reference:
           - [Blending](https://www.khronos.org/opengl/wiki/Blending)
         """
-        return self, source + 0 * destination
+
+        def has_kept_fragment() -> Integer[Array, ""]:
+            depths: Float[Array, "primitives"]
+            depths = jnp.where(keeps, gl_FragDepth, -jnp.inf)
+            assert isinstance(depths, Float[Array, "primitives"])
+
+            idx: Integer[Array, ""] = jnp.argmax(depths)
+
+            return idx
+
+        has_valid_fragment = jnp.any(keeps)
+
+        idx: Integer[Array, ""] = lax.cond(
+            has_valid_fragment,
+            has_kept_fragment,
+            lambda: jnp.array(0),
+        )
+        depth: Float[Array, ""] = gl_FragDepth[idx]
+        assert isinstance(depth, Float[Array, ""])
+
+        return (
+            MixerOutput(keep=has_valid_fragment, zbuffer=depth),
+            tree_map(lambda x: x[idx], extra),
+        )
