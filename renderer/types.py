@@ -1,11 +1,16 @@
 from functools import partial
-from typing import NamedTuple, Optional
+from typing import Any, NamedTuple, Union
 
 import jax
+import jax.lax as lax
 import jax.numpy as jnp
-from jaxtyping import Array, Bool, Float, Integer, jaxtyped
+from jaxtyping import Array, Bool, Float, Integer, Shaped, jaxtyped
 
 jax.config.update('jax_array', True)
+
+TRUE_ARRAY: Bool[Array, ""] = lax.full((), True, dtype=jnp.bool_)
+FALSE_ARRAY: Bool[Array, ""] = lax.full((), False, dtype=jnp.bool_)
+NAN_ARRAY: Float[Array, ""] = lax.full((), jnp.nan)
 
 Index = Integer[Array, ""]
 
@@ -38,75 +43,47 @@ Vertices = Float[Array, "vertices 3"]
 Texture = Float[Array, "textureWidth textureHeight channel"]
 
 
+class DtypeInfo(NamedTuple):
+    # TODO: use Generic NamedTuple when bump to Python 3.11
+    min: Union[jnp.floating[Any], jnp.integer[Any]]
+    max: Union[jnp.floating[Any], jnp.integer[Any]]
+    bits: int
+    dtype: jnp.dtype[Any]
+
+    @classmethod
+    @jaxtyped
+    @partial(jax.jit, static_argnames=("cls", "dtype"))
+    def create(cls, dtype: jnp.dtype[Any]) -> "DtypeInfo":
+        with jax.ensure_compile_time_eval():
+            if jnp.issubdtype(dtype, jnp.floating):
+                finfo = jnp.finfo(dtype)
+
+                return cls(
+                    min=finfo.min,
+                    max=finfo.max,
+                    bits=finfo.bits,
+                    dtype=dtype,
+                )
+            if jnp.issubdtype(dtype, jnp.integer):
+                iinfo = jnp.iinfo(dtype)
+
+                return cls(
+                    min=iinfo.min,
+                    max=iinfo.max,
+                    bits=iinfo.bits,
+                    dtype=dtype,
+                )
+
+        raise ValueError(f"Unexpected dtype {dtype}")
+
+
 class LightSource(NamedTuple):
     light_direction: Vec3f = jax.numpy.array((0., 0., -1.))
     light_colour: Colour = jax.numpy.ones(3)
 
 
 class Buffers(NamedTuple):
+    """Use lax.full to create buffers and attach here."""
+    # TODO: use Generic NamedTuple when bump to Python 3.11
     zbuffer: ZBuffer
-    canvas: Canvas
-
-    @classmethod
-    @jaxtyped
-    @partial(
-        jax.jit,
-        static_argnames=(
-            "cls",
-            "canvas_size",
-            "canvas_dtype",
-            "zbuffer_dtype",
-        ),
-    )
-    def create(
-        cls,
-        canvas_size: tuple[int, int],
-        background_colour: Colour,
-        canvas_dtype: Optional[jnp.dtype] = None,
-        zbuffer_dtype: jnp.dtype = jnp.single,
-    ) -> "Buffers":
-        """Create buffers (zbuffer, canvas) to store render result (depth,
-            colour).
-
-        Noted that the rendered result will be a ZBuffer and a Canvas, both in
-        (width, height, *) shape. To render them properly, the width and height
-        dimensions may need to be swapped.
-
-        Parameters:
-          - `canvas_size`: tuple[int, int]. Width, height of the resultant
-            image.
-          - `background_colour`: Optional[Colour]. Used to fill the canvas before anything being rendered. If not given (or None), using
-            `jnp.zeros(canvas_size, dtype=canvas_dtype)`, which will resulting
-            in a black background.
-          - `canvas_dtype`: dtype for canvas. If not given, the dtype of the
-            `background_colour` will be used.
-          - `zbuffer_dtype`: dtype for canvas. Default: `jnp.single`.
-
-        Returns: Buffers[ZBuffer, Canvas]
-          - ZBuffer: Num[Array, "width height"], with dtype being the same as
-            `zbuffer_dtype` or `jnp.single` if not given. The initial value is a
-            `finfo.min` if given Float or `iinfo.min`; -inf is not used to
-            allows later pipeline to use it as a mask (indicating "discarded").
-          - Canvas: Num[Array, "width height channel"], with dtype being the
-            same as the given one, or `background_colour`. "channel" is given
-            by the size of `background_colour`.
-        """
-        width, height = canvas_size
-        channel: int = background_colour.size
-        canvas_dtype = (jax.dtypes.result_type(background_colour)
-                        if canvas_dtype is None else canvas_dtype)
-
-        canvas: Canvas = jnp.full(
-            (width, height, channel),
-            background_colour,
-            dtype=canvas_dtype,
-        )
-        min_z = (jnp.finfo(dtype=zbuffer_dtype).min if jnp.issubdtype(
-            zbuffer_dtype, jnp.floating) else jnp.iinfo(zbuffer_dtype).min)
-        zbuffer: ZBuffer = jnp.full(
-            canvas_size,
-            min_z,
-            dtype=zbuffer_dtype,
-        )
-
-        return cls(zbuffer=zbuffer, canvas=canvas)
+    targets: tuple[Shaped[Array, "width height ..."]]
