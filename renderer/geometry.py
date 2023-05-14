@@ -168,12 +168,12 @@ class Camera(NamedTuple):
 
         Returns: coordinates transformed
         """
-        assert len(points.shape) < 3
-        assert (((len(points.shape) == 2) and (points.shape[1] == 4))
-                or ((len(points.shape) == 1) and (points.shape[0] == 4)))
+        assert jnp.ndim(points) < 3
+        assert (((jnp.ndim(points) == 2) and (points.shape[1] == 4))
+                or ((jnp.ndim(points) == 1) and (points.shape[0] == 4)))
 
         with jax.ensure_compile_time_eval():
-            lhs_contract_axis = 1 if len(points.shape) == 2 else 0
+            lhs_contract_axis = 1 if jnp.ndim(points) == 2 else 0
             dtype = jax.dtypes.result_type(points, matrix)
 
         # put `points` at lhs to keep batch axis at axis 0 in the result.
@@ -431,7 +431,7 @@ def to_homogeneous(
     )
     homo_coords: Float[Array, "*batch dim+1"] = lax.concatenate(
         (coordinates, ones),
-        len(coordinates.shape) - 1,
+        jnp.ndim(coordinates) - 1,
     )
 
     return homo_coords
