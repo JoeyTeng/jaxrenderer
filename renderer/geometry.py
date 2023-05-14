@@ -304,7 +304,7 @@ class Camera(NamedTuple):
         Reference:
           - [gluPerspective](https://registry.khronos.org/OpenGL-Refpages/gl2.1/xhtml/gluPerspective.xml)
         """
-        f: jnp.single = 1. / lax.tan(fovy.astype(jnp.single) / 2.)
+        f: jnp.single = 1. / lax.tan(jnp.radians(fovy.astype(jnp.single)) / 2.)
         projection: Projection = (
             jnp.zeros((4, 4), dtype=jnp.single)  #
             .at[0, 0].set(f / aspect)  #
