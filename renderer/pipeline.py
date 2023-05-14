@@ -189,20 +189,20 @@ def _postprocessing(
         def select_value_per_row(
             keep: Bool[Array, ""],
             new_values: _valueT,
-            old_values: Any,
+            old_values: _valueT,
         ) -> _valueT:
             FieldRowT = TypeVar("FieldRowT")
 
             def _select_per_field(
                 new_field_value: FieldRowT,
-                old_field_value: Any,
+                old_field_value: FieldRowT,
             ) -> FieldRowT:
                 """Either choose new value of this field for row `index`, or
                     keep the previous value."""
                 return lax.cond(
                     keep,
                     lambda: new_field_value,
-                    lambda: old_field_value[index],
+                    lambda: old_field_value,
                 )
 
             result: _valueT = tree_map(
@@ -230,7 +230,7 @@ def _postprocessing(
         buffers_row = jax.vmap(select_value_per_row)(
             keeps,
             Buffers(zbuffer=depths, targets=tuple(extras)),
-            buffers,
+            tree_map(lambda field: field[index], buffers),
         )
 
         return tree_map(
