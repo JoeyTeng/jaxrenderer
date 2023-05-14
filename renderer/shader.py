@@ -34,7 +34,7 @@ class PerVertex(NamedTuple):
 class PerFragment(NamedTuple):
     """Built-in Output from Fragment Shader.
 
-    If gl_FragDepth is not set (or being nan), gl_FragCoord[3] will be used
+    If gl_FragDepth is not set (or being nan), gl_FragCoord[2] will be used
     later by default.
     """
     gl_FragDepth: Float[Array, ""] = NAN_ARRAY
@@ -69,12 +69,7 @@ class Shader(ABC, Generic[VertexShaderExtraInputT, VaryingT, MixedExtraT]):
     """Base class for customised shader.
 
     Since JAX is pure functional (stateless), the state will be passed by
-    returned values in each process.
-
-    In one rendering process, `vertex` will be called for all primitives
-    concurrently and thus they share same state when being called. The state in
-    the shader are like `varying` qualifier of GLSL prior to 1.40. They are
-    additional input of a fragment shader or the output of a vertex shader.
+    returned values (the second return value in each function) in each process.
     """
 
     @staticmethod
@@ -91,12 +86,11 @@ class Shader(ABC, Generic[VertexShaderExtraInputT, VaryingT, MixedExtraT]):
 
         The meaning of the inputs follows the definitions in OpenGL. Additional
         named parameters can be defined and passed in if you need, as defined
-        in `inputs`.
+        in `extra`.
 
-        If any internal state of this shader needs to be updated (in a
-        per-vertex basis), it must be updated using `self.replace` method and
-        return the updated instance as the function output. Otherwise the
-        update/internal state will not be tracked.
+        Noticed that no internal state will be tracked, thus if there is any
+        value to be passed to downstream process, it must be returned as the
+        output `VaryingT` of this function.
 
         Relevant information from the original document is copied below.
 
@@ -131,7 +125,7 @@ class Shader(ABC, Generic[VertexShaderExtraInputT, VaryingT, MixedExtraT]):
           - [Vertex Shader/Defined Inputs](https://www.khronos.org/opengl/wiki/Vertex_Shader/Defined_Inputs)
           - [Vertex Shader#Outputs](https://www.khronos.org/opengl/wiki/Vertex_Shader#Outputs)
         """
-        raise NotImplementedError()
+        raise NotImplementedError("vertex shader not implemented")
 
     @staticmethod
     @jaxtyped

@@ -185,25 +185,26 @@ def _postprocessing(
 
         @jaxtyped
         @partial(jax.jit, donate_argnums=(2, ))
-        def select_value_per_row(
+        def select_value_per_pixel(
             keep: Bool[Array, ""],
             new_values: _valueT,
             old_values: _valueT,
         ) -> _valueT:
+            """Choose new value of the pixel, or keep the previous."""
             FieldRowT = TypeVar("FieldRowT")
 
             def _select_per_field(
                 new_field_value: FieldRowT,
                 old_field_value: FieldRowT,
             ) -> FieldRowT:
-                """Either choose new value of this field for row `index`, or
-                    keep the previous value."""
+                """Choose this pixel for this field in the PyTree."""
                 return lax.cond(
                     keep,
                     lambda: new_field_value,
                     lambda: old_field_value,
                 )
 
+            # tree_map over each field in the PyTree
             result: _valueT = tree_map(
                 _select_per_field,
                 new_values,
@@ -215,6 +216,7 @@ def _postprocessing(
         keeps: Bool[Array, "height"]
         depths: Num[Array, "height"]
         extras: MixedExtraT
+        # vmap over axis 1 (height) of the buffers. Axis 0 (width) is `index`.
         (keeps, depths), extras = jax.vmap(_per_pixel)(lax.concatenate(
             (
                 lax.full((batch_size, 1), index),
@@ -226,18 +228,24 @@ def _postprocessing(
         assert isinstance(depths, Num[Array, "height"])
         assert isinstance(extras, tuple)
 
-        buffers_row = jax.vmap(select_value_per_row)(
+        # vmap each pixel over axis 1 (height) of the buffers (per row in
+        # matrix)
+        buffers_row = jax.vmap(select_value_per_pixel)(
             keeps,
             Buffers(zbuffer=depths, targets=tuple(extras)),
             tree_map(lambda field: field[index], buffers),
         )
 
+        # tree_map over each field in the PyTree to update all buffers
         return tree_map(
             lambda field, value: field.at[index].set(value),
             buffers,
             buffers_row,
         )
 
+    # END OF `loop_body`
+
+    # iterate over axis 0 (width) of the buffers (one row at a time)
     buffers = lax.fori_loop(
         0,
         loop_size,
@@ -272,6 +280,7 @@ def render(
         gl_VertexID: Integer[Array, ""],
         _extra: VertexShaderExtraInputT,
     ) -> tuple[PerVertexInScreen, VaryingT]:
+        """Process one vertex into screen space, and keep varying values."""
         per_vertex: PerVertex
         varying: VaryingT
         per_vertex, varying = shader.vertex(
@@ -293,11 +302,7 @@ def render(
         screen: Vec4f = camera.viewport @ ndc
         assert isinstance(screen, Vec4f)
 
-        vertex_with_screen: PerVertexInScreen
-        vertex_with_screen = PerVertexInScreen(gl_Position=screen)
-        assert isinstance(vertex_with_screen, PerVertexInScreen)
-
-        return vertex_with_screen, varying
+        return PerVertexInScreen(gl_Position=screen), varying
 
     # PROCESS: Vertex Processing
     per_vertices, varyings = jax.vmap(vertex_processing)(
