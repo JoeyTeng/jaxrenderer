@@ -23,7 +23,7 @@ class Model:
 
     def __post_init__(self):
         assert self.verts.shape[1] == 3
-        assert len(self.faces.shape) == 2
+        assert jnp.ndim(self.faces) == 2
 
     @property
     def nverts(self) -> int:
