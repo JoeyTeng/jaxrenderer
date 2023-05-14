@@ -1,3 +1,4 @@
+import jax
 import jax.lax as lax
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
@@ -5,7 +6,7 @@ import matplotlib.pyplot as plt
 from renderer.shaders.gouraud import GouraudShader, GouraudExtraVertexInput
 from renderer.pipeline import render
 from renderer.geometry import Camera
-from renderer.types import Buffers
+from renderer.types import Buffers, LightSource
 from renderer.utils import transpose_for_display
 
 eye = jnp.array((0., 0, 2))
@@ -48,9 +49,16 @@ face_indices = jnp.array((
     (0, 4, 3),
     (2, 5, 1),
 ))
+position = jnp.array((
+    (0., 0., 0.),
+    (2., 0., 0.),
+    (0., 1., 0.),
+    (1., 1., 0.),
+    (-1, -1, 1.),
+    (-2, 0., 0.),
+))
 extra = GouraudExtraVertexInput(
-    position=jnp.array(((0., 0., 0.), (2., 0., 0.), (0., 1., 0.), (1., 1., 0.),
-                        (-1, -1, 1.), (-2, 0., 0.))),
+    position=position,
     colour=jnp.array((
         (1., 0., 0.),
         (0., 1., 0.),
@@ -59,6 +67,11 @@ extra = GouraudExtraVertexInput(
         (1., 1., 1.),
         (1., 1., 0.),
     )),
+    normal=jax.vmap(lambda _: LightSource().direction)(position),
+    light=LightSource(
+        direction=jax.vmap(lambda _: LightSource().direction)(position),
+        colour=jax.vmap(lambda _: LightSource().colour)(position),
+    ),
 )
 
 result = render(camera, GouraudShader, buffers, face_indices, extra)

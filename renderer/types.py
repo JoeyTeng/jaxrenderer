@@ -78,8 +78,8 @@ class DtypeInfo(NamedTuple):
 
 
 class LightSource(NamedTuple):
-    light_direction: Vec3f = jax.numpy.array((0., 0., -1.))
-    light_colour: Colour = jax.numpy.ones(3)
+    direction: Vec3f = jax.numpy.array((0., 0., -1.))
+    colour: Colour = jax.numpy.ones(3)
 
 
 class Buffers(NamedTuple):

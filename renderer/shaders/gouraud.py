@@ -2,11 +2,11 @@ from typing import NamedTuple
 
 import jax
 import jax.numpy as jnp
-from jaxtyping import Array, Bool, jaxtyped
+from jaxtyping import Array, Bool, Float, jaxtyped
 
 from ..shader import ID, PerFragment, PerVertex, Shader
 from ..geometry import Camera, to_homogeneous
-from ..types import Colour, Vec2f, Vec3f, Vec4f
+from ..types import Colour, LightSource, Vec2f, Vec3f, Vec4f
 
 jax.config.update('jax_array', True)
 
@@ -14,6 +14,8 @@ jax.config.update('jax_array', True)
 class GouraudExtraVertexInput(NamedTuple):
     position: Vec3f  # in world space
     colour: Colour
+    normal: Vec3f  # in world space
+    light: LightSource
 
 
 class GouraudExtraFragmentData(NamedTuple):
@@ -42,9 +44,18 @@ class GouraudShader(Shader[GouraudExtraVertexInput, GouraudExtraFragmentData,
         gl_Position: Vec4f = camera.to_clip(position)
         assert isinstance(gl_Position, Vec4f)
 
+        # assume normal here is in world space. If it is in model space, it
+        # must be transformed by the inverse transpose of the model matrix.
+        # Ref: https://github.com/ssloy/tinyrenderer/wiki/Lesson-5:-Moving-the-camera#transformation-of-normal-vectors
+        normal: Vec3f = extra.normal
+        intensity: Float[Array, ""] = jnp.dot(normal, extra.light.direction)
+        assert isinstance(intensity, Float[Array, ""])
+
+        colour: Colour = extra.colour * extra.light.colour * intensity
+
         return (
             PerVertex(gl_Position=gl_Position),
-            GouraudExtraFragmentData(colour=extra.colour),
+            GouraudExtraFragmentData(colour=colour),
         )
 
     @staticmethod

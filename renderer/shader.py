@@ -5,7 +5,7 @@ import jax
 import jax.lax as lax
 import jax.numpy as jnp
 from jax.tree_util import Partial, tree_map
-from jaxtyping import Array, Bool, Float, Integer, Shaped, jaxtyped
+from jaxtyping import Array, Bool, Float, Integer, PyTree, Shaped, jaxtyped
 
 from .geometry import Camera, Interpolation, interpolate
 from .types import NAN_ARRAY, TRUE_ARRAY, Vec2f, Vec3f, Vec4f
@@ -16,7 +16,7 @@ ID = Integer[Array, ""]
 
 VertexShaderExtraInputT = TypeVar(
     'VertexShaderExtraInputT',
-    bound=tuple[Shaped[Array, "..."], ...],
+    bound=PyTree[Shaped[Array, "..."]],
 )
 
 
