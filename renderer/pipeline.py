@@ -6,12 +6,12 @@ import jax.lax as lax
 import jax.numpy as jnp
 from jax import lax
 from jax.tree_util import tree_map
-from jaxtyping import Array, Bool, Integer, Shaped, jaxtyped
+from jaxtyping import Array, Bool, Integer, Num, jaxtyped
 
 from .geometry import (Camera, Interpolation, barycentric, interpolate,
                        normalise_homogeneous)
 from .shader import (ID, MixedExtraT, MixerOutput, PerFragment, PerVertex,
-                     Shader, VaryingT)
+                     Shader, VaryingT, VertexShaderExtraInputT)
 from .types import (FALSE_ARRAY, Buffers, FaceIndices, Triangle, Triangle2Df,
                     Vec2f, Vec2i, Vec3f, Vec4f)
 
@@ -43,9 +43,11 @@ class PerPrimitive(NamedTuple):
 @jaxtyped
 @partial(jax.jit, static_argnames=("shader", ), donate_argnums=(1, ))
 def _postprocessing(
-    shader: Shader,
+    shader: Union[Shader[VertexShaderExtraInputT, VaryingT, MixedExtraT],
+                  type[Shader[VertexShaderExtraInputT, VaryingT,
+                              MixedExtraT]]],
     buffers: Buffers,
-    per_primitive: tuple[Any, ...],
+    per_primitive: tuple[Any, ...],  # Batch PerPrimitive
     varyings: VaryingT,
 ) -> Buffers:
     with jax.ensure_compile_time_eval():
@@ -57,7 +59,7 @@ def _postprocessing(
 
     @jaxtyped
     @jax.jit
-    def _per_pixel(coord: Vec2i) -> tuple[MixerOutput, tuple[Any, ...]]:
+    def _per_pixel(coord: Vec2i) -> tuple[MixerOutput, MixedExtraT]:
 
         assert isinstance(coord, Vec2i), f"expected Vec2i, got {coord}"
 
@@ -111,7 +113,7 @@ def _postprocessing(
                     bc_screen,
                     bc_clip,
                 )
-                assert isinstance(varying, VaryingT)
+                assert isinstance(varying, tuple)
 
                 # PROCESS: Fragment Processing
                 per_frag: PerFragment
@@ -123,7 +125,7 @@ def _postprocessing(
                     extra=varying,
                 )
                 assert isinstance(per_frag, PerFragment)
-                assert isinstance(extra_fragment_output, VaryingT)
+                assert isinstance(extra_fragment_output, tuple)
 
                 # enforce default `gl_FragDepth` when it is None
                 per_frag = lax.cond(
@@ -153,7 +155,7 @@ def _postprocessing(
                 ),
             )
             assert isinstance(built_in, PerFragment)
-            assert isinstance(attachments, VaryingT)
+            assert isinstance(attachments, tuple)
 
             return built_in, attachments
 
@@ -166,10 +168,10 @@ def _postprocessing(
 
         # PROCESS: Per-Sample Operations (Mixing: depth test + colour blending)
         mixed_output: MixerOutput
-        attachments: tuple[Any, ...]
+        attachments: MixedExtraT
         mixed_output, attachments = shader.mix(gl_Depths, keeps, extra_outputs)
         assert isinstance(mixed_output, MixerOutput)
-        assert isinstance(attachments, MixedExtraT)
+        assert isinstance(attachments, tuple)
 
         return mixed_output, attachments
 
@@ -180,26 +182,39 @@ def _postprocessing(
         buffers: Buffers,
     ) -> Buffers:
 
-        _valueT = TypeVar('_valueT', bound=tuple)
+        _valueT = TypeVar('_valueT', bound=tuple[Any, ...])
 
         @jaxtyped
         @partial(jax.jit, donate_argnums=(2, ))
         def select_value_per_row(
             keep: Bool[Array, ""],
             new_values: _valueT,
-            old_values: _valueT,
+            old_values: Any,
         ) -> _valueT:
-            return tree_map(
-                lambda new_value, field: lax.cond(
+            FieldRowT = TypeVar("FieldRowT")
+
+            def _select_per_field(
+                new_field_value: FieldRowT,
+                old_field_value: Any,
+            ) -> FieldRowT:
+                """Either choose new value of this field for row `index`, or
+                    keep the previous value."""
+                return lax.cond(
                     keep,
-                    lambda: new_value,
-                    lambda: field[index],
-                ),
+                    lambda: new_field_value,
+                    lambda: old_field_value[index],
+                )
+
+            result: _valueT = tree_map(
+                _select_per_field,
                 new_values,
                 old_values,
             )
 
+            return result
+
         keeps: Bool[Array, "height"]
+        depths: Num[Array, "height"]
         extras: MixedExtraT
         (keeps, depths), extras = jax.vmap(_per_pixel)(lax.concatenate(
             (
@@ -208,7 +223,9 @@ def _postprocessing(
             ),
             1,
         ))
-        assert isinstance(extras, MixedExtraT)
+        assert isinstance(keeps, Bool[Array, "height"])
+        assert isinstance(depths, Num[Array, "height"])
+        assert isinstance(extras, tuple)
 
         buffers_row = jax.vmap(select_value_per_row)(
             keeps,
@@ -228,6 +245,7 @@ def _postprocessing(
         loop_body,
         buffers,
     )
+    assert isinstance(buffers, Buffers)
 
     return buffers
 
@@ -236,10 +254,12 @@ def _postprocessing(
 @partial(jax.jit, static_argnames=("shader", ), donate_argnums=(2, ))
 def render(
     camera: Camera,
-    shader: Union[Shader, type[Shader]],
+    shader: Union[Shader[VertexShaderExtraInputT, VaryingT, MixedExtraT],
+                  type[Shader[VertexShaderExtraInputT, VaryingT,
+                              MixedExtraT]]],
     buffers: Buffers,
     face_indices: FaceIndices,
-    extra: tuple[Shaped[Array, "..."], ...],
+    extra: VertexShaderExtraInputT,
 ) -> Buffers:
     vertices_count: int
     gl_InstanceID: ID
@@ -251,10 +271,10 @@ def render(
     @jax.jit
     def vertex_processing(
         gl_VertexID: Integer[Array, ""],
-        _extra: tuple[Any, ...],
-    ) -> tuple[PerVertexInScreen, tuple[Any, ...]]:
+        _extra: VertexShaderExtraInputT,
+    ) -> tuple[PerVertexInScreen, VaryingT]:
         per_vertex: PerVertex
-        varying: tuple[Any, ...]
+        varying: VaryingT
         per_vertex, varying = shader.vertex(
             gl_VertexID,
             gl_InstanceID,
@@ -264,11 +284,14 @@ def render(
         assert isinstance(per_vertex, PerVertex)
         assert isinstance(varying, tuple)
 
-        clip_coord: Vec4f = normalise_homogeneous(per_vertex.gl_Position)
-        assert isinstance(clip_coord, Vec4f)
+        # TODO: add clipping in clip space.
+
+        # NDC, normalised device coordinate
+        ndc: Vec4f = normalise_homogeneous(per_vertex.gl_Position)
+        assert isinstance(ndc, Vec4f)
 
         # already normalised; result is still normalised
-        screen: Vec4f = camera.viewport @ clip_coord
+        screen: Vec4f = camera.viewport @ ndc
         assert isinstance(screen, Vec4f)
 
         vertex_with_screen: PerVertexInScreen
