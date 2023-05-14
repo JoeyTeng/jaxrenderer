@@ -71,8 +71,7 @@ def _postprocessing(
             screen: Triangle = primitive.gl_Position
 
             # 2d screen coordinates
-            # use `/ [:, 2:3]` to assist broadcasting
-            screen2d: Triangle2Df = screen[:, :2] / screen[:, 2:3]
+            screen2d: Triangle2Df = screen[:, :2]
             assert isinstance(screen2d, Triangle2Df)
 
             # PROCESS: Rasterisation (Interpolate)
