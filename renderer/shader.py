@@ -1,11 +1,11 @@
 from abc import ABC, abstractmethod
-from typing import Any, NamedTuple
+from typing import Generic, NamedTuple, TypeVar
 
 import jax
 import jax.lax as lax
 import jax.numpy as jnp
 from jax.tree_util import Partial, tree_map
-from jaxtyping import Array, Bool, Float, Integer, jaxtyped
+from jaxtyping import Array, Bool, Float, Integer, Shaped, jaxtyped
 
 from .geometry import Camera, Interpolation, interpolate
 from .types import NAN_ARRAY, TRUE_ARRAY, Vec2f, Vec3f, Vec4f
@@ -13,6 +13,11 @@ from .types import NAN_ARRAY, TRUE_ARRAY, Vec2f, Vec3f, Vec4f
 jax.config.update('jax_array', True)
 
 ID = Integer[Array, ""]
+
+VertexShaderExtraInputT = TypeVar(
+    'VertexShaderExtraInputT',
+    bound=tuple[Shaped[Array, "..."], ...],
+)
 
 
 class PerVertex(NamedTuple):
@@ -37,10 +42,16 @@ class PerFragment(NamedTuple):
     keeps: Bool[Array, ""] = TRUE_ARRAY
 
 
-VaryingT = tuple
+VaryingT = TypeVar(
+    "VaryingT",
+    bound=tuple[Shaped[Array, "..."], ...],
+)
 """The user-defined input and second (extra) output of fragment shader."""
 
-MixedExtraT = tuple
+MixedExtraT = TypeVar(
+    "MixedExtraT",
+    bound=tuple[Shaped[Array, "..."], ...],
+)
 """The user-defined second (extra) output of mix shader."""
 
 
@@ -54,7 +65,7 @@ class MixerOutput(NamedTuple):
     zbuffer: Float[Array, ""]
 
 
-class Shader(ABC):
+class Shader(ABC, Generic[VertexShaderExtraInputT, VaryingT, MixedExtraT]):
     """Base class for customised shader.
 
     Since JAX is pure functional (stateless), the state will be passed by
@@ -71,10 +82,10 @@ class Shader(ABC):
     @jax.jit
     @abstractmethod
     def vertex(
-            gl_VertexID: ID,
-            gl_InstanceID: ID,
-            camera: Camera,
-            extra: tuple[Any, ...] = tuple(),
+        gl_VertexID: ID,
+        gl_InstanceID: ID,
+        camera: Camera,
+        extra: VertexShaderExtraInputT,
     ) -> tuple[PerVertex, VaryingT]:
         """Override this to implement the vertex shader as defined by OpenGL.
 

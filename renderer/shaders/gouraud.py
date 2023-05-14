@@ -16,21 +16,8 @@ class GouraudExtraVertexInput(NamedTuple):
     colour: Colour
 
 
-class GouraudExtraVertexOutput(NamedTuple):
-    colour: Colour
-
-
 class GouraudExtraFragmentData(NamedTuple):
     colour: Colour = jnp.array([0.0, 0.0, 0.0, 1.0])
-
-
-class GouraudExtraFragmentOutput(NamedTuple):
-    """When render to only one target, for simplicity.
-
-    Reference:
-      - https://stackoverflow.com/questions/51459596/using-gl-fragcolor-vs-out-vec4-color
-    """
-    gl_FragColor: Colour
 
 
 class GouraudExtraMixerOutput(NamedTuple):
@@ -38,7 +25,8 @@ class GouraudExtraMixerOutput(NamedTuple):
     canvas: Colour
 
 
-class GouraudShader(Shader):
+class GouraudShader(Shader[GouraudExtraVertexInput, GouraudExtraFragmentData,
+                           GouraudExtraMixerOutput]):
     """Gouraud Shading without lighting."""
 
     @staticmethod
@@ -49,14 +37,14 @@ class GouraudShader(Shader):
         gl_InstanceID: ID,
         camera: Camera,
         extra: GouraudExtraVertexInput,
-    ) -> tuple[PerVertex, GouraudExtraVertexOutput]:
+    ) -> tuple[PerVertex, GouraudExtraFragmentData]:
         position: Vec4f = to_homogeneous(extra.position)
         gl_Position: Vec4f = camera.to_clip(position)
         assert isinstance(gl_Position, Vec4f)
 
         return (
             PerVertex(gl_Position=gl_Position),
-            GouraudExtraVertexOutput(colour=extra.colour),
+            GouraudExtraFragmentData(colour=extra.colour),
         )
 
     @staticmethod
