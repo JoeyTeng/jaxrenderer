@@ -272,7 +272,9 @@ def render(
     gl_InstanceID: ID
     with jax.ensure_compile_time_eval():
         vertices_count = extra[0].shape[0]
-        gl_InstanceID = jnp.zeros((1, ))
+        gl_InstanceID = jnp.array(0, dtype=int)
+        assert isinstance(vertices_count, int)
+        assert isinstance(gl_InstanceID, ID)
 
     @jaxtyped
     @jax.jit
@@ -312,7 +314,8 @@ def render(
     buffers = _postprocessing(
         shader=shader,
         buffers=buffers,
-        per_primitive=tree_map(lambda field: field[face_indices], per_vertices),
+        per_primitive=tree_map(lambda field: field[face_indices],
+                               per_vertices),
         varyings=tree_map(lambda field: field[face_indices], varyings),
         extra=extra,
     )
