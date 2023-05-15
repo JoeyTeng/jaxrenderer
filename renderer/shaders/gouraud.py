@@ -5,7 +5,7 @@ import jax.numpy as jnp
 from jaxtyping import Array, Bool, Float, jaxtyped
 
 from ..shader import ID, PerFragment, PerVertex, Shader
-from ..geometry import Camera, to_homogeneous
+from ..geometry import Camera, normalise, to_homogeneous
 from ..types import Colour, LightSource, Vec2f, Vec3f, Vec4f
 
 jax.config.update('jax_array', True)
@@ -47,8 +47,11 @@ class GouraudShader(Shader[GouraudExtraVertexInput, GouraudExtraFragmentData,
         # assume normal here is in world space. If it is in model space, it
         # must be transformed by the inverse transpose of the model matrix.
         # Ref: https://github.com/ssloy/tinyrenderer/wiki/Lesson-5:-Moving-the-camera#transformation-of-normal-vectors
-        normal: Vec3f = extra.normal
-        intensity: Float[Array, ""] = jnp.dot(normal, extra.light.direction)
+        normal: Vec3f = normalise(extra.normal)
+        intensity: Float[Array, ""] = jnp.dot(
+            normal,
+            normalise(extra.light.direction),
+        )
         assert isinstance(intensity, Float[Array, ""])
 
         colour: Colour = extra.colour * extra.light.colour * intensity
