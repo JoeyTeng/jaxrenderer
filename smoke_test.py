@@ -3,7 +3,7 @@ import jax.lax as lax
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
 
-from renderer.shaders.gouraud import GouraudShader, GouraudExtraVertexInput
+from renderer.shaders.gouraud import GouraudShader, GouraudExtraInput
 from renderer.pipeline import render
 from renderer.geometry import Camera
 from renderer.types import Buffers, LightSource
@@ -57,7 +57,7 @@ position = jnp.array((
     (-1, -1, 1.),
     (-2, 0., 0.),
 ))
-extra = GouraudExtraVertexInput(
+extra = GouraudExtraInput(
     position=position,
     colour=jnp.array((
         (1., 0., 0.),
@@ -68,10 +68,7 @@ extra = GouraudExtraVertexInput(
         (1., 1., 0.),
     )),
     normal=jax.vmap(lambda _: LightSource().direction)(position),
-    light=LightSource(
-        direction=jax.vmap(lambda _: LightSource().direction)(position),
-        colour=jax.vmap(lambda _: LightSource().colour)(position),
-    ),
+    light=LightSource(),
 )
 
 result = render(camera, GouraudShader, buffers, face_indices, extra)

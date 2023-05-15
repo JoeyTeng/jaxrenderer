@@ -11,7 +11,7 @@ from jaxtyping import Array, Bool, Integer, Num, jaxtyped
 from .geometry import (Camera, Interpolation, barycentric, interpolate,
                        normalise_homogeneous)
 from .shader import (ID, MixedExtraT, MixerOutput, PerFragment, PerVertex,
-                     Shader, VaryingT, VertexShaderExtraInputT)
+                     Shader, VaryingT, ShaderExtraInputT)
 from .types import (FALSE_ARRAY, Buffers, FaceIndices, Triangle, Triangle2Df,
                     Vec2f, Vec2i, Vec3f, Vec4f)
 
@@ -43,12 +43,12 @@ class PerPrimitive(NamedTuple):
 @jaxtyped
 @partial(jax.jit, static_argnames=("shader", ), donate_argnums=(1, ))
 def _postprocessing(
-    shader: Union[Shader[VertexShaderExtraInputT, VaryingT, MixedExtraT],
-                  type[Shader[VertexShaderExtraInputT, VaryingT,
-                              MixedExtraT]]],
+    shader: Union[Shader[ShaderExtraInputT, VaryingT, MixedExtraT],
+                  type[Shader[ShaderExtraInputT, VaryingT, MixedExtraT]]],
     buffers: Buffers,
     per_primitive: tuple[Any, ...],  # Batch PerPrimitive
     varyings: VaryingT,
+    extra: ShaderExtraInputT,
 ) -> Buffers:
     with jax.ensure_compile_time_eval():
         # loop along first axis, for memory efficiency
@@ -121,7 +121,8 @@ def _postprocessing(
                     gl_FragCoord=gl_FragCoord,
                     gl_FrontFacing=gl_FrontFacing,
                     gl_PointCoord=gl_PointCoord,
-                    extra=varying,
+                    varying=varying,
+                    extra=extra,
                 )
                 assert isinstance(per_frag, PerFragment)
                 assert isinstance(extra_fragment_output, tuple)
@@ -261,12 +262,11 @@ def _postprocessing(
 @partial(jax.jit, static_argnames=("shader", ), donate_argnums=(2, ))
 def render(
     camera: Camera,
-    shader: Union[Shader[VertexShaderExtraInputT, VaryingT, MixedExtraT],
-                  type[Shader[VertexShaderExtraInputT, VaryingT,
-                              MixedExtraT]]],
+    shader: Union[Shader[ShaderExtraInputT, VaryingT, MixedExtraT],
+                  type[Shader[ShaderExtraInputT, VaryingT, MixedExtraT]]],
     buffers: Buffers,
     face_indices: FaceIndices,
-    extra: VertexShaderExtraInputT,
+    extra: ShaderExtraInputT,
 ) -> Buffers:
     vertices_count: int
     gl_InstanceID: ID
@@ -277,8 +277,7 @@ def render(
     @jaxtyped
     @jax.jit
     def vertex_processing(
-        gl_VertexID: Integer[Array, ""],
-        _extra: VertexShaderExtraInputT,
+            gl_VertexID: Integer[Array, ""],  #
     ) -> tuple[PerVertexInScreen, VaryingT]:
         """Process one vertex into screen space, and keep varying values."""
         per_vertex: PerVertex
@@ -287,7 +286,7 @@ def render(
             gl_VertexID,
             gl_InstanceID,
             camera,
-            _extra,
+            extra,
         )
         assert isinstance(per_vertex, PerVertex)
         assert isinstance(varying, tuple)
@@ -307,15 +306,15 @@ def render(
     # PROCESS: Vertex Processing
     per_vertices, varyings = jax.vmap(vertex_processing)(
         lax.iota(int, vertices_count),  # gl_VertexID
-        extra,  # extra
     )
 
     # everything after vertex processing, will directly update buffers
     buffers = _postprocessing(
-        shader,
-        buffers,
-        tree_map(lambda field: field[face_indices], per_vertices),
-        tree_map(lambda field: field[face_indices], varyings),
+        shader=shader,
+        buffers=buffers,
+        per_primitive=tree_map(lambda field: field[face_indices], per_vertices),
+        varyings=tree_map(lambda field: field[face_indices], varyings),
+        extra=extra,
     )
     assert isinstance(buffers, Buffers)
 
