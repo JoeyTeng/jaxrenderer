@@ -4,26 +4,33 @@ from typing import List
 
 import jax
 import jax.numpy as jnp
-from jaxtyping import Array, Float, Integer
+from jaxtyping import jaxtyped
 import numpy as np
 from PIL import Image
 
+from renderer.types import (FaceIndices, Normals, Texture, UVCoordinates,
+                            Vec2f, Vec3f, Vertices)
+
 jax.config.update('jax_array', True)
 
-FaceIndices = Integer[Array, "faces 3"]
-Vertices = Float["vertices 3"]
-Texture = Float[Array, "textureWidth textureHeight channel"]
-Vec3 = Float[Array, "3"]
 
-
-@dataclass()
+@dataclass(frozen=True)
 class Model:
     verts: Vertices
+    norms: Normals
+    uv: UVCoordinates
     faces: FaceIndices
+    faces_norm: FaceIndices
+    faces_uv: FaceIndices
 
+    @jaxtyped
     def __post_init__(self):
-        assert self.verts.shape[1] == 3
-        assert jnp.ndim(self.faces) == 2
+        assert isinstance(self.verts, Vertices), self.verts.shape
+        assert isinstance(self.norms, Vertices), self.norms.shape
+        assert isinstance(self.uv, UVCoordinates), self.uv.shape
+        assert isinstance(self.faces, FaceIndices), self.faces.shape
+        assert isinstance(self.faces_norm, FaceIndices), self.faces_norm.shape
+        assert isinstance(self.faces_uv, FaceIndices), self.faces_uv.shape
 
     @property
     def nverts(self) -> int:
@@ -35,28 +42,56 @@ class Model:
 
 
 def make_model(fileContent: List[str]) -> Model:
-    verts: List[Vec3] = []
+    verts: List[Vec3f] = []
+    norms: List[Vec3f] = []
+    uv: List[Vec2f] = []
     faces: List[List[int]] = []
+    faces_norm: List[List[int]] = []
+    faces_uv: List[List[int]] = []
 
     _float = re.compile(r"(-?\d+\.?\d*(?:e[+-]\d+)?)")
     _integer = re.compile(r"\d+")
     _one_vertex = re.compile(r"\d+/\d*/\d*")
     for line in fileContent:
         if line.startswith("v "):
-            vert: Vec3 = tuple(map(float, _float.findall(line, 2)[:3]))
+            vert: Vec3f = tuple(map(float, _float.findall(line, 2)[:3]))
             verts.append(vert)
+        elif line.startswith("vn "):
+            norm: Vec3f = tuple(map(float, _float.findall(line, 2)[:3]))
+            norms.append(norm)
+        elif line.startswith("vt "):
+            uv_coord: Vec2f = tuple(map(float, _float.findall(line, 2)[:2]))
+            uv.append(uv_coord)
         elif line.startswith("f "):
-            face: List[int] = list(
-                map(
-                    lambda index: int(index) - 1,  # indexed from 1 in .obj
-                    map(
-                        lambda x: _integer.search(x)[0],  # pick first int
-                        _one_vertex.findall(line),  # split into vertices
-                    ),
-                ))
-            faces.append(face)
+            face: List[int] = []
+            face_norm: List[int] = []
+            face_uv: List[int] = []
 
-    return Model(jnp.array(verts), jnp.array(faces))
+            vertices: List[str] = _one_vertex.findall(line)
+            assert len(vertices) == 3, ("Expected 3 vertices, "
+                                        f"(got {len(vertices)}")
+            for vertex in _one_vertex.findall(line):
+                indices: List[int] = list(map(int, _integer.findall(vertex)))
+                assert len(indices) == 3, ("Expected 3 indices (v/vt/vn), "
+                                           f"got {len(indices)}")
+                v, vt, vn = indices
+                # indexed from 1 in Wavefront Obj
+                face.append(v - 1)
+                face_norm.append(vn - 1)
+                face_uv.append(vt - 1)
+
+            faces.append(face)
+            faces_norm.append(face_norm)
+            faces_uv.append(face_uv)
+
+    return Model(
+        verts=jnp.array(verts),
+        norms=jnp.array(norms),
+        uv=jnp.array(uv),
+        faces=jnp.array(faces),
+        faces_norm=jnp.array(faces_norm),
+        faces_uv=jnp.array(faces_uv),
+    )
 
 
 def load_tga(path: str) -> Texture:

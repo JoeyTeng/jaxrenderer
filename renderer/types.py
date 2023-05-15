@@ -40,6 +40,8 @@ TriangleBarycentric = Float[Array, "3 3"]
 FaceIndices = Integer[Array, "faces 3"]
 # each vertex is defined by 3 float numbers, x-y-z
 Vertices = Float[Array, "vertices 3"]
+Normals = Float[Array, "normals 3"]
+UVCoordinates = Float[Array, "uv_counts 2"]
 Texture = Float[Array, "textureWidth textureHeight channel"]
 
 
