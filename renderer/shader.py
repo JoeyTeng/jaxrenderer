@@ -14,10 +14,11 @@ jax.config.update('jax_array', True)
 
 ID = Integer[Array, ""]
 
-VertexShaderExtraInputT = TypeVar(
-    'VertexShaderExtraInputT',
+ShaderExtraInputT = TypeVar(
+    'ShaderExtraInputT',
     bound=PyTree[Shaped[Array, "..."]],
 )
+"""Extra input for vertex shader & fragment shader, shared by all."""
 
 
 class PerVertex(NamedTuple):
@@ -65,7 +66,7 @@ class MixerOutput(NamedTuple):
     zbuffer: Float[Array, ""]
 
 
-class Shader(ABC, Generic[VertexShaderExtraInputT, VaryingT, MixedExtraT]):
+class Shader(ABC, Generic[ShaderExtraInputT, VaryingT, MixedExtraT]):
     """Base class for customised shader.
 
     Since JAX is pure functional (stateless), the state will be passed by
@@ -80,7 +81,7 @@ class Shader(ABC, Generic[VertexShaderExtraInputT, VaryingT, MixedExtraT]):
         gl_VertexID: ID,
         gl_InstanceID: ID,
         camera: Camera,
-        extra: VertexShaderExtraInputT,
+        extra: ShaderExtraInputT,
     ) -> tuple[PerVertex, VaryingT]:
         """Override this to implement the vertex shader as defined by OpenGL.
 
@@ -109,7 +110,8 @@ class Shader(ABC, Generic[VertexShaderExtraInputT, VaryingT, MixedExtraT]):
           - camera: Camera [extra input, not in GLSL]
             contains model_view, viewport, and projection matrices.
           - extra: Camera [extra input, not in GLSL]
-            contains model_view, viewport, and projection matrices.
+            User-defined extra input for vertex shader, shared by all. They are
+            **not** split over batch axis 0, if any; but directly passed in.
 
 
         Return: PerVertex (used for internals) and ExtraPerVertexOutput to be
@@ -172,25 +174,27 @@ class Shader(ABC, Generic[VertexShaderExtraInputT, VaryingT, MixedExtraT]):
         gl_FragCoord: Vec4f,
         gl_FrontFacing: Bool[Array, ""],
         gl_PointCoord: Vec2f,
-        extra: VaryingT,
+        varying: VaryingT,
+        extra: ShaderExtraInputT,
     ) -> tuple[PerFragment, VaryingT]:
         """Override this to implement the vertex shader as defined by OpenGL.
 
         This is optional. The default implementation writes nothing and thus
         `gl_FragDepth` further down the pipeline will use `gl_FragCoord[2]`.
-        For the `extra` input, it will be returned directly untouched.
+        For the `varying` input, it will be returned directly untouched.
 
         Parameters:
           - gl_FragCoord: homogeneous coordinates in screen device space.
           - gl_FrontFacing: True if the primitive is NOT back facing.
           - gl_PointCoord: 2d coordinates in screen device space.
-          - extra: interpolated values from `Shader.interpolate`; these are
+          - varying: interpolated values from `Shader.interpolate`; these are
             generated from `Shader.vertex`.
+          - extra: ShaderExtraInputT, same as `extra` in `Shader.vertex`.
 
         Return: PerFragment for depth test and further mixing process.
           - gl_FragDepth: if not set (remains None), gl_FragCoord[2] will be
             used later.
-          - extra: defined by user, passed as `extra` in `Shader.mix`.
+          - varying: defined by user, passed as `varying` in `Shader.mix`.
             **NOTE** the return type must be the same type as `values` in
             `Shader.interpolate`, as that will be used as the dummy value for
             this return value, when `PerFragment` suggests `keeps` is False.
@@ -199,7 +203,7 @@ class Shader(ABC, Generic[VertexShaderExtraInputT, VaryingT, MixedExtraT]):
           - [Fragment Shader/Defined Inputs](https://www.khronos.org/opengl/wiki/Fragment_Shader/Defined_Inputs)
           - [Fragment Shader#Outputs](https://www.khronos.org/opengl/wiki/Fragment_Shader#Outputs)
         """
-        return PerFragment(), extra
+        return PerFragment(), varying
 
     @staticmethod
     @jaxtyped
