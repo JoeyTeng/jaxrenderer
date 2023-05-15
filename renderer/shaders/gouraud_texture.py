@@ -3,11 +3,10 @@ from typing import NamedTuple
 import jax
 import jax.lax as lax
 import jax.numpy as jnp
-from jax.tree_util import tree_map
-from jaxtyping import Array, Bool, Float, Integer, jaxtyped
+from jaxtyping import Array, Bool, Float, jaxtyped
 
-from ..shader import ID, MixerOutput, PerFragment, PerVertex, Shader
 from ..geometry import Camera, normalise, to_homogeneous
+from ..shader import ID, MixerOutput, PerFragment, PerVertex, Shader
 from ..types import Colour, LightSource, Texture, Vec2f, Vec3f, Vec4f
 
 jax.config.update('jax_array', True)
