@@ -105,7 +105,11 @@ class GouraudTextureShader(Shader[GouraudTextureExtraInput,
         return (
             PerFragment(
                 gl_FragDepth=built_in.gl_FragDepth,
-                keeps=jnp.logical_and(built_in.keeps, gl_FrontFacing),
+                keeps=jnp.array((
+                    built_in.keeps,
+                    gl_FrontFacing,
+                    (light_colour >= 0).all(),
+                )).all(),
             ),
             GouraudTextureExtraFragmentData(
                 colour=texture_colour * light_colour,
