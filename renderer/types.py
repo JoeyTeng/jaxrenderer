@@ -43,6 +43,7 @@ Vertices = Float[Array, "vertices 3"]
 Normals = Float[Array, "normals 3"]
 UVCoordinates = Float[Array, "uv_counts 2"]
 Texture = Float[Array, "textureWidth textureHeight channel"]
+NormalMap = Float[Array, "textureWidth textureHeight 3"]
 
 
 class DtypeInfo(NamedTuple):
