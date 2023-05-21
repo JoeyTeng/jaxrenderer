@@ -18,7 +18,9 @@ class GouraudTextureExtraInput(NamedTuple):
     Attributes:
       - position: in world space, of each vertex.
       - normal: in world space, of each vertex.
+      - uv: in texture space, of each vertex.
       - light: parallel light source, shared by all vertices.
+      - texture: texture, shared by all vertices.
     """
     position: Float[Array, "vertices 3"]  # in world space
     normal: Float[Array, "vertices 3"]  # in world space

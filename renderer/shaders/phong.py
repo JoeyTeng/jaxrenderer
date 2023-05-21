@@ -18,7 +18,9 @@ class PhongTextureExtraInput(NamedTuple):
     Attributes:
       - position: in world space, of each vertex.
       - normal: in world space, of each vertex.
+      - uv: in texture space, of each vertex.
       - light: parallel light source, shared by all vertices.
+      - texture: texture, shared by all vertices.
     """
     position: Float[Array, "vertices 3"]  # in world space
     normal: Float[Array, "vertices 3"]  # in world space
@@ -28,6 +30,13 @@ class PhongTextureExtraInput(NamedTuple):
 
 
 class PhongTextureExtraFragmentData(NamedTuple):
+    """From vertex shader to fragment shader, and from fragment shader to mixer.
+
+    Attributes:
+      - normal: in clip space, of each fragment; From VS to FS.
+      - uv: in texture space, of each fragment; From VS to FS.
+      - colour: colour when passing from FS to mixer.
+    """
     normal: Vec3f = jnp.array([0.0, 0.0, 0.0])
     uv: Vec2f = jnp.zeros(2)
     colour: Colour = jnp.array([0.0, 0.0, 0.0])
