@@ -324,6 +324,49 @@ class Camera(NamedTuple):
     @staticmethod
     @jaxtyped
     @jax.jit
+    def orthographic_projection_matrix(
+        left: jnp.floating[Any],
+        right: jnp.floating[Any],
+        bottom: jnp.floating[Any],
+        top: jnp.floating[Any],
+        z_near: jnp.floating[Any],
+        z_far: jnp.floating[Any],
+    ) -> Projection:
+        """Create a projection matrix to map the model in the camera frame (eye
+            coordinates) onto the viewing volume (clip coordinates), using
+            orthographic transformation. This follows the implementation in
+            OpenGL (glOrtho).
+
+        Parameters:
+          - left, right: Specifies the coordinates for the left and right
+            vertical clipping planes.
+          - bottom, top: Specifies the coordinates for the bottom and top
+            horizontal clipping planes..
+          - z_near, z_far: Specifies the distances from the viewer to the
+            nearer and farther depth clipping planes. These values are negative
+            if they are behind the viewer.
+
+        Return: Projection, (4, 4) matrix.
+
+        Reference:
+          - [glOrtho](https://registry.khronos.org/OpenGL-Refpages/gl2.1/xhtml/glOrtho.xml)
+        """
+        l_op: Float[Array, "3"] = jnp.array([right, top, z_far])
+        r_op: Float[Array, "3"] = jnp.array([left, bottom, z_near])
+        projection: Projection = (
+            jnp.zeros((4, 4), dtype=jnp.single)  #
+            .at[0, 0].set(2 / (right - left))  #
+            .at[1, 1].set(2 / (top - bottom))  #
+            .at[2, 2].set(-2 / (z_far - z_near))  #
+            .at[3, 3].set(1)  #
+            .at[:3, 3].set(-(l_op + r_op) / (l_op - r_op))  #
+        )
+
+        return projection
+
+    @staticmethod
+    @jaxtyped
+    @jax.jit
     def perspective_projection_matrix_tinyrenderer(
         eye: Vec3f,
         centre: Vec3f,
