@@ -6,12 +6,15 @@ from matplotlib import pyplot as plt
 
 from renderer.geometry import Camera
 from renderer.pipeline import render
+from renderer.shaders.depth import DepthExtraInput, DepthShader
 from renderer.shaders.gouraud import GouraudExtraInput, GouraudShader
 from renderer.shaders.gouraud_texture import (GouraudTextureExtraInput,
                                               GouraudTextureShader)
 from renderer.shaders.phong import PhongTextureExtraInput, PhongTextureShader
-from renderer.shaders.phong_darboux import PhongTextureDarbouxExtraInput, PhongTextureDarbouxShader
-from renderer.types import Buffers, FaceIndices, LightSource, NormalMap, Texture
+from renderer.shaders.phong_darboux import (PhongTextureDarbouxExtraInput,
+                                            PhongTextureDarbouxShader)
+from renderer.types import (Buffers, FaceIndices, LightSource, NormalMap,
+                            Texture)
 from renderer.utils import transpose_for_display
 from test_resources.utils import Model, load_tga, make_model
 
@@ -274,6 +277,59 @@ def phong_shader_with_texture_nm_tangent(
     axs[1].imshow(transpose_for_display(result.targets[0]), origin='lower')
 
 
+def depth_shader(model: Model):
+    light = LightSource(direction=jnp.array((0., 0., 1.)))
+    eye = jnp.array((1, 1, 3.))
+    center = jnp.array((0, 0, 0))
+    up = jnp.array((0, 1, 0))
+
+    width = height = 800
+    lowerbound = jnp.zeros(2, dtype=int)
+    dimension = jnp.array((width, height))
+    depth = 1.
+
+    camera: Camera = Camera.create(
+        model_view=Camera.model_view_matrix(
+            eye=light.direction,
+            centre=center,
+            up=up,
+        ),
+        projection=Camera.orthographic_projection_matrix(
+            left=-1.,
+            right=1.,
+            bottom=-1.,
+            top=1.,
+            z_near=-1.,
+            z_far=1.,
+        ),
+        viewport=Camera.viewport_matrix(
+            lowerbound=lowerbound,
+            dimension=dimension,
+            depth=depth,
+        ),
+    )
+
+    buffers = Buffers(
+        zbuffer=lax.full((width, height), 0.),
+        targets=tuple(),
+    )
+
+    extra = DepthExtraInput(position=model.verts)
+
+    result = render(
+        camera,
+        DepthShader,
+        buffers,
+        model.faces,
+        extra,
+    )
+
+    # show
+    fig, axs = plt.subplots(figsize=(8, 8))
+
+    axs.imshow(transpose_for_display(result.zbuffer), origin='lower')
+
+
 if __name__ == '__main__':
     model = make_model(open('test_resources/obj/african_head.obj').readlines())
     # gouraud_shader_with_simple_light(model)
@@ -284,5 +340,7 @@ if __name__ == '__main__':
     # phong_shader_with_texture(model, texture)
     # plt.show()
     normal_darboux = load_tga('test_resources/tga/african_head_nm_tangent.tga')
-    phong_shader_with_texture_nm_tangent(model, texture, normal_darboux)
+    # phong_shader_with_texture_nm_tangent(model, texture, normal_darboux)
+    # plt.show()
+    depth_shader(model)
     plt.show()
