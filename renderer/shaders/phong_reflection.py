@@ -20,7 +20,7 @@ class PhongReflectionTextureExtraInput(NamedTuple):
       - normal: in world space, of each vertex.
       - uv: in texture space, of each vertex.
       - light: parallel light source, shared by all vertices.
-      - light_dir_clip: normalised light source direction in clip space.
+      - light_dir_eye: normalised light source direction in eye space.
       - texture: texture, shared by all vertices.
       - specular_map: specular map, shared by all vertices.
       - ambient: ambient strength, shared by all vertices.
@@ -31,7 +31,7 @@ class PhongReflectionTextureExtraInput(NamedTuple):
     normal: Float[Array, "vertices 3"]  # in world space
     uv: Float[Array, "vertices 2"]  # in texture space
     light: LightSource
-    light_dir_clip: Vec3f
+    light_dir_eye: Vec3f  # in eye/view space
     texture: Texture
     specular_map: SpecularMap
     ambient: Colour
@@ -116,7 +116,7 @@ class PhongReflectionTextureShader(
         texture_colour: Colour = extra.texture[uv[0], uv[1]]
 
         normal: Vec3f = normalise(varying.normal)
-        light_dir: Vec3f = extra.light_dir_clip
+        light_dir: Vec3f = extra.light_dir_eye
 
         diffuse: float = lax.dot(normal, light_dir)
         reflected_light: Vec3f = normalise(light_dir - 2 * diffuse * normal)

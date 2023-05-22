@@ -250,13 +250,13 @@ def phong_shader_with_texture_phong_reflection(
 
     # is not affected by projection, thus only need to transform by model_view
     # into view space.
-    light_dir_clip: Vec3f = normalise(
+    light_dir_eye: Vec3f = normalise(
         to_cartesian(camera.model_view @ (to_homogeneous(
             normalise(light.direction.copy()),
             0.,
         ))))
 
-    assert isinstance(light_dir_clip, Vec3f)
+    assert isinstance(light_dir_eye, Vec3f)
 
     extra = PhongReflectionTextureExtraInput(
         # flatten so each vertex has its own "extra"
@@ -264,7 +264,7 @@ def phong_shader_with_texture_phong_reflection(
         normal=model.norms[model.faces_norm.reshape((-1, ))],
         uv=uv,
         light=light,
-        light_dir_clip=light_dir_clip,
+        light_dir_eye=light_dir_eye,
         texture=texture,
         specular_map=specular_map,
         ambient=lax.full((3, ), 5. / 255),
