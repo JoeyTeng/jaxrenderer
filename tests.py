@@ -4,7 +4,7 @@ import jax.numpy as jnp
 from jaxtyping import Array, Integer
 from matplotlib import pyplot as plt
 
-from renderer.geometry import Camera
+from renderer.geometry import Camera, World2Screen, normalise, to_cartesian, to_homogeneous
 from renderer.pipeline import render
 from renderer.shaders.depth import DepthExtraInput, DepthShader
 from renderer.shaders.gouraud import GouraudExtraInput, GouraudShader
@@ -13,8 +13,9 @@ from renderer.shaders.gouraud_texture import (GouraudTextureExtraInput,
 from renderer.shaders.phong import PhongTextureExtraInput, PhongTextureShader
 from renderer.shaders.phong_darboux import (PhongTextureDarbouxExtraInput,
                                             PhongTextureDarbouxShader)
+from renderer.shaders.phong_reflection import PhongReflectionTextureExtraInput, PhongReflectionTextureShader
 from renderer.types import (Buffers, FaceIndices, LightSource, NormalMap,
-                            Texture)
+                            SpecularMap, Texture, Vec3f, ZBuffer)
 from renderer.utils import transpose_for_display
 from test_resources.utils import Model, load_tga, make_model
 
@@ -200,6 +201,96 @@ def phong_shader_with_texture(model: Model, texture: Texture):
     axs[1].imshow(transpose_for_display(result.targets[0]), origin='lower')
 
 
+def phong_shader_with_texture_phong_reflection(
+    model: Model,
+    texture: Texture,
+    specular_map: SpecularMap,
+):
+    # light goes along 0, 0, 1
+    light = LightSource(direction=jnp.array((0., 0., -1.)))
+    eye = jnp.array((1, 1, 3.))
+    center = jnp.array((0, 0, 0))
+    up = jnp.array((0, 1, 0))
+
+    width = height = 800
+    lowerbound = jnp.zeros(2, dtype=int)
+    dimension = jnp.array((width, height))
+    depth = 1.
+
+    camera: Camera = Camera.create(
+        model_view=Camera.model_view_matrix(eye=eye, centre=center, up=up),
+        projection=Camera.perspective_projection_matrix(
+            fovy=40.,
+            aspect=1.,
+            z_near=-1,
+            z_far=1.,
+        ),
+        viewport=Camera.viewport_matrix(
+            lowerbound=lowerbound,
+            dimension=dimension,
+            depth=depth,
+        ),
+    )
+
+    buffers = Buffers(
+        zbuffer=lax.full((width, height), -20.),
+        targets=(lax.full((width, height, 3), 0.), ),
+    )
+    uv = (
+        # reverse along y direction
+        (model.uv[model.faces_uv.reshape((-1, ))].at[:, 1].multiply(-1))
+        # scale to the dimension of texture map
+        * jnp.array(texture.shape[:2])[None, ...])
+    # swap x, y axis
+    texture = transpose_for_display(texture / 255.)
+    assert isinstance(texture, Texture)
+    # swap x, y axis
+    specular_map = transpose_for_display(specular_map)
+    assert isinstance(specular_map, SpecularMap)
+
+    # is not affected by projection, thus only need to transform by model_view
+    # into view space.
+    light_dir_clip: Vec3f = normalise(
+        to_cartesian(camera.model_view @ (to_homogeneous(
+            normalise(light.direction.copy()),
+            0.,
+        ))))
+
+    assert isinstance(light_dir_clip, Vec3f)
+
+    extra = PhongReflectionTextureExtraInput(
+        # flatten so each vertex has its own "extra"
+        position=model.verts[model.faces.reshape((-1, ))],
+        normal=model.norms[model.faces_norm.reshape((-1, ))],
+        uv=uv,
+        light=light,
+        light_dir_clip=light_dir_clip,
+        texture=texture,
+        specular_map=specular_map,
+        ambient=lax.full((3, ), 5. / 255),
+        diffuse=lax.full((3, ), .4),
+        specular=lax.full((3, ), .6),
+    )
+
+    result = render(
+        camera,
+        PhongReflectionTextureShader,
+        buffers,
+        # such that vertex (3i, 3i + 1, 3i + 2) corresponds to primitive i
+        jnp.arange(model.nfaces * 3).reshape((model.nfaces, 3)),
+        extra,
+    )
+
+    # show
+    fig, axs = plt.subplots(ncols=2, sharex=True, sharey=True, figsize=(16, 8))
+
+    axs[0].imshow(transpose_for_display(result.zbuffer), origin='lower')
+    axs[1].imshow(
+        transpose_for_display(jnp.clip(result.targets[0], 0., 1.)),
+        origin='lower',
+    )
+
+
 def phong_shader_with_texture_nm_tangent(
     model: Model,
     texture: Texture,
@@ -339,6 +430,9 @@ if __name__ == '__main__':
     # plt.show()
     # phong_shader_with_texture(model, texture)
     # plt.show()
+    specular_map = load_tga('test_resources/tga/african_head_spec.tga')[..., 0]
+    phong_shader_with_texture_phong_reflection(model, texture, specular_map)
+    plt.show()
     normal_darboux = load_tga('test_resources/tga/african_head_nm_tangent.tga')
     # phong_shader_with_texture_nm_tangent(model, texture, normal_darboux)
     # plt.show()
