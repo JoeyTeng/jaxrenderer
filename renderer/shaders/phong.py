@@ -104,7 +104,7 @@ class PhongTextureShader(Shader[PhongTextureExtraInput,
         texture_colour: Colour = extra.texture[uv[0], uv[1]]
 
         # light colour * intensity
-        light_colour: Colour = texture_colour * extra.light.colour * lax.dot(
+        light_colour: Colour = extra.light.colour * lax.dot(
             normalise(varying.normal),
             normalise(extra.light.direction),
         )
