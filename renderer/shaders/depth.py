@@ -1,12 +1,11 @@
 from typing import NamedTuple
 
 import jax
-import jax.numpy as jnp
-from jaxtyping import Array, Bool, Float, jaxtyped
+from jaxtyping import Array, Float, jaxtyped
 
-from ..shader import ID, PerFragment, PerVertex, Shader
-from ..geometry import Camera, normalise, to_homogeneous
-from ..types import Colour, LightSource, Vec2f, Vec3f, Vec4f
+from ..shader import ID, PerVertex, Shader
+from ..geometry import Camera, to_homogeneous
+from ..types import Vec4f
 
 jax.config.update('jax_array', True)
 
