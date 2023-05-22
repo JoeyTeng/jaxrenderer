@@ -19,7 +19,8 @@ class PhongTextureExtraInput(NamedTuple):
       - position: in world space, of each vertex.
       - normal: in world space, of each vertex.
       - uv: in texture space, of each vertex.
-      - light: parallel light source, shared by all vertices.
+      - light: parallel `headlight` light source, shared by all vertices.
+        It is in the eye/view space.
       - texture: texture, shared by all vertices.
     """
     position: Float[Array, "vertices 3"]  # in world space
