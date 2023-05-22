@@ -209,7 +209,7 @@ class PhongTextureDarbouxShader(Shader[PhongTextureDarbouxExtraInput,
         texture_colour: Colour = extra.texture[uv[0], uv[1]]
 
         # light colour * intensity
-        light_colour: Colour = texture_colour * extra.light.colour * lax.dot(
+        light_colour: Colour = extra.light.colour * lax.dot(
             normal,
             normalise(extra.light.direction),
         )
