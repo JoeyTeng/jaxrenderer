@@ -1,5 +1,7 @@
 # Key Implementations of the Renderer
 
+This document describes the key implementations of the renderer. For the implementations of the shaders, refer to [shaders/README.md](shaders/README.md).
+
 ## Pipeline Design
 
 The design follows the [OpenGL rendering pipeline](https://www.khronos.org/opengl/wiki/Rendering_Pipeline_Overview) largely. Only relevant parts are included here.
