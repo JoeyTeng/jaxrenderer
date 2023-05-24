@@ -78,7 +78,9 @@ class PhongTextureShader(Shader[PhongTextureExtraInput,
             PerVertex(gl_Position=gl_Position),
             PhongTextureExtraFragmentData(
                 normal=normal,
-                uv=extra.uv[gl_VertexID],
+                # repeat texture
+                uv=extra.uv[gl_VertexID] %
+                jnp.asarray(extra.texture.shape[:2]),
             ),
         )
 

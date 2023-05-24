@@ -98,7 +98,9 @@ class PhongReflectionShadowTextureShader(
             PerVertex(gl_Position=gl_Position),
             PhongReflectionShadowTextureExtraFragmentData(
                 normal=normal,
-                uv=extra.uv[gl_VertexID],
+                # repeat texture
+                uv=extra.uv[gl_VertexID] %
+                jnp.asarray(extra.texture.shape[:2]),
             ),
         )
 

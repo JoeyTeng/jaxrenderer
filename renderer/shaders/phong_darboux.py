@@ -120,10 +120,14 @@ class PhongTextureDarbouxShader(Shader[PhongTextureDarbouxExtraInput,
 
         return (
             PerVertex(gl_Position=gl_Position),
-            PhongTextureDarbouxExtraFragmentData(normal=normal,
-                                                 uv=extra.uv[gl_VertexID],
-                                                 triangle=triangle_ndc,
-                                                 triangle_uv=triangle_uv),
+            PhongTextureDarbouxExtraFragmentData(
+                normal=normal,
+                # repeat texture
+                uv=extra.uv[gl_VertexID] %
+                jnp.asarray(extra.texture.shape[:2]),
+                triangle=triangle_ndc,
+                triangle_uv=triangle_uv,
+            ),
         )
 
     @staticmethod
@@ -182,7 +186,10 @@ class PhongTextureDarbouxShader(Shader[PhongTextureDarbouxExtraInput,
         assert isinstance(varying, PhongTextureDarbouxExtraFragmentData), (
             f"Expected PhongTextureDarbouxExtraFragmentData, got {varying}")
 
-        uv: Vec2i = lax.round(varying.uv).astype(int)
+        # Repeat texture.
+        uv: Vec2i = (lax.round(varying.uv).astype(int) %
+                     jnp.asarray(extra.texture.shape[:2]))
+
         normal: Vec3f = normalise(varying.normal)
         A: Float[Array, "3 3"] = jnp.vstack([
             varying.triangle[1, :] - varying.triangle[0, :],

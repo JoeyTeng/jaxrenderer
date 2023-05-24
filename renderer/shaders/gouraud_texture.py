@@ -77,7 +77,9 @@ class GouraudTextureShader(Shader[GouraudTextureExtraInput,
             PerVertex(gl_Position=gl_Position),
             GouraudTextureExtraFragmentData(
                 colour=light_colour,
-                uv=extra.uv[gl_VertexID],
+                # repeat texture
+                uv=extra.uv[gl_VertexID] %
+                jnp.asarray(extra.texture.shape[:2]),
             ),
         )
 
