@@ -110,6 +110,61 @@ def interpolate(
     return interpolated
 
 
+@jaxtyped
+@jax.jit
+def to_homogeneous(
+    coordinates: Float[Array, "*batch dim"],
+    value: Float[Array, "*batch"] = jnp.array(1.),
+) -> Float[Array, "*batch dim+1"]:
+    """Transform the coordinates to homogeneous coordinates by append a batch
+        of `value`s (default 1.) in the last axis."""
+    if not isinstance(value, Float[Array, "*batch"]):
+        value = jnp.array(value)
+
+    paddings: Float[Array, "*batch 1"] = jnp.broadcast_to(
+        value.astype(jax.dtypes.result_type(coordinates)),
+        (*coordinates.shape[:-1], 1),
+    )
+    homo_coords: Float[Array, "*batch dim+1"] = lax.concatenate(
+        (coordinates, paddings),
+        jnp.ndim(coordinates) - 1,
+    )
+
+    return homo_coords
+
+
+@jaxtyped
+@jax.jit
+def normalise_homogeneous(
+    coordinates: Float[Array, "*batch dim"], ) -> Float[Array, "*batch dim"]:
+    """Transform the homogenous coordinates to make the scale factor equals to
+        either 1 or 0, by divide every element with the last element on the
+        last axis.
+
+    Noted that when a coordinate is 0 and divides by 0, it will produce a nan;
+    for non-zero elements divides by 0, a inf will be produced.
+    """
+    return coordinates / coordinates[..., -1:]
+
+
+@jaxtyped
+@jax.jit
+def to_cartesian(
+    coordinates: Float[Array, "*batch dim"], ) -> Float[Array, "*batch dim-1"]:
+    """Transform the homogenous coordinates to cartesian coordinates by divide
+        every element with the last element on the last axis, then drop them.
+
+    When last component is 0, this function just discard the w-component
+    without division.
+    """
+    return jnp.where(
+        # if w component is 0, just discard it and return.
+        coordinates[..., -1:] == .0,
+        coordinates[..., :-1],
+        normalise_homogeneous(coordinates)[..., :-1],
+    )
+
+
 class Camera(NamedTuple):
     """Camera parameters.
 
@@ -464,61 +519,6 @@ def compute_normal(triangle_verts: Float[Array, "3 3"]) -> Float[Array, "3"]:
 @jax.jit
 def compute_normals(batch_verts: Float[Array, "b 3 3"]) -> Float[Array, "b 3"]:
     return jax.vmap(compute_normal)(batch_verts)
-
-
-@jaxtyped
-@partial(jax.jit, static_argnames=("value", ))
-def to_homogeneous(
-    coordinates: Float[Array, "*batch dim"],
-    value: Float[Array, "*batch"] = jnp.array(1.),
-) -> Float[Array, "*batch dim+1"]:
-    """Transform the coordinates to homogeneous coordinates by append a batch
-        of `value`s (default 1.) in the last axis."""
-    if not isinstance(value, Float[Array, "*batch"]):
-        value = jnp.array(value)
-
-    ones: Float[Array, "*batch 1"] = jnp.broadcast_to(
-        value.astype(jax.dtypes.result_type(coordinates)),
-        (*coordinates.shape[:-1], 1),
-    )
-    homo_coords: Float[Array, "*batch dim+1"] = lax.concatenate(
-        (coordinates, ones),
-        jnp.ndim(coordinates) - 1,
-    )
-
-    return homo_coords
-
-
-@jaxtyped
-@jax.jit
-def normalise_homogeneous(
-    coordinates: Float[Array, "*batch dim"], ) -> Float[Array, "*batch dim"]:
-    """Transform the homogenous coordinates to make the scale factor equals to
-        either 1 or 0, by divide every element with the last element on the
-        last axis.
-
-    Noted that when a coordinate is 0 and divides by 0, it will produce a nan;
-    for non-zero elements divides by 0, a inf will be produced.
-    """
-    return coordinates / coordinates[..., -1:]
-
-
-@jaxtyped
-@jax.jit
-def to_cartesian(
-    coordinates: Float[Array, "*batch dim"], ) -> Float[Array, "*batch dim-1"]:
-    """Transform the homogenous coordinates to cartesian coordinates by divide
-        every element with the last element on the last axis, then drop them.
-
-    When last component is 0, this function just discard the w-component
-    without division.
-    """
-    return jnp.where(
-        # if w component is 0, just discard it and return.
-        coordinates[..., -1:] == .0,
-        coordinates[..., :-1],
-        normalise_homogeneous(coordinates)[..., :-1],
-    )
 
 
 @jaxtyped
