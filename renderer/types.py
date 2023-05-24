@@ -52,12 +52,12 @@ class DtypeInfo(NamedTuple):
     min: Union[jnp.floating[Any], jnp.integer[Any]]
     max: Union[jnp.floating[Any], jnp.integer[Any]]
     bits: int
-    dtype: jnp.dtype[Any]
+    dtype: type
 
     @classmethod
     @jaxtyped
-    @partial(jax.jit, static_argnames=("cls", "dtype"))
-    def create(cls, dtype: jnp.dtype[Any]) -> "DtypeInfo":
+    # cannot be jitted as `dtype` will not be a valid JAX type
+    def create(cls, dtype: type) -> "DtypeInfo":
         with jax.ensure_compile_time_eval():
             if jnp.issubdtype(dtype, jnp.floating):
                 finfo = jnp.finfo(dtype)
