@@ -127,8 +127,8 @@ class PhongReflectionTextureShader(
             extra.specular_map[uv[0], uv[1]],
         )
         colour: Colour = (
-            extra.ambient +
-            (extra.diffuse * diffuse + extra.specular * specular) *
+            (extra.ambient +
+             (extra.diffuse * diffuse + extra.specular * specular)) *
             # intensity * light colour * texture colour
             extra.light.colour * texture_colour)
 

@@ -157,11 +157,11 @@ class PhongReflectionShadowTextureShader(
         )
 
         # compute colour
-        colour: Colour = (
+        colour: Colour = ((
             extra.ambient +
             (extra.diffuse * diffuse + extra.specular * specular) *
             # shadow * intensity * light colour * texture colour
-            shadow * extra.light.colour * texture_colour)
+            shadow) * extra.light.colour * texture_colour)
 
         return (
             PerFragment(
