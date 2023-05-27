@@ -50,10 +50,7 @@ def gouraud_shader_with_simple_light(model: Model):
     )
 
     buffers = Buffers(
-        zbuffer=lax.full(
-            (width, height),
-            -20.,
-        ),
+        zbuffer=lax.full((width, height), 20.),
         targets=(lax.full((width, height, 3), 0.), ),
     )
 
@@ -107,7 +104,7 @@ def gouraud_shader_with_texture(model: Model, texture: Texture):
     )
 
     buffers = Buffers(
-        zbuffer=lax.full((width, height), -20.),
+        zbuffer=lax.full((width, height), 20.),
         targets=(lax.full((width, height, 3), 0.), ),
     )
     uv = (
@@ -169,7 +166,7 @@ def phong_shader_with_texture(model: Model, texture: Texture):
     )
 
     buffers = Buffers(
-        zbuffer=lax.full((width, height), -20.),
+        zbuffer=lax.full((width, height), 20.),
         targets=(lax.full((width, height, 3), 0.), ),
     )
     uv = (
@@ -237,7 +234,7 @@ def phong_shader_with_texture_phong_reflection(
     )
 
     buffers = Buffers(
-        zbuffer=lax.full((width, height), -20.),
+        zbuffer=lax.full((width, height), 20.),
         targets=(lax.full((width, height, 3), 0.), ),
     )
     uv = (
@@ -325,7 +322,7 @@ def phong_shader_with_texture_nm_tangent(
     )
 
     buffers = Buffers(
-        zbuffer=lax.full((width, height), -20.),
+        zbuffer=lax.full((width, height), 20.),
         targets=(lax.full((width, height, 3), 0.), ),
     )
     faces_uv: Integer[Array, "faces*3"] = model.faces_uv.reshape((-1, ))
@@ -405,7 +402,7 @@ def depth_shader(model: Model):
     )
 
     buffers = Buffers(
-        zbuffer=lax.full((width, height), 0.),
+        zbuffer=lax.full((width, height), 1.),
         targets=tuple(),
     )
 
@@ -456,7 +453,7 @@ def phong_shader_with_shadow(
     )
 
     shadow: Shadow = Shadow.render_shadow_map(
-        shadow_map=lax.full((width, height), 0.),
+        shadow_map=lax.full((width, height), 1e10.),
         verts=model.verts,
         faces=model.faces,
         light_direction=light.direction,
@@ -474,7 +471,7 @@ def phong_shader_with_shadow(
 
     def second_pass(texture: Texture, shadow: Shadow) -> Buffers:
         buffers = Buffers(
-            zbuffer=lax.full((width, height), -20.),
+            zbuffer=lax.full((width, height), 20.),
             targets=(lax.full((width, height, 3), 0.), ),
         )
         uv = (

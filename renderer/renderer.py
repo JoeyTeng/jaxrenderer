@@ -296,7 +296,7 @@ class Renderer:
                 shadow_map=lax.full_like(
                     buffers.zbuffer,
                     DtypeInfo.create(jax.dtypes.result_type(
-                        buffers.zbuffer)).min,
+                        buffers.zbuffer)).max,
                 ),
                 verts=model.verts,
                 faces=model.faces,
@@ -341,7 +341,7 @@ class Renderer:
         width: int,
         height: int,
         colourChannels: int = 3,
-        zbuffer_default: Num[Array, ""] = jnp.array(-1),
+        zbuffer_default: Num[Array, ""] = jnp.array(1),
         zbuffer_dtype: jnp.dtype[Any] = jnp.single,
         colour_dtype: jnp.dtype[Any] = jnp.single,
         shadow_param: Optional[ShadowParameters] = None,

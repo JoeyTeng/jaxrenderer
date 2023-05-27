@@ -246,10 +246,10 @@ class Shader(ABC, Generic[ShaderExtraInputT, VaryingT, MixedExtraT]):
 
         def has_kept_fragment() -> Integer[Array, ""]:
             depths: Float[Array, "primitives"]
-            depths = jnp.where(keeps, gl_FragDepth, -jnp.inf)
+            depths = jnp.where(keeps, gl_FragDepth, jnp.inf)
             assert isinstance(depths, Float[Array, "primitives"])
 
-            idx: Integer[Array, ""] = jnp.argmax(depths)
+            idx: Integer[Array, ""] = jnp.argmin(depths)
 
             return idx
 

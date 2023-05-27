@@ -35,11 +35,7 @@ camera: Camera = Camera.create(
 )
 
 buffers = Buffers(
-    zbuffer=lax.full(
-        (width, height),
-        # jnp.finfo(jnp.single).min,
-        -1.,
-    ),
+    zbuffer=lax.full((width, height), 1.),
     targets=(lax.full((width, height, 3), 0.), ),
 )
 face_indices = jnp.array((

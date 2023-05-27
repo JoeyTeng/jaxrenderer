@@ -51,7 +51,7 @@ class Shadow(NamedTuple):
           - up: up direction of the scene, same as object's camera's up.
           - strength: strength of shadow. For details, see `Shadow.strength`.
           - offset: Offset to avoid self-shadowing / z-fighting. This will be
-            subtracted to the shadow map, making the shadows further away from
+            added to the shadow map, making the shadows further away from
             the light.
 
         Returns: Updated `Shadow` object with shadow_map updated.
@@ -79,7 +79,7 @@ class Shadow(NamedTuple):
         buffers = Buffers(zbuffer=shadow_map, targets=tuple())
         extra = DepthExtraInput(position=verts)
         shadow_map, _ = render(_camera, DepthShader, buffers, faces, extra)
-        shadow_map = shadow_map - offset
+        shadow_map = shadow_map + offset
         assert isinstance(shadow_map, ZBuffer)
 
         shadow: Shadow = Shadow(
