@@ -92,12 +92,12 @@ class GouraudShader(Shader[GouraudExtraInput, GouraudExtraFragmentData,
 
         return (
             PerFragment(
-                gl_FragDepth=built_in.gl_FragDepth,
                 keeps=jnp.array((
                     built_in.keeps,
                     gl_FrontFacing,
                     (varying.colour >= 0).all(),
                 )).all(),
+                use_default_depth=built_in.use_default_depth,
             ),
             varying,
         )

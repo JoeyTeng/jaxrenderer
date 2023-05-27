@@ -114,8 +114,8 @@ class PhongTextureShader(Shader[PhongTextureExtraInput,
 
         return (
             PerFragment(
-                gl_FragDepth=built_in.gl_FragDepth,
                 keeps=jnp.logical_and(built_in.keeps, gl_FrontFacing),
+                use_default_depth=built_in.use_default_depth,
             ),
             PhongTextureExtraFragmentData(
                 colour=lax.cond(

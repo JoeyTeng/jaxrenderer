@@ -11,7 +11,7 @@ from jaxtyping import Array, Bool, Integer, Num, jaxtyped
 from .geometry import (Camera, Interpolation, barycentric, interpolate,
                        normalise_homogeneous)
 from .shader import (ID, MixedExtraT, MixerOutput, PerFragment, PerVertex,
-                     Shader, VaryingT, ShaderExtraInputT)
+                     Shader, ShaderExtraInputT, VaryingT)
 from .types import (FALSE_ARRAY, Buffers, FaceIndices, Triangle, Triangle2Df,
                     Vec2f, Vec2i, Vec3f, Vec4f)
 
@@ -129,7 +129,7 @@ def _postprocessing(
 
                 # enforce default `gl_FragDepth` when it is None
                 per_frag = lax.cond(
-                    jnp.isnan(per_frag.gl_FragDepth),
+                    per_frag.use_default_depth,
                     lambda: per_frag._replace(gl_FragDepth=gl_FragCoord[2]),
                     lambda: per_frag,
                 )
@@ -161,10 +161,12 @@ def _postprocessing(
 
         # END OF `_per_primitive_process`
 
-        (gl_Depths, keeps), extra_outputs = jax.vmap(_per_primitive_process)(
+        built_in, extra_outputs = jax.vmap(_per_primitive_process)(
             per_primitive,
             varyings,
         )
+        gl_Depths = built_in.gl_FragDepth
+        keeps = built_in.keeps
 
         # PROCESS: Per-Sample Operations (Mixing: depth test + colour blending)
         mixed_output: MixerOutput

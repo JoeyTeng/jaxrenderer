@@ -1,4 +1,3 @@
-from functools import partial
 from typing import Any, NamedTuple, Union
 
 import jax
@@ -10,7 +9,7 @@ jax.config.update('jax_array', True)
 
 TRUE_ARRAY: Bool[Array, ""] = lax.full((), True, dtype=jnp.bool_)
 FALSE_ARRAY: Bool[Array, ""] = lax.full((), False, dtype=jnp.bool_)
-NAN_ARRAY: Float[Array, ""] = lax.full((), jnp.nan)
+INF_ARRAY: Float[Array, ""] = lax.full((), jnp.inf)
 
 Index = Integer[Array, ""]
 

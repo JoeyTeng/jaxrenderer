@@ -8,7 +8,7 @@ from jax.tree_util import Partial, tree_map
 from jaxtyping import Array, Bool, Float, Integer, PyTree, Shaped, jaxtyped
 
 from .geometry import Camera, Interpolation, interpolate
-from .types import NAN_ARRAY, TRUE_ARRAY, Vec2f, Vec3f, Vec4f
+from .types import FALSE_ARRAY, INF_ARRAY, TRUE_ARRAY, Vec2f, Vec3f, Vec4f
 
 jax.config.update('jax_array', True)
 
@@ -35,12 +35,13 @@ class PerVertex(NamedTuple):
 class PerFragment(NamedTuple):
     """Built-in Output from Fragment Shader.
 
-    If gl_FragDepth is not set (or being nan), gl_FragCoord[2] will be used
+    If use_default_depth is True (default False), gl_FragCoord[2] will be used
     later by default.
     """
-    gl_FragDepth: Float[Array, ""] = NAN_ARRAY
+    gl_FragDepth: Float[Array, ""] = INF_ARRAY
     # not discard
     keeps: Bool[Array, ""] = TRUE_ARRAY
+    use_default_depth: Bool[Array, ""] = FALSE_ARRAY
 
 
 VaryingT = TypeVar(
@@ -183,6 +184,10 @@ class Shader(ABC, Generic[ShaderExtraInputT, VaryingT, MixedExtraT]):
         `gl_FragDepth` further down the pipeline will use `gl_FragCoord[2]`.
         For the `varying` input, it will be returned directly untouched.
 
+        If the output from this default implementation is re-used, noticed that
+        `use_default_depth` needs to be updated to False, otherwise the default
+        depth (`gl_FragCoord[2]`) will be used in further process.
+
         Parameters:
           - gl_FragCoord: homogeneous coordinates in screen device space.
           - gl_FrontFacing: True if the primitive is NOT back facing.
@@ -203,7 +208,7 @@ class Shader(ABC, Generic[ShaderExtraInputT, VaryingT, MixedExtraT]):
           - [Fragment Shader/Defined Inputs](https://www.khronos.org/opengl/wiki/Fragment_Shader/Defined_Inputs)
           - [Fragment Shader#Outputs](https://www.khronos.org/opengl/wiki/Fragment_Shader#Outputs)
         """
-        return PerFragment(), varying
+        return PerFragment(use_default_depth=TRUE_ARRAY), varying
 
     @staticmethod
     @jaxtyped
