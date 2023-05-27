@@ -7,7 +7,7 @@ import jax.lax as lax
 import jax.numpy as jnp
 from jaxtyping import Array, Float, Integer, Num, jaxtyped
 
-from .types import Triangle2Df, Vec2f, Vec3f
+from .types import Triangle2Df, Vec2f, Vec3f, Vec4f
 
 # Transform matrix that takes a batch of homogeneous 3D vertices and transform
 # them into 2D cartesian vertices in screen space + Z value (making it 3D)
@@ -177,6 +177,7 @@ class Camera(NamedTuple):
     - world_to_clip_norm: transform normals from model space to clip space
     - world_to_screen: transform from model space to screen space
     """
+    # TODO: refactor: model_view => view, as it transforms from world to view.
     model_view: ModelView
     projection: Projection
     viewport: Viewport
@@ -217,7 +218,7 @@ class Camera(NamedTuple):
         points: Num[Array, "*N 4"],
         matrix: Num[Array, "4 4"],
     ) -> Num[Array, "*N 4"]:
-        """Transform points from model space to screen space.
+        """Transform homogeneous points using given matrix.
 
         Parameters:
           - points: shape (4, ) or (N, 4). points in model space, with axis 0
@@ -244,6 +245,75 @@ class Camera(NamedTuple):
         assert isinstance(transformed, Num[Array, "*N 4"])
 
         return transformed
+
+    @classmethod
+    @jaxtyped
+    @partial(jax.jit, static_argnames=("cls", ))
+    def apply_pos(
+        cls,
+        points: Num[Array, "*N 3"],
+        matrix: Num[Array, "4 4"],
+    ) -> Num[Array, "*N 3"]:
+        """Transform points representing 3D positions using given matrix.
+
+        Parameters:
+          - points: shape (3, ) or (N, 3). points in model space, with axis 0
+            being the batch axis. Batch axis can be omitted. Points must be
+            in cartesian coordinate. For coordinates in homogeneous coordinate,
+            use `apply` instead.
+          - matrix: shape (4, 4) transformation matrix
+
+        Returns: coordinates transformed
+        """
+        points_homo = to_homogeneous(points)
+        assert isinstance(points_homo, Num[Array, "*N 4"])
+
+        transformed_homo = cls.apply(points_homo, matrix)
+        assert isinstance(transformed_homo, Num[Array, "*N 4"])
+
+        transformed = to_cartesian(transformed_homo)
+        assert isinstance(transformed, Num[Array, "*N 3"])
+
+        return transformed
+
+    @classmethod
+    @jaxtyped
+    @partial(jax.jit, static_argnames=("cls", ))
+    def apply_vec(
+        cls,
+        vectors: Num[Array, "*N 3"],
+        matrix: Num[Array, "4 4"],
+    ) -> Num[Array, "*N 3"]:
+        """Transform vectors representing 3D positions using given matrix.
+
+        Parameters:
+          - vectors: shape (3, ) or (N, 3). Directional Vectors in model
+            space, with axis 0 being the batch axis. Batch axis can be omitted.
+            Vectors must be in cartesian coordinate. For coordinates in
+            homogeneous coordinate, use `apply` instead.
+          - matrix: shape (4, 4) transformation matrix
+
+        Returns: vectors transformed and normalised
+        """
+        normalised_vectors = normalise(vectors)
+        assert isinstance(normalised_vectors, Num[Array, "*N 3"])
+
+        points_homo = to_homogeneous(
+            normalised_vectors,
+            jnp.zeros((), dtype=vectors.dtype),
+        )
+        assert isinstance(points_homo, Num[Array, "*N 4"])
+
+        transformed_homo = cls.apply(points_homo, matrix)
+        assert isinstance(transformed_homo, Num[Array, "*N 4"])
+
+        transformed = to_cartesian(transformed_homo)
+        assert isinstance(transformed, Num[Array, "*N 3"])
+
+        transformed_normalised = normalise(transformed)
+        assert isinstance(transformed_normalised, Num[Array, "*N 3"])
+
+        return transformed_normalised
 
     @jaxtyped
     @jax.jit
@@ -519,6 +589,36 @@ def compute_normal(triangle_verts: Float[Array, "3 3"]) -> Float[Array, "3"]:
 @jax.jit
 def compute_normals(batch_verts: Float[Array, "b 3 3"]) -> Float[Array, "b 3"]:
     return jax.vmap(compute_normal)(batch_verts)
+
+
+@jaxtyped
+@jax.jit
+def transform_matrix_from_rotation(rotation: Vec4f) -> Float[Array, "3 3"]:
+    """Generate a transform matrix from a quaternion rotation.
+
+    Supports non-unit rotation.
+
+    References:
+          - [Quaternions and spatial rotation#Quaternion-derived rotation matrix](https://en.wikipedia.org/wiki/Quaternions_and_spatial_rotation#Quaternion-derived_rotation_matrix)
+          - [TinySceneRenderer::set_object_orientation](https://github.com/erwincoumans/tinyrenderer/blob/89e8adafb35ecf5134e7b17b71b0f825939dc6d9/tinyrenderer.cpp#LL997C20-L997C20)
+    """
+    d = rotation @ rotation
+    s = 2.0 / d  # here s is $2\times s$ in Wikipedia.
+
+    rs: Vec3f = rotation[:3] * s
+    ((wx, wy, wz), (xx, xy, xz), (yy, yz, zz)) = jnp.outer(
+        rotation[jnp.array((3, 0, 1))],
+        rs,
+    )
+
+    mat: Float[Array, "3 3"] = jnp.array((
+        (1. - (yy + zz), xy - wz, xz + wy),
+        (xy + wz, 1. - (xx + zz), yz - wx),
+        (xz - wy, yz + wx, 1. - (xx + yy)),
+    ))
+    assert isinstance(mat, Float[Array, "3 3"])
+
+    return mat
 
 
 @jaxtyped

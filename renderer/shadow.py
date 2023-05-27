@@ -58,7 +58,7 @@ class Shadow(NamedTuple):
         """
 
         model_view: ModelView = Camera.model_view_matrix(
-            eye=light_direction,
+            eye=light_direction - centre,  # keep "forward = -light_direction"
             centre=centre,
             up=up,
         )
