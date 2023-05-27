@@ -80,9 +80,10 @@ class PhongReflectionTextureShader(
         # assume normal here is in world space. If it is in model space, it
         # must be transformed by the inverse transpose of the model matrix.
         # Ref: https://github.com/ssloy/tinyrenderer/wiki/Lesson-5:-Moving-the-camera#transformation-of-normal-vectors
-        normal: Vec3f = normalise(
-            to_cartesian(camera.world_to_clip_norm @ jnp.zeros(4).at[:3].set(
-                normalise(extra.normal[gl_VertexID]))))
+        normal: Vec3f = Camera.apply_vec(
+            normalise(extra.normal[gl_VertexID]),
+            camera.world_to_eye_norm,
+        )
         assert isinstance(normal, Vec3f)
 
         return (

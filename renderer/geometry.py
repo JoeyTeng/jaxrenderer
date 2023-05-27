@@ -174,7 +174,7 @@ class Camera(NamedTuple):
       screen space. Noticed that this is NDC space in OpenGL, which has range
       [-1, 1]^3.
     - world_to_clip: transform from model space to clip space
-    - world_to_clip_norm: transform normals from model space to clip space
+    - world_to_eye_norm: transform normals from model space to eye space, without projection.
     - world_to_screen: transform from model space to screen space
     """
     # TODO: refactor: model_view => view, as it transforms from world to view.
@@ -182,7 +182,7 @@ class Camera(NamedTuple):
     projection: Projection
     viewport: Viewport
     world_to_clip: Projection
-    world_to_clip_norm: Projection
+    world_to_eye_norm: Projection
     world_to_screen: World2Screen
 
     @classmethod
@@ -207,7 +207,7 @@ class Camera(NamedTuple):
             projection=projection,
             world_to_clip=projection @ model_view,
             # inverse transpose of projection @ model_view
-            world_to_clip_norm=jnp.linalg.inv(projection @ model_view).T,
+            world_to_eye_norm=jnp.linalg.inv(projection @ model_view).T,
             world_to_screen=viewport @ projection @ model_view,
         )
 
