@@ -6,7 +6,7 @@ import jax.lax as lax
 import jax.numpy as jnp
 from jax import lax
 from jax.tree_util import tree_map
-from jaxtyping import Array, Bool, Integer, Num, jaxtyped
+from jaxtyping import Array, Bool, Float, Integer, Num, jaxtyped
 
 from .geometry import (Camera, Interpolation, barycentric, interpolate,
                        normalise_homogeneous)
@@ -80,7 +80,11 @@ def _postprocessing(
             assert isinstance(bc_screen, Vec3f)
 
             def _when_keep_triangle() -> tuple[PerFragment, VaryingT]:
-                bc_clip: Vec3f = bc_screen / screen[:, 3]
+                # weight barycentric coordinates by 1/w to obtain
+                # perspective-coorected barycentric coordinates
+                bc_clip: Vec3f = bc_screen * screen[:, 3]
+
+                # normalise barycentric coordinates so that it sums to 1.
                 bc_clip = bc_clip / bc_clip.sum()
 
                 # Prepare inputs for fragment shader
@@ -298,11 +302,14 @@ def render(
         # TODO: add clipping in clip space.
 
         # NDC, normalised device coordinate
+        # Ref: OpenGL Spec 4.6 (Core Profile), Section 15.2.2
+        w: Float[Array, ""] = per_vertex.gl_Position[3]
         ndc: Vec4f = normalise_homogeneous(per_vertex.gl_Position)
         assert isinstance(ndc, Vec4f)
 
         # already normalised; result is still normalised
-        screen: Vec4f = camera.viewport @ ndc
+        # Ref: OpenGL Spec 4.6 (Core Profile), Section 15.2.2
+        screen: Vec4f = (camera.viewport @ ndc).at[3].divide(w)
         assert isinstance(screen, Vec4f)
 
         return PerVertexInScreen(gl_Position=screen), varying
