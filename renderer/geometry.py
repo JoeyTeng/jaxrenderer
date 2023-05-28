@@ -40,12 +40,12 @@ class Interpolation(enum.Enum):
     References:
       - [Interpolation qualifiers](https://www.khronos.org/opengl/wiki/Type_Qualifier_(GLSL)#Interpolation_qualifiers)
     """
-    # Flat shading: use the value of the first vertex of the primitive
     FLAT = 0
-    # No perspective correction: linear interpolation in screen space
+    """Flat shading: use the value of the first vertex of the primitive""" ""
     NOPERSPECTIVE = 1
-    # Perspective correction: linear interpolation in clip space
+    """No perspective correction: linear interpolation in screen space"""
     SMOOTH = 2
+    """Perspective correction: linear interpolation in clip space"""
 
     @jaxtyped
     @partial(jax.jit, static_argnames=("self", ))
@@ -331,7 +331,7 @@ class Camera(NamedTuple):
         transformed_homo = cls.apply(points_homo, matrix)
         assert isinstance(transformed_homo, Num[Array, "*N 4"])
 
-        transformed = to_cartesian(transformed_homo)
+        transformed = transformed_homo[..., :3]
         assert isinstance(transformed, Num[Array, "*N 3"])
 
         transformed_normalised = normalise(transformed)
