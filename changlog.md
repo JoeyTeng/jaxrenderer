@@ -9,3 +9,4 @@
 5. Change `shaders/phong_reflection_shadow` according to the z-value definition change.
 6. Transform shadow coordinates in VS (world => NDC) and FS (NDC => screen) instead of transforming in FS (model's screen => world => screen) to avoid precision loss in inverse matrix computation.
 7. Fix issue of perspective-correction barycentric interpolation in `pipeline`.
+8. Fix `shaders/phong*` so normals are correctly transformed into pre-projection eye coordinates, rather than being projected.
