@@ -10,15 +10,11 @@ from renderer import (CameraParameters, LightParameters, Renderer, Scene,
 
 scene: Scene = Scene()
 texture: Texture = jnp.array((
-    (
-        (255, 255, 255),  # White
-        (255, 0, 0),
-    ),  # Red
-    (
-        (0, 255, 0),  # Green
-        (0, 0, 255),
-    ),  # Blue
-)) / 255.0  # shape (2, 2, 3)
+    (255, 255, 255),  # White
+    (255, 0, 0),  # Red
+    (0, 255, 0),  # Green
+    (0, 0, 255),  # Blue
+)).reshape((2, 2, 3)).swapaxes(0, 1) / 255.0  # shape (2, 2, 3)
 
 scene, capx_model_id = scene.add_capsule(
     radius=0.1,

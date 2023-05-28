@@ -188,9 +188,7 @@ class PhongTextureDarbouxShader(Shader[PhongTextureDarbouxExtraInput,
         assert isinstance(varying, PhongTextureDarbouxExtraFragmentData), (
             f"Expected PhongTextureDarbouxExtraFragmentData, got {varying}")
 
-        # Repeat texture.
-        uv: Vec2i = (lax.round(varying.uv).astype(int) %
-                     jnp.asarray(extra.texture.shape[:2]))
+        uv: Vec2i = lax.floor(varying.uv).astype(int)
 
         normal: Vec3f = normalise(varying.normal)
         A: Float[Array, "3 3"] = jnp.vstack([

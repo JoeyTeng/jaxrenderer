@@ -240,7 +240,9 @@ class MergedModel(NamedTuple):
             `merge_maps`.
           - map_index: index of the map to use.
         """
-        return (uv % shape) + (map_index * offset_shape)
+        # since given uv are in [0, 1] (and may be scaled, if is cube),
+        # we need to multiply it by (w, h) of the texture map first.
+        return (uv * shape % shape) + (map_index * offset_shape)
 
 
 class ModelObject(NamedTuple):

@@ -150,7 +150,7 @@ class PhongReflectionShadowTextureShader(
         )
 
         # texture
-        uv = lax.round(varying.uv).astype(int)
+        uv = lax.floor(varying.uv).astype(int)
         texture_colour: Colour = extra.texture[uv[0], uv[1]]
 
         normal: Vec3f = normalise(varying.normal)
