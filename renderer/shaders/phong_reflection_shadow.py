@@ -40,7 +40,7 @@ class PhongReflectionShadowTextureExtraInput(NamedTuple):
     texture: Texture
     specular_map: SpecularMap
     shadow: Shadow
-    shadow_mat: Float[Array, "4 4"]
+    camera: Camera  # so accessible in FS as well.
     ambient: Colour
     diffuse: Colour
     specular: Colour
@@ -125,17 +125,16 @@ class PhongReflectionShadowTextureShader(
         assert isinstance(built_in, PerFragment)
 
         # shadow
+        # Use a more precise way to compute shadow coordinate to avoid NaN, as
+        # sometimes an imprecise result will have [3] being 0, causing NaN.
         shadow_coord: Vec4f = normalise_homogeneous(
-            extra.shadow_mat @ gl_FragCoord)
+            extra.shadow.matrix @ extra.camera.to_screen_inv(gl_FragCoord))
         assert isinstance(shadow_coord, Vec4f)
         shadow_str: Colour = extra.shadow.strength
         assert isinstance(shadow_str, Colour)
-        shadow: Colour = lax.select(
+        shadow: Colour = jnp.where(
             # if before/at shadow
-            jnp.broadcast_to(
-                shadow_coord[2] >= extra.shadow.get(shadow_coord[:2]),
-                shadow_str.shape,
-            ),
+            shadow_coord[2] <= extra.shadow.get(shadow_coord[:2]),
             # when not in shadow, keeps all light.
             jnp.ones_like(shadow_str),
             # if in shadow, only keep "1 - shadow_str" amount of light.

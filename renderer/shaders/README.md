@@ -44,4 +44,8 @@ This is a simple implementation of Phong shading with Phong reflection approxima
 
 Phong's Approximation is used to support `specular`, `ambient` and `diffuse` lighting. The spcular lighting is computed with shininess factor given in a `SpecularMap`.
 
-Shadows are simply tested in fragment shadow against a shadow map given by `Shadow`.
+The light direction needs to be given in the pre-projection view/eye space via `light_dir_eye`. The normals are transformed into eye space as well for light computation.
+
+Shadows are simply tested in fragment shadow against a shadow map given by `Shadow`. The fragment shadow is computed by transform fragment coordinates first back to world space, then transform to light's screen space. A handcrafted high-precision method `Camera.to_screen_inv` is used to avoid NaN.
+
+Another possible method, although not used, is to first transform world coordinates of the vertices in the vertex shader into the clip space of the light, interpolated in clip space (`SMOOTH` by default) in the `Shader.interpolate`, then  projected into screen coordinates in the fragment shader, and finally compared against the shadow map. It is safe to interpolate in the light's clip space using barycentric coordinates obtained in the model/main camera's clip space, because there is a simple linear transformation (by a invertible matrix) between the two pre-projection clip spaces. CHECK: Thus after projection, the barycentric coordinates computed are the same.

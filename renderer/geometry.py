@@ -1,6 +1,6 @@
 import enum
 from functools import partial
-from typing import Any, NamedTuple
+from typing import Any, NamedTuple, Optional
 
 import jax
 import jax.lax as lax
@@ -184,6 +184,8 @@ class Camera(NamedTuple):
     world_to_clip: Projection
     world_to_eye_norm: Projection
     world_to_screen: World2Screen
+    view_inv: ModelView
+    screen_to_world: World2Screen
 
     @classmethod
     @jaxtyped
@@ -193,6 +195,7 @@ class Camera(NamedTuple):
         model_view: ModelView,
         projection: Projection,
         viewport: Viewport,
+        view_inv: Optional[ModelView] = None,
     ) -> "Camera":
         """Create a camera with the given parameters.
 
@@ -200,15 +203,36 @@ class Camera(NamedTuple):
           - model_view: transform from model space to view space
           - projection: transform from view space to clip space
           - viewport: transform from NDC (normalised device coordinate) space to
+          - view_inv: inverse of view. If not given, it will be computed.
         """
+        if view_inv is None:
+            view_inv = jnp.linalg.inv(model_view)
+        assert isinstance(view_inv, ModelView)
+
+        projection_inv: Projection = lax.cond(
+            jnp.isclose(projection[3, 3], 0),
+            # is perspective projection matrix
+            cls.perspective_projection_matrix_inv,
+            # is orthographic projection matrix
+            cls.orthographic_projection_matrix_inv,
+            # arg
+            projection,
+        )
+        assert isinstance(projection_inv, Projection), f"{projection_inv}"
+
+        viewport_inv: Viewport = cls.viewport_matrix_inv(viewport)
+        assert isinstance(viewport_inv, Viewport)
+
         return cls(
             model_view=model_view,
             viewport=viewport,
             projection=projection,
             world_to_clip=projection @ model_view,
             # inverse transpose of projection @ model_view
-            world_to_eye_norm=jnp.linalg.inv(projection @ model_view).T,
+            world_to_eye_norm=view_inv.T,
             world_to_screen=viewport @ projection @ model_view,
+            view_inv=view_inv,
+            screen_to_world=view_inv @ projection_inv @ viewport_inv,
         )
 
     @staticmethod
@@ -362,6 +386,98 @@ class Camera(NamedTuple):
 
         return clip_space
 
+    @jaxtyped
+    @jax.jit
+    def to_screen_inv(
+        self,
+        screen: Float[Array, "*N 4"],
+    ) -> Float[Array, "*N 4"]:
+        """Transform points from screen space to model space.
+
+        This is an inverse process of `to_screen`, and provide higher precision
+        then just multiplying the inverse. This may help solve NaN issue.
+
+        Internally this is done by two `lax.linalg.triangular_solve` for
+        viewport and projection, then a `@` for `view_inv`. If a good
+        `view_inv` is provided during creation of this camera using
+        `view_matrix_inv`, this should provide a much higher precision.
+        """
+        if screen.ndim == 1:
+            _screen = screen[None, :]
+        else:
+            _screen = screen
+
+        clip = lax.linalg.triangular_solve(self.viewport, _screen)
+        assert isinstance(clip, Float[Array, "*N 4"])
+        shuffle = lax.cond(
+            self.projection[3, 3] == 0,
+            # perspective projection
+            lambda: jnp.array([0, 1, 3, 2]),
+            # orthographic projection
+            lambda: jnp.array([0, 1, 2, 3]),
+        )
+        eye = lax.linalg.triangular_solve(
+            self.projection[..., shuffle],
+            clip[..., shuffle],
+        )[..., shuffle]
+        assert isinstance(eye, Float[Array, "*N 4"])
+        world = self.apply(eye, self.view_inv)
+        assert isinstance(world, Float[Array, "*N 4"])
+
+        if screen.ndim == 1:
+            world = world[0]
+
+        jax.debug.print(
+            "s {} c {} e {} w {}",
+            normalise_homogeneous(screen),
+            normalise_homogeneous(clip),
+            normalise_homogeneous(eye),
+            normalise_homogeneous(world),
+        )
+
+        return world
+
+    @staticmethod
+    @jaxtyped
+    @jax.jit
+    def inv_scale_translation_matrix(
+            scale_translation_mat: Float[Array, "4 4"]) -> Float[Array, "4 4"]:
+        """Compute the inverse matrix of a (4, 4) matrix representing a scale and translation, in a form of:
+
+            [[s_x, 0,   0,   t_x],
+             [0,   s_y, 0,   t_y],
+             [0,   0,   s_z, t_z],
+             [0,   0,   0,   1]]
+
+        where s is a scale vector and t is a translation vector. It is treated
+        as a combination of a scale matrix and a translation matrix, as
+        `scale @ translation`: translate first, then scale.
+
+        This utilise the fact that the inverse of a scale operation is just the
+        reciprocal of the scale factor, and the inverse of a translation is
+        just the negative of the translation. It separates the scale and
+        translation operations first, inverse them separately, then combine
+        them back (in reverse order).
+        """
+
+        scale_inv = jnp.diag(1. / jnp.diag(scale_translation_mat))
+        assert isinstance(scale_inv, Float[Array, "4 4"])
+
+        # scale_translation = scale @ translation;
+        # thus  translation = scale_inv @ scale @ translation
+        #                   = scale_inv @ scale_translation
+        translation: Float[Array, "4 4"] = scale_inv @ scale_translation_mat
+        assert isinstance(translation, Float[Array, "4 4"])
+
+        # inverse of translation: negative of translation
+        translation_inv = (jnp.identity(4).at[:3, 3].set(-translation[:3, 3]))
+        assert isinstance(translation_inv, Float[Array, "4 4"])
+
+        scale_translation_inv = translation_inv @ scale_inv
+        assert isinstance(scale_translation_inv, Float[Array, "4 4"])
+
+        return scale_translation_inv
+
     @staticmethod
     @jaxtyped
     @jax.jit
@@ -406,6 +522,59 @@ class Camera(NamedTuple):
     @staticmethod
     @jaxtyped
     @jax.jit
+    def view_matrix_inv(
+        eye: Vec3f,
+        centre: Vec3f,
+        up: Vec3f,
+    ) -> ModelView:
+        """Compute the invert of View matrix as defined by OpenGL.
+
+        Same as inverting `lookAt` in OpenGL, but more precise.
+
+        Parameters:
+          - eye: the position of camera, in world space
+          - centre: the centre of the frame, where the camera points to, in
+            world space
+          - up: the direction vector with start point at "eye", indicating the
+            "up" direction of the camera frame.
+
+        Noticed that the view matrix contains only rotation and translation, and
+        thus the inverse of it is just the inverse of translation multiplies the
+        inverse (a simple transpose!) of rotation.
+
+        Returns: View^{-1}, (4, 4) matrix.
+
+        Reference:
+          - [gluLookAt](https://registry.khronos.org/OpenGL-Refpages/gl2.1/xhtml/gluLookAt.xml)
+          - [4B](http://graphics.stanford.edu/courses/cs248-98-fall/Final/q4.html)
+        """
+        forward: Vec3f = normalise(centre - eye)
+        up = normalise(up)
+        side: Vec3f = normalise(jnp.cross(forward, up))
+        up = jnp.cross(side, forward)
+
+        # inverse of rotation is just the transpose
+        m: ModelView = (
+            jnp.identity(4)  #
+            .at[0, :3].set(side)  #
+            .at[1, :3].set(up)  #
+            .at[2, :3].set(-forward)  #
+        )
+        m_inv: ModelView = m.T
+        assert isinstance(m_inv, ModelView)
+
+        # inverse of translation is just the negative of translation
+        translation_inv: ModelView = jnp.identity(4).at[:3, 3].set(eye)
+        assert isinstance(translation_inv, ModelView)
+
+        view_matrix_inv: ModelView = translation_inv @ m_inv
+        assert isinstance(view_matrix_inv, ModelView)
+
+        return view_matrix_inv
+
+    @staticmethod
+    @jaxtyped
+    @jax.jit
     def perspective_projection_matrix(
         fovy: jnp.floating[Any],
         aspect: jnp.floating[Any],
@@ -433,7 +602,8 @@ class Camera(NamedTuple):
         Reference:
           - [gluPerspective](https://registry.khronos.org/OpenGL-Refpages/gl2.1/xhtml/gluPerspective.xml)
         """
-        f: jnp.single = 1. / lax.tan(jnp.radians(fovy.astype(jnp.single)) / 2.)
+        f: jnp.single = 1. / lax.tan(
+            jnp.radians(jnp.asarray(fovy).astype(jnp.single)) / 2.)
         projection: Projection = (
             jnp.zeros((4, 4), dtype=jnp.single)  #
             .at[0, 0].set(f / aspect)  #
@@ -445,6 +615,35 @@ class Camera(NamedTuple):
         )
 
         return projection
+
+    @classmethod
+    @jaxtyped
+    @partial(jax.jit, static_argnames=("cls", ))
+    def perspective_projection_matrix_inv(cls, mat: Projection) -> Projection:
+        """Create the inverse of a perspective projection matrix as defined in
+            `perspective_projection_matrix`.
+
+        Since the perspective projection matrix is formed as:
+
+            [[a, 0,  0, 0],
+             [0, b,  0, 0],
+             [0, 0,  c, d],
+             [0, 0, -1, 0]]
+
+        it can be simply transformed into a scale-translation matrix by
+        swapping the last two columns. Thus, the inverse is computed by
+        swapping the last columns, then inverting using
+        `inv_scale_translation_matrix`, and finally swapping back (last two
+        rows, instead).
+        """
+        with jax.ensure_compile_time_eval():
+            shuffle: Integer[Array, "4"] = jnp.array((0, 1, 3, 2))
+            assert isinstance(shuffle, Integer[Array, "4"])
+
+        inv = cls.inv_scale_translation_matrix(mat[:, shuffle])[shuffle, :]
+        assert isinstance(inv, Projection)
+
+        return inv
 
     @staticmethod
     @jaxtyped
@@ -489,6 +688,20 @@ class Camera(NamedTuple):
 
         return projection
 
+    @classmethod
+    @jaxtyped
+    @partial(jax.jit, static_argnames=("cls", ))
+    def orthographic_projection_matrix_inv(cls, mat: Projection) -> Projection:
+        """Create the inverse of a orthographic projection matrix as defined in
+            `orthographic_projection_matrix`. Since orthographic projection
+            matrix is a scale-translation matrix, the inverse is computed by
+            `inv_scale_translation_matrix` directly.
+        """
+        inv = cls.inv_scale_translation_matrix(mat)
+        assert isinstance(inv, Projection)
+
+        return inv
+
     @staticmethod
     @jaxtyped
     @jax.jit
@@ -523,7 +736,6 @@ class Camera(NamedTuple):
         lowerbound: Num[Array, "2"],
         dimension: Integer[Array, "2"],
         depth: Num[Array, ""],
-        dtype: jnp.dtype = jnp.single,
     ) -> Viewport:
         """Create a viewport matrix to map the model in bi-unit cube
             ([-1...1]^3) onto the screen cube ([x, x+w]*[y, y+h]*[0, d]). The
@@ -541,13 +753,29 @@ class Camera(NamedTuple):
         """
         width, height = dimension
         viewport: Viewport = (
-            jnp.identity(4, dtype=dtype)  #
+            jnp.identity(4)  #
             .at[:2, 3].set(lowerbound + dimension / 2)  #
             .at[0, 0].set(width / 2).at[1, 1].set(height / 2)  #
             .at[2, 2:].set(depth / 2)  #
         )
 
         return viewport
+
+    @classmethod
+    @jaxtyped
+    @partial(jax.jit, static_argnames=("cls", ))
+    def viewport_matrix_inv(cls, viewport: Viewport) -> Viewport:
+        """Create the inverse of a viewport matrix as defined in `viewport_matrix`.
+
+        Parameters:
+          - viewport: Viewport matrix to invert.
+
+        Return: Viewport^{-1}, (4, 4) matrix.
+        """
+        viewport_inv: Viewport = cls.inv_scale_translation_matrix(viewport)
+        assert isinstance(viewport_inv, Viewport)
+
+        return viewport_inv
 
     @staticmethod
     @jaxtyped

@@ -193,6 +193,12 @@ class Renderer:
             up=camera.up,
         )
         assert isinstance(view_mat, ModelView), f"{view_mat}"
+        view_inv: ModelView = Camera.view_matrix_inv(
+            eye=camera.position,
+            centre=camera.target,
+            up=camera.up,
+        )
+        assert isinstance(view_inv, ModelView), f"{view_inv}"
         projection_mat: Projection = Camera.perspective_projection_matrix(
             fovy=camera.vfov,
             aspect=(lax.tan(jnp.radians(camera.hfov) / 2.) /
@@ -212,6 +218,7 @@ class Renderer:
             model_view=view_mat,
             projection=projection_mat,
             viewport=viewport_mat,
+            view_inv=view_inv,
         )
         assert isinstance(_camera, Camera), f"{_camera}"
 
@@ -309,14 +316,10 @@ class Renderer:
             )
             assert isinstance(shadow, Shadow), f"{shadow}"
 
-            shadow_mat: Float[Array, "4 4"]
-            shadow_mat = shadow.matrix @ jnp.linalg.inv(camera.world_to_screen)
-            assert isinstance(shadow_mat, Float[Array, "4 4"])
-
             _extra = PhongReflectionShadowTextureExtraInput(
                 **extra._asdict(),
                 shadow=shadow,
-                shadow_mat=shadow_mat,
+                camera=camera,
             )
 
             # second pass: actual rendering
