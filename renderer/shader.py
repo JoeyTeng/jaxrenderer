@@ -109,7 +109,7 @@ class Shader(ABC, Generic[ShaderExtraInputT, VaryingT, MixedExtraT]):
             base instance calls. When not using instanced rendering, this value
             will be 0.
           - camera: Camera [extra input, not in GLSL]
-            contains model_view, viewport, and projection matrices.
+            contains view, viewport, and projection matrices.
           - extra: Camera [extra input, not in GLSL]
             User-defined extra input for vertex shader, shared by all. They are
             **not** split over batch axis 0, if any; but directly passed in.

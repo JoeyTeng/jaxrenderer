@@ -6,7 +6,7 @@ import jax.lax as lax
 import jax.numpy as jnp
 from jaxtyping import Array, Float, jaxtyped
 
-from .geometry import Camera, ModelView, Viewport
+from .geometry import Camera, View, Viewport
 from .pipeline import render
 from .shaders.depth import DepthExtraInput, DepthShader
 from .types import (Buffers, Colour, FaceIndices, Vec2f, Vec2i, Vec3f,
@@ -61,16 +61,16 @@ class Shadow(NamedTuple):
         Returns: Updated `Shadow` object with shadow_map updated.
         """
 
-        model_view: ModelView = Camera.model_view_matrix(
+        view: View = Camera.view_matrix(
             # keep "forward = -light_direction"
             eye=centre + light_direction * distance,
             centre=centre,
             up=up,
         )
-        assert isinstance(model_view, ModelView)
+        assert isinstance(view, View)
 
         _camera: Camera = Camera.create(
-            model_view=model_view,
+            view=view,
             projection=Camera.orthographic_projection_matrix(
                 left=-1.,
                 right=1.,

@@ -15,13 +15,13 @@ from .types import Triangle2Df, Vec2f, Vec3f, Vec4f
 # The result of x-y values in screen space may be float, and thus further
 # conversion to integers are needed.
 World2Screen = Float[Array, "4 4"]
-# Transform all coordinates from model space to view space, with camera at
+# Transform all coordinates from world space to view space, with camera at
 # origin. (Object Coordinates -> Eye Coordinates)
-ModelView = Float[Array, "4 4"]
+View = Float[Array, "4 4"]
 # Transform all coordinates from view space to viewing volume.
 # (Eye Coordinates -> Clip Coordinates)
 Projection = Float[Array, "4 4"]
-# Transform all coordinates from model space in a bi-unit cube ([-1...1]^3) to
+# Transform all coordinates from clip space in a bi-unit cube ([-1...1]^3) to
 # a screen cube ([x, x+width] * [y, y+height] * [0, depth]) in view space.
 # (Normalised Device Coordinates -> Window Coordinates)
 Viewport = Float[Array, "4 4"]
@@ -168,7 +168,7 @@ def to_cartesian(
 class Camera(NamedTuple):
     """Camera parameters.
 
-    - model_view: transform from model space to view space
+    - view: transform from model space to view space
     - projection: transform from view space to clip space
     - viewport: transform from NDC (normalised device coordinate) space to
       screen space. Noticed that this is NDC space in OpenGL, which has range
@@ -177,14 +177,13 @@ class Camera(NamedTuple):
     - world_to_eye_norm: transform normals from model space to eye space, without projection.
     - world_to_screen: transform from model space to screen space
     """
-    # TODO: refactor: model_view => view, as it transforms from world to view.
-    model_view: ModelView
+    view: View
     projection: Projection
     viewport: Viewport
     world_to_clip: Projection
     world_to_eye_norm: Projection
     world_to_screen: World2Screen
-    view_inv: ModelView
+    view_inv: View
     screen_to_world: World2Screen
 
     @classmethod
@@ -192,22 +191,22 @@ class Camera(NamedTuple):
     @partial(jax.jit, static_argnames=("cls", ))
     def create(
         cls,
-        model_view: ModelView,
+        view: View,
         projection: Projection,
         viewport: Viewport,
-        view_inv: Optional[ModelView] = None,
+        view_inv: Optional[View] = None,
     ) -> "Camera":
         """Create a camera with the given parameters.
 
         Parameters:
-          - model_view: transform from model space to view space
+          - view: transform from model space to view space
           - projection: transform from view space to clip space
           - viewport: transform from NDC (normalised device coordinate) space to
           - view_inv: inverse of view. If not given, it will be computed.
         """
         if view_inv is None:
-            view_inv = jnp.linalg.inv(model_view)
-        assert isinstance(view_inv, ModelView)
+            view_inv = jnp.linalg.inv(view)
+        assert isinstance(view_inv, View)
 
         projection_inv: Projection = lax.cond(
             jnp.isclose(projection[3, 3], 0),
@@ -224,13 +223,13 @@ class Camera(NamedTuple):
         assert isinstance(viewport_inv, Viewport)
 
         return cls(
-            model_view=model_view,
+            view=view,
             viewport=viewport,
             projection=projection,
-            world_to_clip=projection @ model_view,
-            # inverse transpose of projection @ model_view
+            world_to_clip=projection @ view,
+            # inverse transpose of projection @ view
             world_to_eye_norm=view_inv.T,
-            world_to_screen=viewport @ projection @ model_view,
+            world_to_screen=viewport @ projection @ view,
             view_inv=view_inv,
             screen_to_world=view_inv @ projection_inv @ viewport_inv,
         )
@@ -481,12 +480,12 @@ class Camera(NamedTuple):
     @staticmethod
     @jaxtyped
     @jax.jit
-    def model_view_matrix(
+    def view_matrix(
         eye: Vec3f,
         centre: Vec3f,
         up: Vec3f,
-    ) -> ModelView:
-        """Compute ModelView matrix as defined by OpenGL / tinyrenderer.
+    ) -> View:
+        """Compute View matrix as defined by OpenGL / tinyrenderer.
 
         Same as `lookAt` in OpenGL / tinyrenderer.
 
@@ -507,17 +506,17 @@ class Camera(NamedTuple):
         side: Vec3f = normalise(jnp.cross(forward, up))
         up = jnp.cross(side, forward)
 
-        m: ModelView = (
+        m: View = (
             jnp.identity(4)  #
             .at[0, :3].set(side)  #
             .at[1, :3].set(up)  #
             .at[2, :3].set(-forward)  #
         )
-        translation: ModelView = jnp.identity(4).at[:3, 3].set(-eye)
+        translation: View = jnp.identity(4).at[:3, 3].set(-eye)
 
-        model_view: ModelView = m @ translation
+        view: View = m @ translation
 
-        return model_view
+        return view
 
     @staticmethod
     @jaxtyped
@@ -526,7 +525,7 @@ class Camera(NamedTuple):
         eye: Vec3f,
         centre: Vec3f,
         up: Vec3f,
-    ) -> ModelView:
+    ) -> View:
         """Compute the invert of View matrix as defined by OpenGL.
 
         Same as inverting `lookAt` in OpenGL, but more precise.
@@ -554,21 +553,21 @@ class Camera(NamedTuple):
         up = jnp.cross(side, forward)
 
         # inverse of rotation is just the transpose
-        m: ModelView = (
+        m: View = (
             jnp.identity(4)  #
             .at[0, :3].set(side)  #
             .at[1, :3].set(up)  #
             .at[2, :3].set(-forward)  #
         )
-        m_inv: ModelView = m.T
-        assert isinstance(m_inv, ModelView)
+        m_inv: View = m.T
+        assert isinstance(m_inv, View)
 
         # inverse of translation is just the negative of translation
-        translation_inv: ModelView = jnp.identity(4).at[:3, 3].set(eye)
-        assert isinstance(translation_inv, ModelView)
+        translation_inv: View = jnp.identity(4).at[:3, 3].set(eye)
+        assert isinstance(translation_inv, View)
 
-        view_matrix_inv: ModelView = translation_inv @ m_inv
-        assert isinstance(view_matrix_inv, ModelView)
+        view_matrix_inv: View = translation_inv @ m_inv
+        assert isinstance(view_matrix_inv, View)
 
         return view_matrix_inv
 

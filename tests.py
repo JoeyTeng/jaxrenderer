@@ -35,7 +35,7 @@ def gouraud_shader_with_simple_light(model: Model):
     depth = 1.
 
     camera: Camera = Camera.create(
-        model_view=Camera.model_view_matrix(eye=eye, centre=center, up=up),
+        view=Camera.view_matrix(eye=eye, centre=center, up=up),
         projection=Camera.perspective_projection_matrix(
             fovy=90.,
             aspect=1.,
@@ -89,7 +89,7 @@ def gouraud_shader_with_texture(model: Model, texture: Texture):
     depth = 1.
 
     camera: Camera = Camera.create(
-        model_view=Camera.model_view_matrix(eye=eye, centre=center, up=up),
+        view=Camera.view_matrix(eye=eye, centre=center, up=up),
         projection=Camera.perspective_projection_matrix(
             fovy=60.,
             aspect=1.,
@@ -151,7 +151,7 @@ def phong_shader_with_texture(model: Model, texture: Texture):
     depth = 1.
 
     camera: Camera = Camera.create(
-        model_view=Camera.model_view_matrix(eye=eye, centre=center, up=up),
+        view=Camera.view_matrix(eye=eye, centre=center, up=up),
         projection=Camera.perspective_projection_matrix(
             fovy=40.,
             aspect=1.,
@@ -219,7 +219,7 @@ def phong_shader_with_texture_phong_reflection(
     depth = 1.
 
     camera: Camera = Camera.create(
-        model_view=Camera.model_view_matrix(eye=eye, centre=center, up=up),
+        view=Camera.view_matrix(eye=eye, centre=center, up=up),
         projection=Camera.perspective_projection_matrix(
             fovy=40.,
             aspect=1.,
@@ -249,10 +249,10 @@ def phong_shader_with_texture_phong_reflection(
     specular_map = transpose_for_display(specular_map)
     assert isinstance(specular_map, SpecularMap)
 
-    # is not affected by projection, thus only need to transform by model_view
+    # is not affected by projection, thus only need to transform by view
     # into view space.
     light_dir_eye: Vec3f = normalise(
-        to_cartesian(camera.model_view @ (to_homogeneous(
+        to_cartesian(camera.view @ (to_homogeneous(
             normalise(light.direction.copy()),
             0.,
         ))))
@@ -307,7 +307,7 @@ def phong_shader_with_texture_nm_tangent(
     depth = 1.
 
     camera: Camera = Camera.create(
-        model_view=Camera.model_view_matrix(eye=eye, centre=center, up=up),
+        view=Camera.view_matrix(eye=eye, centre=center, up=up),
         projection=Camera.perspective_projection_matrix(
             fovy=40.,
             aspect=1.,
@@ -381,7 +381,7 @@ def depth_shader(model: Model):
     depth = 1.
 
     camera: Camera = Camera.create(
-        model_view=Camera.model_view_matrix(
+        view=Camera.view_matrix(
             eye=light.direction,
             centre=center,
             up=up,
@@ -438,7 +438,7 @@ def phong_shader_with_shadow(
     depth = 1.
 
     camera: Camera = Camera.create(
-        model_view=Camera.model_view_matrix(eye=eye, centre=center, up=up),
+        view=Camera.view_matrix(eye=eye, centre=center, up=up),
         projection=Camera.perspective_projection_matrix(
             fovy=40.,
             aspect=1.,
@@ -483,9 +483,9 @@ def phong_shader_with_shadow(
         texture = transpose_for_display(texture / 255.)
 
         # is not affected by projection, thus only need to transform by
-        # model_view into view space.
+        # view into view space.
         light_dir_eye: Vec3f = normalise(
-            to_cartesian(camera.model_view @ (to_homogeneous(
+            to_cartesian(camera.view @ (to_homogeneous(
                 normalise(light.direction.copy()),
                 0.,
             ))))

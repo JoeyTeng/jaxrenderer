@@ -20,7 +20,7 @@ dimension = jnp.array((width, height))
 depth = 255
 
 camera: Camera = Camera.create(
-    model_view=Camera.model_view_matrix(eye=eye, centre=center, up=up),
+    view=Camera.view_matrix(eye=eye, centre=center, up=up),
     projection=Camera.perspective_projection_matrix(
         fovy=90.,
         aspect=1.,

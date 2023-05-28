@@ -6,7 +6,7 @@ import jax.lax as lax
 import jax.numpy as jnp
 from jaxtyping import Array, Bool, Float, Integer, Num, jaxtyped
 
-from .geometry import Camera, ModelView, Projection, Viewport, normalise
+from .geometry import Camera, View, Projection, Viewport, normalise
 from .model import MergedModel, ModelMatrix, ModelObject
 from .pipeline import render
 from .shaders.phong_reflection import (PhongReflectionTextureExtraInput,
@@ -224,18 +224,18 @@ class Renderer:
     @partial(jax.jit, inline=True)
     def create_camera_from_parameters(camera: CameraParameters) -> Camera:
         """Create a camera from camera parameters."""
-        view_mat: ModelView = Camera.model_view_matrix(
+        view_mat: View = Camera.view_matrix(
             eye=camera.position,
             centre=camera.target,
             up=camera.up,
         )
-        assert isinstance(view_mat, ModelView), f"{view_mat}"
-        view_inv: ModelView = Camera.view_matrix_inv(
+        assert isinstance(view_mat, View), f"{view_mat}"
+        view_inv: View = Camera.view_matrix_inv(
             eye=camera.position,
             centre=camera.target,
             up=camera.up,
         )
-        assert isinstance(view_inv, ModelView), f"{view_inv}"
+        assert isinstance(view_inv, View), f"{view_inv}"
         projection_mat: Projection = Camera.perspective_projection_matrix(
             fovy=camera.vfov,
             aspect=(lax.tan(jnp.radians(camera.hfov) / 2.) /
@@ -252,7 +252,7 @@ class Renderer:
         assert isinstance(viewport_mat, Viewport), f"{viewport_mat}"
 
         _camera: Camera = Camera.create(
-            model_view=view_mat,
+            view=view_mat,
             projection=projection_mat,
             viewport=viewport_mat,
             view_inv=view_inv,
@@ -301,7 +301,7 @@ class Renderer:
 
         light_dir_eye: Vec3f = Camera.apply_vec(
             light_dir.copy(),
-            camera.model_view,
+            camera.view,
         )
         assert isinstance(light_dir_eye, Vec3f), f"{light_dir_eye}"
 

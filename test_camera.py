@@ -9,7 +9,7 @@ centre = jnp.array((0, 0, 0))
 up = jnp.array((0, 0, 1))
 
 print(
-    Camera.model_view_matrix(eye, centre, up) @ Camera.view_matrix_inv(
+    Camera.view_matrix(eye, centre, up) @ Camera.view_matrix_inv(
         eye, centre, up))
 
 lowerbound = jnp.array((3, 2))
@@ -29,7 +29,7 @@ verts = jax.random.uniform(subkey, shape=(101, 3), minval=-1., maxval=1.)
 verts = to_homogeneous(verts)
 
 camera: Camera = Camera.create(
-    model_view=Camera.model_view_matrix(eye, centre, up),
+    view=Camera.view_matrix(eye, centre, up),
     projection=proj,
     viewport=viewport,
     view_inv=Camera.view_matrix_inv(eye, centre, up),
@@ -41,7 +41,7 @@ w = jnp.array((
     (15., 23., 2., 1.),
     (0., 0., 1., 1.),
 ))[0]
-e = camera.apply(w, camera.model_view)
+e = camera.apply(w, camera.view)
 print("e<=>w", w, camera.view_inv @ e)
 c = camera.apply(e, camera.projection)
 shuffle = jax.lax.cond(
