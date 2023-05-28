@@ -55,8 +55,12 @@ class LightParameters(NamedTuple):
 
     Default values come from [erwincoumans/tinyrenderer::TinyRenderLight](https://github.com/erwincoumans/tinyrenderer/blob/89e8adafb35ecf5134e7b17b71b0f825939dc6d9/python/pytinyrenderer.cc#L74).
     """
-    direction: Vec3f = normalise(-1 * jnp.array((0.57735, 0.57735, 0.57735)))
-    """in world space, as it goes towards that position from origin (camera)."""
+    direction: Vec3f = normalise(jnp.array((0.57735, 0.57735, 0.57735)))
+    """in world space, as it goes from that position to origin (camera).
+
+    For example, if direction = camera's eye, full specular will be applied to
+    triangles with normal towards camera.
+    """
     colour: Colour = jnp.ones(3)
     """Light source to render."""
     ambient: Colour = jnp.array((0.6, 0.6, 0.6))

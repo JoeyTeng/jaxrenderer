@@ -82,7 +82,11 @@ class DtypeInfo(NamedTuple):
 
 class LightSource(NamedTuple):
     direction: Vec3f = jax.numpy.array((0., 0., -1.))
-    """in world space, as it goes towards that position from origin (camera)."""
+    """in world space, as it goes from that position to origin (camera).
+
+    For example, if direction = camera's eye, full specular will be applied to
+    triangles with normal towards camera.
+    """
     colour: Colour = jax.numpy.ones(3)
 
 
