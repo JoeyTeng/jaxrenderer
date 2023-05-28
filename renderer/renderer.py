@@ -82,11 +82,11 @@ class ShadowParameters(NamedTuple):
     """centre of the scene, same as object's camera's centre."""
     up: Vec3f = jnp.array((0., 0., 1.))
     """up direction of the scene, same as object's camera's up."""
-    strength: Colour = jnp.array((0.4, 0.4, 0.4))
+    strength: Colour = 1 - jnp.array((0.4, 0.4, 0.4))
     """Strength of shadow. Must be in [0, 1]. 0 means no shadow, 1 means fully
         black shadow.  See `Shadow.strength` for more details.
     """
-    offset: float = 0.001
+    offset: float = 0.05
     """Offset to avoid self-shadowing / z-fighting. This will be subtracted to
         the shadow map, making the shadows further away from the light.
     """
@@ -107,6 +107,35 @@ class Renderer:
         """
         with jax.ensure_compile_time_eval():
             models = [obj.model for obj in objects]
+
+            # broadcasted per vertex info
+            counts: list[int] = [len(m.verts) for m in models]
+
+            map_indices: Integer[Array, "vertices"]
+            map_indices = MergedModel.generate_object_vert_info(
+                counts,
+                list(range(len(models))),
+            )
+            assert isinstance(map_indices, Integer[Array, "vertices"])
+
+            map_wh_per_object = MergedModel.generate_object_vert_info(
+                counts,
+                [jnp.asarray(m.diffuse_map.shape[:2]) for m in models],
+            )
+            assert isinstance(map_wh_per_object, Integer[Array, "vertices 2"])
+
+            double_sided: Bool[Array, "vertices"]
+            double_sided = MergedModel.generate_object_vert_info(
+                counts,
+                [obj.double_sided for obj in objects],
+            )
+            assert isinstance(double_sided, Bool[Array, "vertices"])
+
+        # merge maps
+        diffuse_map, single_map_shape = MergedModel.merge_maps(
+            [m.diffuse_map for m in models])
+        specular_map, _ = MergedModel.merge_maps(
+            [m.specular_map for m in models])
 
         @jaxtyped
         @partial(jax.jit, inline=True)
@@ -135,8 +164,28 @@ class Renderer:
             ],
             [m.faces for m in models],
         )
+
+        @jaxtyped
+        @partial(jax.jit, inline=True)
+        def transform_normals(
+            normals: Float[Array, "N 3"],
+            transform: ModelMatrix,
+        ) -> Vertices:
+            """Apply transforms defined in `ModelObject` to vertex normals."""
+            world: Float[Array, "N 3"] = Camera.apply_vec(
+                normals,
+                # transform by inverse transpose
+                jnp.linalg.inv(transform).T,
+            )
+            assert isinstance(world, Float[Array, "N 3"])
+
+            return world
+
         norms, faces_norm = MergedModel.merge_verts(
-            [m.norms for m in models],
+            [
+                transform_normals(obj.model.norms, obj.transform)
+                for obj in objects
+            ],
             [m.faces_norm for m in models],
         )
         uvs, faces_uv = MergedModel.merge_verts(
@@ -144,29 +193,19 @@ class Renderer:
             [m.faces_uv for m in models],
         )
 
-        # merge maps
-        diffuse_map, single_map_shape = MergedModel.merge_maps(
-            [m.diffuse_map for m in models])
-        specular_map, _ = MergedModel.merge_maps(
-            [m.specular_map for m in models])
-
-        # other fields
-        with jax.ensure_compile_time_eval():
-            counts: list[int] = [len(m.verts) for m in models]
-
-            map_indices: Integer[Array, "vertices"]
-            map_indices = MergedModel.generate_object_vert_info(
-                counts,
-                list(range(len(models))),
-            )
-            assert isinstance(map_indices, Integer[Array, "vertices"])
-
-            double_sided: Bool[Array, "vertices"]
-            double_sided = MergedModel.generate_object_vert_info(
-                counts,
-                [obj.double_sided for obj in objects],
-            )
-            assert isinstance(double_sided, Bool[Array, "vertices"])
+        # ensure uvs are within each of the map, by effectively repeating the
+        # map, using `mod`. It is the same to modulo here first, as modulo at
+        # fragment shader, as the value is interpolated within the triangle
+        # "linearly", by only dot product a vector, and the sum of the vector
+        # is 1, making the result not exceeding the range of the map.
+        single_map_shape = jnp.asarray(single_map_shape)
+        assert isinstance(single_map_shape, Integer[Array, "2"])
+        uvs = uvs[:, ::-1]  # swap x and y, equivalent to transpose the map
+        uvs = jax.vmap(
+            partial(
+                MergedModel.uv_repeat,
+                offset_shape=single_map_shape,
+            ))(uvs, map_wh_per_object, map_indices)
 
         return MergedModel(
             verts=verts,
@@ -175,9 +214,7 @@ class Renderer:
             faces=faces,
             faces_norm=faces_norm,
             faces_uv=faces_uv,
-            map_indices=map_indices,
             double_sided=double_sided,
-            single_map_shape=jnp.asarray(single_map_shape),
             diffuse_map=diffuse_map,
             specular_map=specular_map,
         )
@@ -259,8 +296,11 @@ class Renderer:
         face_indices = jnp.arange(model.faces.size).reshape(model.faces.shape)
         assert isinstance(face_indices, Integer[Array, "_ 3"])
 
+        light_dir: Vec3f = normalise(light.direction.copy())
+        assert isinstance(light_dir, Vec3f), f"{light_dir}"
+
         light_dir_eye: Vec3f = Camera.apply_vec(
-            light.direction.copy(),
+            light_dir.copy(),
             camera.model_view,
         )
         assert isinstance(light_dir_eye, Vec3f), f"{light_dir_eye}"
@@ -270,7 +310,7 @@ class Renderer:
             normal=normal,
             uv=uv,
             light=LightSource(
-                direction=light.direction,
+                direction=light_dir,
                 colour=light.colour,
             ),
             light_dir_eye=light_dir_eye,
@@ -343,10 +383,9 @@ class Renderer:
         camera: Union[Camera, CameraParameters],
         width: int,
         height: int,
-        colourChannels: int = 3,
+        colour_default: Colour = jnp.array((1., 1., 1.), dtype=jnp.single),
         zbuffer_default: Num[Array, ""] = jnp.array(1),
         zbuffer_dtype: jnp.dtype[Any] = jnp.single,
-        colour_dtype: jnp.dtype[Any] = jnp.single,
         shadow_param: Optional[ShadowParameters] = None,
     ) -> Canvas:
         """Render the scene with the given camera.
@@ -373,9 +412,9 @@ class Renderer:
             (width, height),
             jnp.array(zbuffer_default, dtype=zbuffer_dtype),
         )
-        canvas: Canvas = lax.full(
-            (width, height, colourChannels),
-            jnp.array(0, dtype=colour_dtype),
+        canvas: Canvas = jnp.full(
+            (width, height, colour_default.size),
+            colour_default,
         )
         buffers: Buffers = Buffers(
             zbuffer=zbuffer,

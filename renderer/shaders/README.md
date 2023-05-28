@@ -36,7 +36,7 @@ This is a simple implementation of Phong shading with Phong reflection approxima
 
 Phong's Approximation is used to support `specular`, `ambient` and `diffuse` lighting. The spcular lighting is computed with shininess factor given in a `SpecularMap`.
 
-The light direction needs to be given in the view/eye space.
+The light direction needs to be given in the pre-projection view/eye space via `light_dir_eye`. The normals are transformed into eye space as well for light computation.
 
 ## Phong Shading with Shadow and Phong Reflection Approximation `phong_reflection_shadow.py`
 

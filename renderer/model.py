@@ -106,13 +106,11 @@ class MergedModel(NamedTuple):
     faces_norm: FaceIndices
     faces_uv: FaceIndices
 
-    map_indices: Integer[Array, "vertices"]
-    """Map indices for each face, used for `uv_repeat`."""
+    # broadcasted object info into per-vertex
     double_sided: Bool[Array, "vertices"]
     """Whether each face is double sided."""
 
     # Merged maps
-    single_map_shape: Integer[Array, "2"]
     diffuse_map: Texture
     specular_map: SpecularMap
 
@@ -120,7 +118,7 @@ class MergedModel(NamedTuple):
     @jaxtyped
     def generate_object_vert_info(
         counts: Sequence[int],
-        values: Sequence[Shaped[Array, ""]],
+        values: Sequence[Shaped[Array, "..."]],
     ) -> Shaped[Array, "vertices"]:
         """Generate object-wide info for each vertex in merged model as
             vertex-level info.
@@ -136,7 +134,8 @@ class MergedModel(NamedTuple):
             `counts`.
         """
         values: Sequence[Shaped[Array, "_"]] = tree_map(
-            lambda count, value: jnp.full((count, ), value),
+            lambda count, value: jnp.full(
+                (count, *jnp.asarray(value).shape), value),
             counts,
             values,
         )
