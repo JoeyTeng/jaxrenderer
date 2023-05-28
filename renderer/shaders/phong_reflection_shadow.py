@@ -154,11 +154,16 @@ class PhongReflectionShadowTextureShader(
         texture_colour: Colour = extra.texture[uv[0], uv[1]]
 
         normal: Vec3f = normalise(varying.normal)
-        light_dir: Vec3f = extra.light_dir_eye
+        # in Phong shading, the light direction is towards the light source;
+        light_dir: Vec3f = normalise(extra.light_dir_eye)
 
         # Phong Reflection Model
-        diffuse: float = lax.dot(normal, light_dir)
-        reflected_light: Vec3f = normalise(light_dir - 2 * diffuse * normal)
+        diffuse: float = jnp.maximum(lax.dot(normal, light_dir), 0)
+        # If using standard reflection formula
+        # `light_dir - 2 * diffuse * normal`, need to use
+        # `-1 * light_dir` as `light_dir` instead.
+        reflected_light: Vec3f = normalise(2 * lax.dot(normal, light_dir) *
+                                           normal - light_dir)
         assert isinstance(reflected_light, Vec3f)
 
         specular: float = lax.pow(
@@ -167,11 +172,10 @@ class PhongReflectionShadowTextureShader(
         )
 
         # compute colour
-        colour: Colour = ((
-            extra.ambient +
+        colour: Colour = (
+            extra.ambient * texture_colour + shadow *
             (extra.diffuse * diffuse + extra.specular * specular) *
-            # shadow * intensity * light colour * texture colour
-            shadow) * extra.light.colour * texture_colour)
+            texture_colour * extra.light.colour)
 
         return (
             PerFragment(

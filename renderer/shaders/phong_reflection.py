@@ -5,7 +5,7 @@ import jax.lax as lax
 import jax.numpy as jnp
 from jaxtyping import Array, Bool, Float, jaxtyped
 
-from ..geometry import Camera, normalise, to_cartesian, to_homogeneous
+from ..geometry import Camera, normalise, to_homogeneous
 from ..shader import ID, MixerOutput, PerFragment, PerVertex, Shader
 from ..types import Colour, LightSource, SpecularMap, Texture, Vec2f, Vec3f, Vec4f
 
@@ -119,19 +119,25 @@ class PhongReflectionTextureShader(
         texture_colour: Colour = extra.texture[uv[0], uv[1]]
 
         normal: Vec3f = normalise(varying.normal)
-        light_dir: Vec3f = extra.light_dir_eye
+        light_dir: Vec3f = normalise(extra.light_dir_eye)
 
-        diffuse: float = lax.dot(normal, light_dir)
-        reflected_light: Vec3f = normalise(light_dir - 2 * diffuse * normal)
+        # Phong Reflection Model
+        diffuse: float = jnp.maximum(lax.dot(normal, light_dir), 0)
+        # as `light_dir * -1` should be used here, if
+        # using `light_dir - 2 * diffuse * normal`
+        reflected_light: Vec3f = normalise(2 * lax.dot(normal, light_dir) *
+                                           normal - light_dir)
         assert isinstance(reflected_light, Vec3f)
 
         specular: float = lax.pow(
             lax.max(reflected_light[2], 0.),
             extra.specular_map[uv[0], uv[1]],
         )
+
+        # compute colour
         colour: Colour = (
-            (extra.ambient +
-             (extra.diffuse * diffuse + extra.specular * specular)) *
+            extra.ambient * texture_colour +
+            (extra.diffuse * diffuse + extra.specular * specular) *
             # intensity * light colour * texture colour
             extra.light.colour * texture_colour)
 
