@@ -3,13 +3,14 @@ from typing import NamedTuple
 
 import jax
 import jax.lax as lax
+import jax.numpy as jnp
 from jaxtyping import Array, Float, jaxtyped
 
-from .geometry import Camera, ModelView, Viewport, World2Screen
+from .geometry import Camera, ModelView, Viewport
 from .pipeline import render
 from .shaders.depth import DepthExtraInput, DepthShader
-from .types import (Buffers, Colour, FaceIndices, Vec2i, Vec3f, Vertices,
-                    ZBuffer)
+from .types import (Buffers, Colour, FaceIndices, Vec2f, Vec2i, Vec3f,
+                    Vertices, ZBuffer)
 
 
 class Shadow(NamedTuple):
@@ -21,8 +22,8 @@ class Shadow(NamedTuple):
     black shadow. (1 - strength) of the original colour will be added to the
     shadowed colour.
     """
-    matrix: World2Screen
-    """Transformation matrix from world space to light source's screen space."""
+    camera: Camera
+    """Camera from world space to shadow map's screen space."""
 
     @staticmethod
     @jaxtyped
@@ -37,6 +38,7 @@ class Shadow(NamedTuple):
         up: Vec3f,
         strength: Colour,
         offset: float = 0.001,
+        distance: float = 10.,
     ) -> "Shadow":
         """Render shadow map from light source's point of view.
 
@@ -53,12 +55,15 @@ class Shadow(NamedTuple):
           - offset: Offset to avoid self-shadowing / z-fighting. This will be
             added to the shadow map, making the shadows further away from
             the light.
+          - distance: Distance from the light source to the centre of the
+            scene. This is mainly to avoid objects being clipped.
 
         Returns: Updated `Shadow` object with shadow_map updated.
         """
 
         model_view: ModelView = Camera.model_view_matrix(
-            eye=light_direction - centre,  # keep "forward = -light_direction"
+            # keep "forward = -light_direction"
+            eye=centre + light_direction * distance,
             centre=centre,
             up=up,
         )
@@ -76,6 +81,8 @@ class Shadow(NamedTuple):
             ),
             viewport=viewport_matrix,
         )
+        assert isinstance(_camera, Camera)
+
         buffers = Buffers(zbuffer=shadow_map, targets=tuple())
         extra = DepthExtraInput(position=verts)
         shadow_map, _ = render(_camera, DepthShader, buffers, faces, extra)
@@ -85,20 +92,32 @@ class Shadow(NamedTuple):
         shadow: Shadow = Shadow(
             shadow_map=shadow_map,
             strength=strength,
-            matrix=_camera.world_to_screen,
+            camera=_camera,
         )
 
         return shadow
 
     @jaxtyped
     @partial(jax.jit, inline=True)
-    def get(self, position: Vec3f) -> Float[Array, ""]:
+    def get(self, position: Vec2f) -> Float[Array, ""]:
         """Get shadow depth at `position`.
 
         Parameters:
           - position: position in shadow buffer's screen space.
         """
+        assert isinstance(position, Vec2f), f"{position} is not a Vec3f."
+
         pos: Vec2i = lax.round(position[:2]).astype(int)
         assert isinstance(pos, Vec2i)
 
-        return self.shadow_map[pos[0], pos[1]]
+        value: Float[Array, ""] = lax.cond(
+            jnp.logical_or(
+                pos < 0,
+                pos >= jnp.asarray(self.shadow_map.shape[:2]),
+            ).any(),
+            lambda: jnp.inf,  # outside shadow map, no shadow
+            lambda: self.shadow_map[pos[0], pos[1]],
+        )
+        assert isinstance(value, Float[Array, ""])
+
+        return value

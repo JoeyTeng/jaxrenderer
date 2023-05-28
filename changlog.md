@@ -7,3 +7,4 @@
 3. Change default `Shader.mixer` behaviour: now it picks the fragment with minimum depth value `gl_FragDepth`.
 4. Change `shadow.py::Shadow.render_shadow_map` according to the z-value definition change, to add into the shadow map instead of subtracting so to move shadow maps further away from the "camera" (light).
 5. Change `shaders/phong_reflection_shadow` according to the z-value definition change.
+6. Transform shadow coordinates in VS (world => NDC) and FS (NDC => screen) instead of transforming in FS (model's screen => world => screen) to avoid precision loss in inverse matrix computation.

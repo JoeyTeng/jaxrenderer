@@ -5,7 +5,7 @@ import jax.lax as lax
 import jax.numpy as jnp
 from jaxtyping import Array, Bool, Float, jaxtyped
 
-from ..geometry import Camera, normalise, normalise_homogeneous, to_cartesian, to_homogeneous
+from ..geometry import Camera, normalise, normalise_homogeneous, to_homogeneous
 from ..shader import ID, MixerOutput, PerFragment, PerVertex, Shader
 from ..shadow import Shadow
 from ..types import (Colour, LightSource, SpecularMap, Texture, Vec2f, Vec3f,
@@ -52,10 +52,12 @@ class PhongReflectionShadowTextureExtraFragmentData(NamedTuple):
     Attributes:
       - normal: in clip space, of each fragment; From VS to FS.
       - uv: in texture space, of each fragment; From VS to FS.
+      - shadow_coord: in shadow's clip space, of each fragment; From VS to FS.
       - colour: colour when passing from FS to mixer.
     """
     normal: Vec3f = jnp.zeros(3)
     uv: Vec2f = jnp.zeros(2)
+    shadow_coord: Vec4f = jnp.zeros(4)
     colour: Colour = jnp.zeros(3)
 
 
@@ -95,6 +97,12 @@ class PhongReflectionShadowTextureShader(
         )
         assert isinstance(normal, Vec3f)
 
+        # shadow. Normalise here as it is not done implicitly in the pipeline.
+        # the result is in shadow's clip space, as NDC.
+        shadow_coord: Vec4f = normalise_homogeneous(
+            extra.shadow.camera.to_clip(position))
+        assert isinstance(shadow_coord, Vec4f)
+
         return (
             PerVertex(gl_Position=gl_Position),
             PhongReflectionShadowTextureExtraFragmentData(
@@ -102,6 +110,7 @@ class PhongReflectionShadowTextureShader(
                 # repeat texture
                 uv=extra.uv[gl_VertexID] %
                 jnp.asarray(extra.texture.shape[:2]),
+                shadow_coord=shadow_coord,
             ),
         )
 
@@ -125,10 +134,9 @@ class PhongReflectionShadowTextureShader(
         assert isinstance(built_in, PerFragment)
 
         # shadow
-        # Use a more precise way to compute shadow coordinate to avoid NaN, as
-        # sometimes an imprecise result will have [3] being 0, causing NaN.
+        # from NDC to screen coordinates, in shadow's screen space.
         shadow_coord: Vec4f = normalise_homogeneous(
-            extra.shadow.matrix @ extra.camera.to_screen_inv(gl_FragCoord))
+            extra.shadow.camera.viewport @ varying.shadow_coord)
         assert isinstance(shadow_coord, Vec4f)
         shadow_str: Colour = extra.shadow.strength
         assert isinstance(shadow_str, Colour)
