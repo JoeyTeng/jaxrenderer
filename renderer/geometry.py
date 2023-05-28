@@ -104,7 +104,11 @@ def interpolate(
     Default mode is `Interpolation.SMOOTH`.
     """
     interpolated: Num[Array, "*valueDimensions"]
-    interpolated = mode(barycentric_screen, barycentric_clip, values)
+    interpolated = mode(
+        values=values,
+        barycentric_screen=barycentric_screen,
+        barycentric_clip=barycentric_clip,
+    )
     assert isinstance(interpolated, Num[Array, "*valueDimensions"])
 
     return interpolated
