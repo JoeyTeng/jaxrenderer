@@ -1,4 +1,4 @@
-from typing import NamedTuple, Sequence, TypeVar, Union
+from typing import NamedTuple, Sequence, Union
 
 import jax
 import jax.experimental.checkify as checkify
@@ -231,7 +231,7 @@ class MergedModel(NamedTuple):
     @jaxtyped
     @jax.jit
     def uv_repeat(
-        uv: Num[Array, "2"],
+        uv: Float[Array, "2"],
         shape: Integer[Array, "2"],
         map_index: Integer[Array, ""],
         offset_shape: Integer[Array, "2"],
@@ -251,6 +251,11 @@ class MergedModel(NamedTuple):
         # we need to multiply it by (w, h) of the texture map first.
         # This is equivalent to just obtain the fractional part of uv.
         fractional_uv, _ = jnp.modf(uv)
+        fractional_uv = jnp.where(
+            fractional_uv < 0,
+            fractional_uv + 1,
+            fractional_uv,
+        )
         assert isinstance(fractional_uv, Float[Array, "2"])
 
         return fractional_uv * shape + (map_index * offset_shape)
