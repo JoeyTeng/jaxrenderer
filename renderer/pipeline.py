@@ -91,12 +91,17 @@ def _postprocessing(
                 # no need to "normalise" as barycentric coordinates here
                 # ensures it sums to 1, thus result is normalised when inputs
                 # are.
+                # Mode: NOPERSPECTIVE: since inverse of the depth is linear,
+                # the correct way to interpolate it is just to interpolate
+                # under screen space using bc_screen,
+                # or using `NONPERSPECTVIE` mode.
                 gl_FragCoord: Vec4f = interpolate(
                     screen,
                     bc_screen,
                     bc_clip,
-                    mode=Interpolation.SMOOTH,
+                    mode=Interpolation.NOPERSPECTIVE,
                 )
+                gl_FragCoord.at[:2].set(coord)
                 assert isinstance(gl_FragCoord, Vec4f)
 
                 # Ref: https://registry.khronos.org/OpenGL-Refpages/gl4/html/gl_FrontFacing.xhtml
