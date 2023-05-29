@@ -38,8 +38,8 @@ class PhongReflectionTextureExtraInput(NamedTuple):
     light: LightSource
     light_dir_eye: Vec3f  # in eye/view space
     texture_shape: Integer[Array, "objects 2"]
-    texture_index: Float[Array, "vertices"]
-    offset_shape: Integer[Array, "2"]
+    texture_index: Integer[Array, "vertices"]
+    texture_offset: Integer[Array, ""]
     texture: Texture
     specular_map: SpecularMap
     ambient: Colour
@@ -58,7 +58,7 @@ class PhongReflectionTextureExtraFragmentData(NamedTuple):
     """
     normal: Vec3f = jnp.zeros(3)
     uv: Vec2f = jnp.zeros(2)
-    texture_index: Float[Array, ""] = jnp.zeros(())
+    texture_index: Integer[Array, ""] = jnp.array(0)
     colour: Colour = jnp.zeros(3)
 
 
@@ -102,10 +102,28 @@ class PhongReflectionTextureShader(
                 normal=normal,
                 # repeat texture
                 uv=extra.uv[gl_VertexID],
-                texture_index=extra.texture_index[gl_VertexID].astype(
-                    jnp.single),
+                texture_index=extra.texture_index[gl_VertexID],
             ),
         )
+
+    @staticmethod
+    @jaxtyped
+    @jax.jit
+    def interpolate(
+        values: PhongReflectionTextureExtraFragmentData,
+        barycentric_screen: Vec3f,
+        barycentric_clip: Vec3f,
+    ) -> PhongReflectionTextureExtraFragmentData:
+        varying = Shader.interpolate(
+            values=values,
+            barycentric_screen=barycentric_screen,
+            barycentric_clip=barycentric_clip,
+        )
+        # all three values should be the same, just pick the first.
+        varying = varying._replace(texture_index=values.texture_index[0])
+        assert isinstance(varying, PhongReflectionTextureExtraFragmentData)
+
+        return varying
 
     @staticmethod
     @jaxtyped
@@ -130,10 +148,10 @@ class PhongReflectionTextureShader(
         texture_index = varying.texture_index.astype(int)
         texture_shape = extra.texture_shape[texture_index]
         uv = MergedModel.uv_repeat(
-            varying.uv,
-            texture_shape,
-            texture_index,
-            extra.offset_shape,
+            uv=varying.uv,
+            shape=texture_shape,
+            map_index=texture_index,
+            offset=extra.texture_offset,
         )
         uv = lax.floor(uv).astype(int)
         assert isinstance(uv, Vec2i)

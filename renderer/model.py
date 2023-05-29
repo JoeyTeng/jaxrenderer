@@ -107,16 +107,16 @@ class MergedModel(NamedTuple):
     faces_uv: FaceIndices
 
     # broadcasted object info into per-vertex
-    texture_shape: Integer[Array, "vertices 2"]
-    """Width, height of each texture map."""
     texture_index: Integer[Array, "vertices"]
     """Texture map index for each vertex."""
     double_sided: Bool[Array, "vertices"]
     """Whether each face is double sided."""
 
     # Merged maps
-    offset_shape: Integer[Array, "2"]
-    """Width, height of biggest merged maps, as returned by `merge_maps`."""
+    texture_shape: Integer[Array, "objects 2"]
+    """Width, height of each texture map."""
+    offset: Integer[Array, ""]
+    """Width of biggest merged maps, as [0] returned by `merge_maps`."""
     diffuse_map: Texture
     specular_map: SpecularMap
 
@@ -234,7 +234,7 @@ class MergedModel(NamedTuple):
         uv: Float[Array, "2"],
         shape: Integer[Array, "2"],
         map_index: Integer[Array, ""],
-        offset_shape: Integer[Array, "2"],
+        offset: Integer[Array, ""],
     ) -> Float[Array, "2"]:
         """Compute final UV coordinates as if it is repeatedly tiled (in case
             of out-of-bound uv coordinate).
@@ -243,10 +243,15 @@ class MergedModel(NamedTuple):
           - uv: raw uv coordinates, in floating numbers. Only fractional part
             is used, as if the uv coordinates are in [0, 1].
           - shape: of the map being used, according to `map_index`.
-          - offset_shape: of each map in the merged maps, as returned by
-            `merge_maps`.
+          - offset: of each map in the merged maps, as [0] returned by
+            `merge_maps`. Only first axis is required, thus here we just need a
+            scalar.
           - map_index: index of the map to use.
         """
+        assert isinstance(uv, Float[Array, "2"]), f"{uv}"
+        assert isinstance(shape, Integer[Array, "2"]), f"{shape}"
+        assert isinstance(map_index, Integer[Array, ""]), f"{map_index}"
+        assert isinstance(offset, Integer[Array, ""]), f"{offset}"
         # since given uv are in [0, 1] (and may be scaled, if is cube),
         # we need to multiply it by (w, h) of the texture map first.
         # This is equivalent to just obtain the fractional part of uv.
@@ -258,7 +263,7 @@ class MergedModel(NamedTuple):
         )
         assert isinstance(fractional_uv, Float[Array, "2"])
 
-        return fractional_uv * shape + (map_index * offset_shape)
+        return (fractional_uv * shape).at[0].add(map_index * offset)
 
 
 class ModelObject(NamedTuple):

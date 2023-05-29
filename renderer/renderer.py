@@ -122,11 +122,9 @@ class Renderer:
             )
             assert isinstance(map_indices, Integer[Array, "vertices"])
 
-            map_wh_per_object = MergedModel.generate_object_vert_info(
-                counts,
-                [jnp.asarray(m.diffuse_map.shape[:2]) for m in models],
-            )
-            assert isinstance(map_wh_per_object, Integer[Array, "vertices 2"])
+            map_wh_per_object = jnp.asarray(
+                [m.diffuse_map.shape[:2] for m in models])
+            assert isinstance(map_wh_per_object, Integer[Array, "objects 2"])
 
             double_sided: Bool[Array, "vertices"]
             double_sided = MergedModel.generate_object_vert_info(
@@ -197,9 +195,6 @@ class Renderer:
             [m.faces_uv for m in models],
         )
 
-        single_map_shape = jnp.asarray(single_map_shape)
-        assert isinstance(single_map_shape, Integer[Array, "2"])
-
         return MergedModel(
             verts=verts,
             norms=norms,
@@ -210,7 +205,7 @@ class Renderer:
             texture_shape=map_wh_per_object,
             texture_index=map_indices,
             double_sided=double_sided,
-            offset_shape=single_map_shape,
+            offset=single_map_shape[0],
             diffuse_map=diffuse_map,
             specular_map=specular_map,
         )
@@ -285,6 +280,9 @@ class Renderer:
         normal = model.norms[model.faces_norm.reshape((-1, ))]
         uv = model.uvs[model.faces_uv.reshape((-1, ))]
 
+        texture_index = model.texture_index[model.faces_uv.reshape((-1, ))]
+        double_sided = model.texture_index[model.faces_uv.reshape((-1, ))]
+
         face_indices: Integer[Array, "_ 3"]
         face_indices = jnp.arange(model.faces.size).reshape(model.faces.shape)
         assert isinstance(face_indices, Integer[Array, "_ 3"])
@@ -308,8 +306,8 @@ class Renderer:
             ),
             light_dir_eye=light_dir_eye,
             texture_shape=model.texture_shape,
-            texture_index=model.texture_index,
-            offset_shape=model.offset_shape,
+            texture_index=texture_index,
+            texture_offset=model.offset,
             texture=model.diffuse_map,
             specular_map=model.specular_map,
             ambient=light.ambient,
