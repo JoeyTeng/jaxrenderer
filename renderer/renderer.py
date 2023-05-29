@@ -204,7 +204,6 @@ class Renderer:
         # is 1, making the result not exceeding the range of the map.
         single_map_shape = jnp.asarray(single_map_shape)
         assert isinstance(single_map_shape, Integer[Array, "2"])
-        uvs = uvs.at[:, 1].multiply(-1)  # reverse in y direction
         uvs = jax.vmap(
             partial(
                 MergedModel.uv_repeat,

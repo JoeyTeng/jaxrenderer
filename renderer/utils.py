@@ -1,9 +1,11 @@
+from typing import Sequence, Union
+
 import jax
 import jax.numpy as jnp
 from jax import lax
-from jaxtyping import jaxtyped, Array, Integer, Num, Shaped
+from jaxtyping import Array, Integer, Num, Shaped, jaxtyped
 
-from .types import Canvas, ZBuffer
+from .types import Canvas, Texture, ZBuffer
 
 
 @jaxtyped
@@ -50,3 +52,28 @@ def transpose_for_display(
         matrix: Num[Array,
                     "fst snd *channel"]) -> Num[Array, "snd fst *channel"]:
     return jnp.swapaxes(matrix, 0, 1)
+
+
+@jaxtyped
+def build_texture_from_PyTinyrenderer(
+    texture: Union[Num[Array, "length"], Sequence[float]],
+    width: int,
+    height: int,
+) -> Texture:
+    """Build a texture from PyTinyrenderer's format.
+
+    The texture was specified in C order (channel varies the fastest), but with
+    y as the first axis. Besides, after swapping the first two axes, the second axis is reversed as required by this renderer.
+
+    Parameters:
+      - texture: a 1D array of length `width * height * channels`, where each
+        channel elements represent a pixel in RGB order. When channels is 1,
+        the resulted texture still has 3 dimensions, with last dimension of
+        side 1.
+      - width: width of the texture.
+      - height: height of the texture.
+
+    Returns: A texture with shape `(width, height, channels)`.
+    """
+    return jnp.reshape(texture, (width, height, -1),
+                       order="C").swapaxes(0, 1)[:, ::-1, :]
