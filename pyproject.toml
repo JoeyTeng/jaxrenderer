@@ -1,9 +1,9 @@
 [tool.poetry]
-name = "jaxtinyrenderer"
-version = "0.1.0"
+name = "jaxrenderer"
+version = "0.0.1"
 description = "Jax implementation of ssloy/tinyrenderer for brax"
 authors = ["Joey Teng <joey.teng.dev@gmail.com>"]
-license = "MIT License"
+license = "Apache 2.0"
 readme = "README.md"
 
 [tool.poetry.dependencies]
