@@ -269,7 +269,7 @@ class Renderer:
     @partial(jax.jit, static_argnames=("cls", ), donate_argnums=(4, ))
     def render(
         cls,
-        objects: ObjectsT,
+        model: MergedModel,
         light: LightParameters,
         camera: Camera,
         buffers: Buffers,
@@ -278,7 +278,7 @@ class Renderer:
         """Render the scene with the given camera.
 
         Parameters:
-          - objects: the objects to render.
+          - model: merged model of all the objects to render.
           - light: the light to render the scene with.
           - camera: the camera to render the scene with.
           - buffers: the buffers to render the scene with.
@@ -287,9 +287,6 @@ class Renderer:
 
         Returns: Buffers, with zbuffer and (coloured image, ).
         """
-        model: MergedModel = cls.merge_objects(objects)
-        assert isinstance(model, MergedModel), f"{model}"
-
         # flatten so each vertex has its own "extra"
         position = model.verts[model.faces.reshape((-1, ))]
         normal = model.norms[model.faces_norm.reshape((-1, ))]
@@ -423,8 +420,11 @@ class Renderer:
             targets=(canvas, ),
         )
 
+        model: MergedModel = cls.merge_objects(objects)
+        assert isinstance(model, MergedModel), f"{model}"
+
         _, (canvas, ) = cls.render(
-            objects=objects,
+            model=model,
             light=light,
             camera=_camera,
             buffers=buffers,
