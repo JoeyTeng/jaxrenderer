@@ -1,10 +1,35 @@
 [tool.poetry]
 name = "jaxrenderer"
 version = "0.0.1"
-description = "Jax implementation of ssloy/tinyrenderer for brax"
+description = "Jax implementation of rasterizer renderer."
 authors = ["Joey Teng <joey.teng.dev@gmail.com>"]
-license = "Apache 2.0"
+license = "Apache-2.0"
 readme = "README.md"
+homepage = "https://github.com/JoeyTeng/jaxrenderer"
+repository = "https://github.com/JoeyTeng/jaxrenderer"
+classifiers = [
+    "Topic :: Multimedia :: Graphics :: 3D Rendering",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Scientific/Engineering :: Visualization",
+    "Development Status :: 3 - Alpha",
+    "Operating System :: OS Independent",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Education",
+    "Intended Audience :: Science/Research",
+    "Natural Language :: Chinese (Simplified)",
+    "Natural Language :: English",
+    "Typing :: Typed",
+]
+packages = [
+    { include = "renderer" },
+]
+include = [
+    "LICENSE",
+    "README.md",
+    "changelog.md",
+    "pyproject.toml",
+]
+
 
 [tool.poetry.dependencies]
 python = "^3.10"
@@ -24,8 +49,12 @@ importlib-resources = "^5.12.0"
 [[tool.poetry.source]]
 name = "jax"
 url = "https://storage.googleapis.com/jax-releases/jax_releases.html"
-default = false
-secondary = false
+priority = "explicit"
+
+
+[tool.poetry.urls]
+"Bug Tracker" = "https://github.com/JoeyTeng/jaxrenderer/issues"
+
 
 [build-system]
 requires = ["poetry-core"]
