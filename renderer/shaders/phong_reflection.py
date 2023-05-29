@@ -3,11 +3,13 @@ from typing import NamedTuple
 import jax
 import jax.lax as lax
 import jax.numpy as jnp
-from jaxtyping import Array, Bool, Float, jaxtyped
+from jaxtyping import Array, Bool, Float, Integer, jaxtyped
 
 from ..geometry import Camera, normalise, to_homogeneous
+from ..model import MergedModel
 from ..shader import ID, MixerOutput, PerFragment, PerVertex, Shader
-from ..types import Colour, LightSource, SpecularMap, Texture, Vec2f, Vec3f, Vec4f
+from ..types import (Colour, LightSource, SpecularMap, Texture, Vec2f, Vec2i,
+                     Vec3f, Vec4f)
 
 jax.config.update('jax_array', True)
 
@@ -21,6 +23,9 @@ class PhongReflectionTextureExtraInput(NamedTuple):
       - uv: in texture space, of each vertex.
       - light: parallel light source, shared by all vertices.
       - light_dir_eye: normalised light source direction in eye space.
+      - texture_shape: shape of each texture map, shared by all vertices.
+      - texture_index: index of texture map for each vertex.
+      - offset_shape: offset of each texture map in the merged model.
       - texture: texture, shared by all vertices.
       - specular_map: specular map, shared by all vertices.
       - ambient: ambient strength, shared by all vertices.
@@ -32,6 +37,9 @@ class PhongReflectionTextureExtraInput(NamedTuple):
     uv: Float[Array, "vertices 2"]  # in texture space
     light: LightSource
     light_dir_eye: Vec3f  # in eye/view space
+    texture_shape: Integer[Array, "objects 2"]
+    texture_index: Float[Array, "vertices"]
+    offset_shape: Integer[Array, "2"]
     texture: Texture
     specular_map: SpecularMap
     ambient: Colour
@@ -45,10 +53,12 @@ class PhongReflectionTextureExtraFragmentData(NamedTuple):
     Attributes:
       - normal: in clip space, of each fragment; From VS to FS.
       - uv: in texture space, of each fragment; From VS to FS.
+      - texture_index: index of texture map for each fragment; From VS to FS.
       - colour: colour when passing from FS to mixer.
     """
     normal: Vec3f = jnp.zeros(3)
     uv: Vec2f = jnp.zeros(2)
+    texture_index: Float[Array, ""] = jnp.zeros(())
     colour: Colour = jnp.zeros(3)
 
 
@@ -91,8 +101,9 @@ class PhongReflectionTextureShader(
             PhongReflectionTextureExtraFragmentData(
                 normal=normal,
                 # repeat texture
-                uv=extra.uv[gl_VertexID] %
-                jnp.asarray(extra.texture.shape[:2]),
+                uv=extra.uv[gl_VertexID],
+                texture_index=extra.texture_index[gl_VertexID].astype(
+                    jnp.single),
             ),
         )
 
@@ -115,7 +126,17 @@ class PhongReflectionTextureShader(
         )[0]
         assert isinstance(built_in, PerFragment)
 
-        uv = lax.floor(varying.uv).astype(int)
+        # texture
+        texture_index = varying.texture_index.astype(int)
+        texture_shape = extra.texture_shape[texture_index]
+        uv = MergedModel.uv_repeat(
+            varying.uv,
+            texture_shape,
+            texture_index,
+            extra.offset_shape,
+        )
+        uv = lax.floor(uv).astype(int)
+        assert isinstance(uv, Vec2i)
         texture_colour: Colour = extra.texture[uv[0], uv[1]]
 
         normal: Vec3f = normalise(varying.normal)

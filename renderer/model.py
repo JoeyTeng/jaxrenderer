@@ -107,10 +107,16 @@ class MergedModel(NamedTuple):
     faces_uv: FaceIndices
 
     # broadcasted object info into per-vertex
+    texture_shape: Integer[Array, "vertices 2"]
+    """Width, height of each texture map."""
+    texture_index: Integer[Array, "vertices"]
+    """Texture map index for each vertex."""
     double_sided: Bool[Array, "vertices"]
     """Whether each face is double sided."""
 
     # Merged maps
+    offset_shape: Integer[Array, "2"]
+    """Width, height of biggest merged maps, as returned by `merge_maps`."""
     diffuse_map: Texture
     specular_map: SpecularMap
 
@@ -229,12 +235,13 @@ class MergedModel(NamedTuple):
         shape: Integer[Array, "2"],
         map_index: Integer[Array, ""],
         offset_shape: Integer[Array, "2"],
-    ) -> Num[Array, "2"]:
+    ) -> Float[Array, "2"]:
         """Compute final UV coordinates as if it is repeatedly tiled (in case
             of out-of-bound uv coordinate).
 
         Parameters:
-          - uv: raw uv coordinates.
+          - uv: raw uv coordinates, in floating numbers. Only fractional part
+            is used, as if the uv coordinates are in [0, 1].
           - shape: of the map being used, according to `map_index`.
           - offset_shape: of each map in the merged maps, as returned by
             `merge_maps`.
@@ -242,7 +249,11 @@ class MergedModel(NamedTuple):
         """
         # since given uv are in [0, 1] (and may be scaled, if is cube),
         # we need to multiply it by (w, h) of the texture map first.
-        return (uv * shape % shape) + (map_index * offset_shape)
+        # This is equivalent to just obtain the fractional part of uv.
+        fractional_uv, _ = jnp.modf(uv)
+        assert isinstance(fractional_uv, Float[Array, "2"])
+
+        return fractional_uv * shape + (map_index * offset_shape)
 
 
 class ModelObject(NamedTuple):

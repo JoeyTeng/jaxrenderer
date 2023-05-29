@@ -124,9 +124,7 @@ class PhongTextureDarbouxShader(Shader[PhongTextureDarbouxExtraInput,
             PerVertex(gl_Position=gl_Position),
             PhongTextureDarbouxExtraFragmentData(
                 normal=normal,
-                # repeat texture
-                uv=extra.uv[gl_VertexID] %
-                jnp.asarray(extra.texture.shape[:2]),
+                uv=extra.uv[gl_VertexID],
                 triangle=triangle_ndc,
                 triangle_uv=triangle_uv,
             ),
@@ -188,7 +186,9 @@ class PhongTextureDarbouxShader(Shader[PhongTextureDarbouxExtraInput,
         assert isinstance(varying, PhongTextureDarbouxExtraFragmentData), (
             f"Expected PhongTextureDarbouxExtraFragmentData, got {varying}")
 
-        uv: Vec2i = lax.floor(varying.uv).astype(int)
+        # repeat texture
+        uv = (lax.floor(varying.uv).astype(int) %
+              jnp.asarray(extra.texture.shape[:2]))
 
         normal: Vec3f = normalise(varying.normal)
         A: Float[Array, "3 3"] = jnp.vstack([

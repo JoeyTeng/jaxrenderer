@@ -197,18 +197,8 @@ class Renderer:
             [m.faces_uv for m in models],
         )
 
-        # ensure uvs are within each of the map, by effectively repeating the
-        # map, using `mod`. It is the same to modulo here first, as modulo at
-        # fragment shader, as the value is interpolated within the triangle
-        # "linearly", by only dot product a vector, and the sum of the vector
-        # is 1, making the result not exceeding the range of the map.
         single_map_shape = jnp.asarray(single_map_shape)
         assert isinstance(single_map_shape, Integer[Array, "2"])
-        uvs = jax.vmap(
-            partial(
-                MergedModel.uv_repeat,
-                offset_shape=single_map_shape,
-            ))(uvs, map_wh_per_object, map_indices)
 
         return MergedModel(
             verts=verts,
@@ -217,7 +207,10 @@ class Renderer:
             faces=faces,
             faces_norm=faces_norm,
             faces_uv=faces_uv,
+            texture_shape=map_wh_per_object,
+            texture_index=map_indices,
             double_sided=double_sided,
+            offset_shape=single_map_shape,
             diffuse_map=diffuse_map,
             specular_map=specular_map,
         )
@@ -314,6 +307,9 @@ class Renderer:
                 colour=light.colour,
             ),
             light_dir_eye=light_dir_eye,
+            texture_shape=model.texture_shape,
+            texture_index=model.texture_index,
+            offset_shape=model.offset_shape,
             texture=model.diffuse_map,
             specular_map=model.specular_map,
             ambient=light.ambient,

@@ -80,9 +80,7 @@ class PhongTextureShader(Shader[PhongTextureExtraInput,
             PerVertex(gl_Position=gl_Position),
             PhongTextureExtraFragmentData(
                 normal=normal,
-                # repeat texture
-                uv=extra.uv[gl_VertexID] %
-                jnp.asarray(extra.texture.shape[:2]),
+                uv=extra.uv[gl_VertexID],
             ),
         )
 
@@ -105,7 +103,9 @@ class PhongTextureShader(Shader[PhongTextureExtraInput,
         )[0]
         assert isinstance(built_in, PerFragment)
 
-        uv = lax.floor(varying.uv).astype(int)
+        # repeat texture
+        uv = (lax.floor(varying.uv).astype(int) %
+              jnp.asarray(extra.texture.shape[:2]))
         texture_colour: Colour = extra.texture[uv[0], uv[1]]
 
         # light colour * intensity

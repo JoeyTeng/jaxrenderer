@@ -77,9 +77,7 @@ class GouraudTextureShader(Shader[GouraudTextureExtraInput,
             PerVertex(gl_Position=gl_Position),
             GouraudTextureExtraFragmentData(
                 colour=light_colour,
-                # repeat texture
-                uv=extra.uv[gl_VertexID] %
-                jnp.asarray(extra.texture.shape[:2]),
+                uv=extra.uv[gl_VertexID],
             ),
         )
 
@@ -102,7 +100,9 @@ class GouraudTextureShader(Shader[GouraudTextureExtraInput,
         )[0]
         assert isinstance(built_in, PerFragment)
 
-        uv = lax.floor(varying.uv).astype(int)
+        # repeat texture
+        uv = (lax.floor(varying.uv).astype(int) %
+              jnp.asarray(extra.texture.shape[:2]))
         texture_colour: Colour = extra.texture[uv[0], uv[1]]
         light_colour: Colour = varying.colour
 

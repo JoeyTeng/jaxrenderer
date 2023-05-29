@@ -76,6 +76,7 @@ camera: CameraParameters = CameraParameters(
     position=eye,
     target=target,
 )
+shadow_param = ShadowParameters()
 
 # PROCESS: Render
 
@@ -92,7 +93,7 @@ img = Renderer.get_camera_image(
     camera=camera,
     width=width,
     height=height,
-    shadow_param=ShadowParameters(),
+    shadow_param=shadow_param,
 )
 rgb_array = lax.clamp(0., img * 255, 255.).astype(jnp.uint8)
 images.append(rgb_array)
@@ -109,25 +110,7 @@ img = Renderer.get_camera_image(
     camera=camera,
     width=width,
     height=height,
-    shadow_param=ShadowParameters(),
-)
-rgb_array = lax.clamp(0., img * 255, 255.).astype(jnp.uint8)
-images.append(rgb_array)
-
-img = Renderer.get_camera_image(
-    objects=[
-        scene.objects[obj_id] for obj_id in [
-            cube_instance_id,
-            capsulex_instance_id,
-            capsuley_instance_id,
-            capsulez_instance_id,
-        ]
-    ],
-    light=light,
-    camera=camera,
-    width=width,
-    height=height,
-    shadow_param=ShadowParameters(),
+    shadow_param=shadow_param,
 )
 rgb_array = lax.clamp(0., img * 255, 255.).astype(jnp.uint8)
 images.append(rgb_array)
@@ -145,15 +128,33 @@ img = Renderer.get_camera_image(
     camera=camera,
     width=width,
     height=height,
-    shadow_param=ShadowParameters(),
+    shadow_param=shadow_param,
+)
+rgb_array = lax.clamp(0., img * 255, 255.).astype(jnp.uint8)
+images.append(rgb_array)
+
+img = Renderer.get_camera_image(
+    objects=[
+        scene.objects[obj_id] for obj_id in [
+            cube_instance_id,
+            capsulex_instance_id,
+            capsuley_instance_id,
+            capsulez_instance_id,
+        ]
+    ],
+    light=light,
+    camera=camera,
+    width=width,
+    height=height,
+    shadow_param=shadow_param,
 )
 rgb_array = lax.clamp(0., img * 255, 255.).astype(jnp.uint8)
 images.append(rgb_array)
 
 # PROCESS: show
 
-import matplotlib.pyplot as plt
 import matplotlib.animation as animation
+import matplotlib.pyplot as plt
 
 fig, ax = plt.subplots()
 

@@ -9,10 +9,6 @@
 - Fix bugs
   - Specular lighting was wrong, where it forgets to reverse the light direction vector.
 
-## Known Issues
-
-- The texture behaviour for cubes is not the same as the PyTinyrenderer. This is a bug and will be fixed soon.
-
 ## Roadmap
 
 - [ ] Correctly implement a proper clipping algorithm
