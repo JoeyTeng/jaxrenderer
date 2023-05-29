@@ -12,3 +12,10 @@
 ## Known Issues
 
 - The texture behaviour for cubes is not the same as the PyTinyrenderer. This is a bug and will be fixed soon.
+
+## Roadmap
+
+- [ ] Correctly implement a proper clipping algorithm
+- [ ] Profile and accelerate implementation
+- [ ] Differentiable rendering
+- [ ] Build a ray tracer as well
