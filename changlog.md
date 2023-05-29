@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.0.1
+## 0.1.0
 
 1. For built-in fragment shader outputs, a new field `use_default_depth` is added (default `False`) instead of relying on checking if `gl_FragDepth` is `NaN`.
 2. Change `ZBuffer` value meaning to OpenGL convention: all values are non-negative, and the smaller the value, the closer the point is to the camera.
