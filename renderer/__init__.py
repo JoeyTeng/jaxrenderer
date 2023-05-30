@@ -1,4 +1,4 @@
-from .geometry import Camera, normalise
+from .geometry import Camera, normalise, quaternion
 from .model import Model, ModelObject
 from .renderer import (CameraParameters, LightParameters, Renderer,
                        ShadowParameters)

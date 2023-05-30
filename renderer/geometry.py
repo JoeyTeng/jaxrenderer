@@ -1,6 +1,6 @@
 import enum
 from functools import partial
-from typing import Any, NamedTuple, Optional
+from typing import Any, NamedTuple, Optional, Union
 
 import jax
 import jax.lax as lax
@@ -820,6 +820,31 @@ def compute_normal(triangle_verts: Float[Array, "3 3"]) -> Float[Array, "3"]:
 @jax.jit
 def compute_normals(batch_verts: Float[Array, "b 3 3"]) -> Float[Array, "b 3"]:
     return jax.vmap(compute_normal)(batch_verts)
+
+
+@jaxtyped
+@jax.jit
+def quaternion(
+    rotation_axis: Union[Vec3f, tuple[float, float, float]],
+    rotation_angle: Union[Float[Array, ""], float],
+) -> Vec4f:
+    """Generate a quaternion rotation from a rotation axis and angle.
+
+    The rotation axis is normalised internally. The angle is specified in
+    degrees (NOT radian). The rotation is clockwise.
+    """
+    axis = normalise(jnp.asarray(rotation_axis))
+    angle = jnp.radians(jnp.asarray(rotation_angle))
+    assert isinstance(axis, Vec3f), f"{rotation_axis}"
+    assert isinstance(angle, Float[Array, ""]), f"{rotation_angle}"
+
+    quaternion: Vec4f = (
+        jnp.zeros(4)  #
+        .at[:3].set(axis * jnp.sin(angle / 2))  #
+        .at[3].set(jnp.cos(angle / 2))  #
+    )
+
+    return quaternion
 
 
 @jaxtyped
