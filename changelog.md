@@ -16,3 +16,4 @@
 
 1. Change the default behaviour of `renderer/utils.py::transpose_for_display` which will flip vertically as well by default, so the origin of the resultant matrix will be (height, width, channels) and with the origin located at the top-left corner. The previous behaviour can be achieved by setting `flip_vertical=False`.
 2. `Scene.add_cube` now accepts one number for `texture_scaling` to scale texture map equally in both x and y directions.
+3. Fix some assert message issues (in `Scene.add_cube`).

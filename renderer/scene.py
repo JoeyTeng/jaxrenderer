@@ -68,13 +68,13 @@ class Scene(NamedTuple):
 
         _half_extents = jnp.asarray(half_extents)
         assert isinstance(_half_extents, Float[Array, "3"]), (
-            "Expected 2 floats in half_extends, got {half_extents}")
+            f"Expected 2 floats in half_extends, got {half_extents}")
 
         _texture_scaling = jnp.asarray(texture_scaling)
         if _texture_scaling.size == 1:
             _texture_scaling = lax.full((2, ), _texture_scaling)
         assert isinstance(_texture_scaling, Float[Array, "2"]), (
-            "Expected 2 floats in texture_scaling, got {texture_scaling}")
+            f"Expected 2 floats in texture_scaling, got {texture_scaling}")
 
         model: Model = create_cube(
             half_extents=_half_extents,
