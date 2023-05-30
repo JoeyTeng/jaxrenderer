@@ -95,6 +95,6 @@ rgb_array = lax.clamp(0., img * 255, 255.).astype(jnp.uint8)
 import matplotlib.pyplot as plt
 
 fig, ax = plt.subplots()
-ax.imshow(transpose_for_display(rgb_array), origin='lower')
+ax.imshow(transpose_for_display(rgb_array))
 
 plt.show()

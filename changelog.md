@@ -11,3 +11,7 @@
 7. Fix issue of perspective-correction barycentric interpolation in `pipeline`.
 8. Fix `shaders/phong*` so normals are correctly transformed into pre-projection eye coordinates, rather than being projected.
 9. Rename `ModelView` => `View`, `model_view` => `view`, `model_view_matrix` => `view_matrix` as the matrix is actually view matrix that transforms from world to eye space, not model view matrix (model to eye space).
+
+## 0.1.1
+
+1. Change the default behaviour of `renderer/utils.py::transpose_for_display` which will flip vertically as well by default, so the origin of the resultant matrix will be (height, width, channels) and with the origin located at the top-left corner. The previous behaviour can be achieved by setting `flip_vertical=False`.

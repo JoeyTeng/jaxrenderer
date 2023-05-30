@@ -74,8 +74,8 @@ def gouraud_shader_with_simple_light(model: Model):
     # show
     fig, axs = plt.subplots(ncols=2, sharex=True, sharey=True, figsize=(16, 8))
 
-    axs[0].imshow(transpose_for_display(result.zbuffer), origin='lower')
-    axs[1].imshow(transpose_for_display(result.targets[0]), origin='lower')
+    axs[0].imshow(transpose_for_display(result.zbuffer))
+    axs[1].imshow(transpose_for_display(result.targets[0]))
 
 
 def gouraud_shader_with_texture(model: Model, texture: Texture):
@@ -136,8 +136,8 @@ def gouraud_shader_with_texture(model: Model, texture: Texture):
     # show
     fig, axs = plt.subplots(ncols=2, sharex=True, sharey=True, figsize=(16, 8))
 
-    axs[0].imshow(transpose_for_display(result.zbuffer), origin='lower')
-    axs[1].imshow(transpose_for_display(result.targets[0]), origin='lower')
+    axs[0].imshow(transpose_for_display(result.zbuffer))
+    axs[1].imshow(transpose_for_display(result.targets[0]))
 
 
 def phong_shader_with_texture(model: Model, texture: Texture):
@@ -198,8 +198,8 @@ def phong_shader_with_texture(model: Model, texture: Texture):
     # show
     fig, axs = plt.subplots(ncols=2, sharex=True, sharey=True, figsize=(16, 8))
 
-    axs[0].imshow(transpose_for_display(result.zbuffer), origin='lower')
-    axs[1].imshow(transpose_for_display(result.targets[0]), origin='lower')
+    axs[0].imshow(transpose_for_display(result.zbuffer))
+    axs[1].imshow(transpose_for_display(result.targets[0]))
 
 
 def phong_shader_with_texture_phong_reflection(
@@ -285,10 +285,9 @@ def phong_shader_with_texture_phong_reflection(
     # show
     fig, axs = plt.subplots(ncols=2, sharex=True, sharey=True, figsize=(16, 8))
 
-    axs[0].imshow(transpose_for_display(result.zbuffer), origin='lower')
+    axs[0].imshow(transpose_for_display(result.zbuffer))
     axs[1].imshow(
-        transpose_for_display(jnp.clip(result.targets[0], 0., 1.)),
-        origin='lower',
+        transpose_for_display(jnp.clip(result.targets[0], 0., 1.))
     )
 
 
@@ -365,8 +364,8 @@ def phong_shader_with_texture_nm_tangent(
     # show
     fig, axs = plt.subplots(ncols=2, sharex=True, sharey=True, figsize=(16, 8))
 
-    axs[0].imshow(transpose_for_display(result.zbuffer), origin='lower')
-    axs[1].imshow(transpose_for_display(result.targets[0]), origin='lower')
+    axs[0].imshow(transpose_for_display(result.zbuffer))
+    axs[1].imshow(transpose_for_display(result.targets[0]))
 
 
 def depth_shader(model: Model):
@@ -419,7 +418,7 @@ def depth_shader(model: Model):
     # show
     fig, axs = plt.subplots(figsize=(8, 8))
 
-    axs.imshow(transpose_for_display(result.zbuffer), origin='lower')
+    axs.imshow(transpose_for_display(result.zbuffer))
 
 
 def phong_shader_with_shadow(
@@ -524,8 +523,8 @@ def phong_shader_with_shadow(
     # show
     fig, axs = plt.subplots(ncols=2, sharex=True, sharey=True, figsize=(16, 8))
 
-    axs[0].imshow(transpose_for_display(shadow.shadow_map), origin='lower')
-    axs[1].imshow(transpose_for_display(result.targets[0]), origin='lower')
+    axs[0].imshow(transpose_for_display(shadow.shadow_map))
+    axs[1].imshow(transpose_for_display(result.targets[0]))
 
 
 if __name__ == '__main__':

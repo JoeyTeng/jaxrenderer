@@ -163,14 +163,10 @@ fig, ax = plt.subplots()
 # each frame
 ims = []
 for i, img in enumerate(images):
-    im = ax.imshow(
-        transpose_for_display(img),
-        origin='lower',
-        animated=True,
-    )
+    im = ax.imshow(transpose_for_display(img), animated=True)
     if i == 0:
         # show an initial one first
-        ax.imshow(transpose_for_display(img), origin='lower')
+        ax.imshow(transpose_for_display(img))
 
     ims.append([im])
 

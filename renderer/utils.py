@@ -49,9 +49,23 @@ def merge_canvases(
 @jaxtyped
 @jax.jit
 def transpose_for_display(
-        matrix: Num[Array,
-                    "fst snd *channel"]) -> Num[Array, "snd fst *channel"]:
-    return jnp.swapaxes(matrix, 0, 1)
+    matrix: Num[Array, "fst snd *channel"],
+    flip_vertical: bool = True,
+) -> Num[Array, "snd fst *channel"]:
+    """Transpose matrix for display.
+
+    When flip_vertical is disabled, the matrix's origin ([0, 0]) is assumed to
+    be at bottom-left. Thus, the correct way to display the matrix is to using
+    tools like matplotlib is to specify `origin="lower"`.
+    To be compatible with PyTinyrenderer and most image processing programs,
+    the default behavior is to flip vertically.
+    """
+    mat = jnp.swapaxes(matrix, 0, 1)
+    assert isinstance(mat, Num[Array, "snd fst *channel"])
+    if flip_vertical:
+        mat = mat[::-1, ...]
+
+    return mat
 
 
 @jaxtyped
