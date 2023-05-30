@@ -205,7 +205,7 @@ class Scene(NamedTuple):
     def set_object_orientation(
         self,
         object_id: GUID,
-        orientation: Vec4f,
+        orientation: Union[Vec4f, tuple[float, float, float, float]],
     ) -> "Scene":
         """Set the orientation of an object in the scene.
 
@@ -213,7 +213,9 @@ class Scene(NamedTuple):
           - object_id: the unique identifier of the object.
           - orientation: the new orientation of the object.
         """
-        mat: Float[Array, "3 3"] = transform_matrix_from_rotation(orientation)
+        _orientation = jnp.asarray(orientation, dtype=float)
+        assert isinstance(_orientation, Vec4f), f"{orientation}"
+        mat: Float[Array, "3 3"] = transform_matrix_from_rotation(_orientation)
         assert isinstance(mat, Float[Array, "3 3"]), f"{mat}"
 
         obj: ModelObject = self.objects[object_id]
@@ -226,7 +228,7 @@ class Scene(NamedTuple):
     def set_object_local_scaling(
         self,
         object_id: GUID,
-        local_scaling: Vec3f,
+        local_scaling: Union[Vec3f, tuple[float, float, float]],
     ) -> "Scene":
         """Set the local scaling of an object in the scene.
 
@@ -234,6 +236,8 @@ class Scene(NamedTuple):
           - object_id: the unique identifier of the object.
           - local_scaling: the new local scaling of the object.
         """
+        local_scaling = jnp.asarray(local_scaling, dtype=float)
+        assert isinstance(local_scaling, Vec3f), f"{local_scaling}"
         obj: ModelObject = self.objects[object_id]
         new_obj: ModelObject = obj._replace(local_scaling=local_scaling)
 

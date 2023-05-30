@@ -18,3 +18,4 @@
 2. `Scene.add_cube` now accepts one number for `texture_scaling` to scale texture map equally in both x and y directions.
 3. Fix some assert message issues (in `Scene.add_cube`).
 4. `CameraParameters` now accepts `position`, `target` and `up` in Python's tuples of floats as well, along with `jnp.array`.
+5. `Scene.set_object_orientation` and `Scene.set_object_local_scaling` supports tuple of floats as well as inputs, additional to `jnp.array`.
