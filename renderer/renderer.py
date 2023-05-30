@@ -42,11 +42,11 @@ class CameraParameters(NamedTuple):
     """horizontal field of view, in degrees."""
     vfov: float = 45.
     """vertical field of view, in degrees."""
-    position: Vec3f = jnp.ones(3)
+    position: Union[Vec3f, tuple[float, float, float]] = jnp.ones(3)
     """position of the camera in world space."""
-    target: Vec3f = jnp.zeros(3)
+    target: Union[Vec3f, tuple[float, float, float]] = jnp.zeros(3)
     """target of the camera."""
-    up: Vec3f = jnp.array((0., 0., 1.))
+    up: Union[Vec3f, tuple[float, float, float]] = jnp.array((0., 0., 1.))
     """up direction of the camera."""
 
 
@@ -215,17 +215,16 @@ class Renderer:
     @partial(jax.jit, inline=True)
     def create_camera_from_parameters(camera: CameraParameters) -> Camera:
         """Create a camera from camera parameters."""
-        view_mat: View = Camera.view_matrix(
-            eye=camera.position,
-            centre=camera.target,
-            up=camera.up,
-        )
+        eye: Vec3f = jnp.asarray(camera.position)
+        assert isinstance(eye, Vec3f), f"{eye}"
+        centre: Vec3f = jnp.asarray(camera.target)
+        assert isinstance(centre, Vec3f), f"{centre}"
+        up: Vec3f = jnp.asarray(camera.up)
+        assert isinstance(up, Vec3f), f"{up}"
+
+        view_mat: View = Camera.view_matrix(eye=eye, centre=centre, up=up)
         assert isinstance(view_mat, View), f"{view_mat}"
-        view_inv: View = Camera.view_matrix_inv(
-            eye=camera.position,
-            centre=camera.target,
-            up=camera.up,
-        )
+        view_inv: View = Camera.view_matrix_inv(eye=eye, centre=centre, up=up)
         assert isinstance(view_inv, View), f"{view_inv}"
         projection_mat: Projection = Camera.perspective_projection_matrix(
             fovy=camera.vfov,
