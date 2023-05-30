@@ -1,11 +1,12 @@
-from typing import NamedTuple, Sequence, Union
+from typing import NamedTuple, Optional, Sequence, Union
 
 import jax
 import jax.experimental.checkify as checkify
 import jax.lax as lax
 import jax.numpy as jnp
 from jax.tree_util import tree_map
-from jaxtyping import Array, Bool, Float, Integer, Num, Shaped, PyTree, jaxtyped
+from jaxtyping import (Array, Bool, Float, Integer, Num, PyTree, Shaped,
+                       jaxtyped)
 
 from .types import (FALSE_ARRAY, FaceIndices, Normals, SpecularMap, Texture,
                     UVCoordinates, Vec3f, Vertices)
@@ -30,6 +31,43 @@ class Model(NamedTuple):
 
     diffuse_map: Texture
     specular_map: SpecularMap
+
+    @classmethod
+    @jaxtyped
+    def create(
+        cls,
+        verts: Vertices,
+        norms: Normals,
+        uvs: UVCoordinates,
+        faces: FaceIndices,
+        diffuse_map: Texture,
+        specular_map: Optional[SpecularMap] = None,
+    ) -> "Model":
+        """A convenient method to create a Model assuming faces_norm and
+            faces_uv are the same as faces. A default specular_map is used if
+            not given, with a constant value of 2.0.
+        """
+        if specular_map is None:
+            # reference: https://github.com/erwincoumans/tinyrenderer/blob/89e8adafb35ecf5134e7b17b71b0f825939dc6d9/model.cpp#L215
+            specular_map = lax.full(diffuse_map.shape[:2], 2.0)
+
+        assert isinstance(verts, Vertices), f"{verts}"
+        assert isinstance(norms, Normals), f"{norms}"
+        assert isinstance(uvs, UVCoordinates), f"{uvs}"
+        assert isinstance(faces, FaceIndices), f"{faces}"
+        assert isinstance(diffuse_map, Texture), f"{diffuse_map}"
+        assert isinstance(specular_map, SpecularMap), f"{specular_map}"
+
+        return cls(
+            verts=verts,
+            norms=norms,
+            uvs=uvs,
+            faces=faces,
+            faces_norm=faces,
+            faces_uv=faces,
+            diffuse_map=diffuse_map,
+            specular_map=specular_map,
+        )
 
     @jaxtyped
     @jax.jit

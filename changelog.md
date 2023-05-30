@@ -19,3 +19,4 @@
 3. Fix some assert message issues (in `Scene.add_cube`).
 4. `CameraParameters` now accepts `position`, `target` and `up` in Python's tuples of floats as well, along with `jnp.array`.
 5. `Scene.set_object_orientation` and `Scene.set_object_local_scaling` supports tuple of floats as well as inputs, additional to `jnp.array`.
+6. `Model` now has a convenient method `create` to create a Model with same face indices shared by `faces`, `faces_norm` and `faces_uv`, and a default `specular_map`. This is useful for creating a mesh where all vertices has its own normal and uv coordinate specified, under same order (thus same face indices).
