@@ -89,5 +89,8 @@ def build_texture_from_PyTinyrenderer(
 
     Returns: A texture with shape `(width, height, channels)`.
     """
-    return jnp.reshape(texture, (width, height, -1),
-                       order="C").swapaxes(0, 1)[:, ::-1, :]
+    return jnp.reshape(
+        jnp.asarray(texture),
+        (width, height, -1),
+        order="C",
+    ).swapaxes(0, 1)[:, ::-1, :]
