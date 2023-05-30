@@ -66,8 +66,8 @@ scene, capsulez_instance_id = scene.add_object_instance(capz_model_id)
 
 width = 640
 height = 480
-eye: Vec3f = jnp.array([2., 4., 1.])
-target: Vec3f = jnp.array([0., 0., 0.])
+eye = [2., 4., 1.]
+target = [0., 0., 0.]
 
 light: LightParameters = LightParameters()
 camera: CameraParameters = CameraParameters(
