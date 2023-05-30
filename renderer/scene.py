@@ -52,7 +52,7 @@ class Scene(NamedTuple):
         self,
         half_extents: Union[Float[Array, "3"], tuple[float, float, float]],
         diffuse_map: Texture,
-        texture_scaling: Union[Float[Array, "2"], tuple[float, float]],
+        texture_scaling: Union[Float[Array, "2"], tuple[float, float], float],
     ) -> tuple["Scene", GUID]:
         """Add a cube to the scene.
 
@@ -60,7 +60,8 @@ class Scene(NamedTuple):
           - half_extents: the half-size of the cube. The final cube would have
             x-y-z dimension of 2 * half_extents.
           - diffuse_map: the diffuse map of the cube.
-          - texture_scaling: the scaling factor of the texture, in x and y.
+          - texture_scaling: the scaling factor of the texture, in x and y. If
+            only one number is given, it is used for both x and y.
         """
         # reference: https://github.com/erwincoumans/tinyrenderer/blob/89e8adafb35ecf5134e7b17b71b0f825939dc6d9/model.cpp#L215
         specular_map: SpecularMap = lax.full(diffuse_map.shape[:2], 2.0)
@@ -70,6 +71,8 @@ class Scene(NamedTuple):
             "Expected 2 floats in half_extends, got {half_extents}")
 
         _texture_scaling = jnp.asarray(texture_scaling)
+        if _texture_scaling.size == 1:
+            _texture_scaling = lax.full((2, ), _texture_scaling)
         assert isinstance(_texture_scaling, Float[Array, "2"]), (
             "Expected 2 floats in texture_scaling, got {texture_scaling}")
 
