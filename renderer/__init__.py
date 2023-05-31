@@ -1,5 +1,5 @@
-from .geometry import Camera, normalise, quaternion
-from .model import Model, ModelObject
+from .geometry import (Camera, normalise, quaternion, quaternion_mul,
+                       rotation_matrix)
 from .renderer import (CameraParameters, LightParameters, Renderer,
                        ShadowParameters)
 from .scene import Scene, UpAxis
