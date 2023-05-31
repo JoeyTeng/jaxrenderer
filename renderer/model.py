@@ -1,3 +1,4 @@
+from functools import partial
 from typing import NamedTuple, Optional, Sequence, Union
 
 import jax
@@ -8,6 +9,7 @@ from jax.tree_util import tree_map
 from jaxtyping import (Array, Bool, Float, Integer, Num, PyTree, Shaped,
                        jaxtyped)
 
+from .geometry import Camera
 from .types import (FALSE_ARRAY, FaceIndices, Normals, SpecularMap, Texture,
                     UVCoordinates, Vec3f, Vertices)
 from .value_checker import index_in_bound
@@ -315,3 +317,111 @@ class ModelObject(NamedTuple):
     # TODO: Support double_sided
     double_sided: Bool[Array, ""] = FALSE_ARRAY
     """Whether the object is double-sided."""
+
+
+@staticmethod
+@jaxtyped
+def merge_objects(objects: Sequence[ModelObject]) -> MergedModel:
+    """Merge objects into a single model.
+
+    Parameters:
+      - objects: a list of objects to merge.
+
+    Returns: A model containing the merged objects into one single mesh.
+    """
+    with jax.ensure_compile_time_eval():
+        models = [obj.model for obj in objects]
+
+        # broadcasted per vertex info
+        counts: list[int] = [len(m.verts) for m in models]
+
+        map_indices: Integer[Array, "vertices"]
+        map_indices = MergedModel.generate_object_vert_info(
+            counts,
+            list(range(len(models))),
+        )
+        assert isinstance(map_indices, Integer[Array, "vertices"])
+
+        map_wh_per_object = jnp.asarray(
+            [m.diffuse_map.shape[:2] for m in models])
+        assert isinstance(map_wh_per_object, Integer[Array, "objects 2"])
+
+        double_sided: Bool[Array, "vertices"]
+        double_sided = MergedModel.generate_object_vert_info(
+            counts,
+            [obj.double_sided for obj in objects],
+        )
+        assert isinstance(double_sided, Bool[Array, "vertices"])
+
+    # merge maps
+    diffuse_map, single_map_shape = MergedModel.merge_maps(
+        [m.diffuse_map for m in models])
+    specular_map, _ = MergedModel.merge_maps([m.specular_map for m in models])
+
+    @jaxtyped
+    @partial(jax.jit, inline=True)
+    def transform_vert(
+        verts: Float[Array, "N 3"],
+        local_scaling: Vec3f,
+        transform: ModelMatrix,
+    ) -> Vertices:
+        """Apply transforms defined in `ModelObject` to vertices."""
+        world: Float[Array, "N 3"] = Camera.apply_pos(
+            verts * local_scaling,
+            transform,
+        )
+        assert isinstance(world, Float[Array, "N 3"])
+
+        return world
+
+    # merge verts
+    verts, faces = MergedModel.merge_verts(
+        [
+            transform_vert(
+                verts=obj.model.verts,
+                local_scaling=obj.local_scaling,
+                transform=obj.transform,
+            ) for obj in objects
+        ],
+        [m.faces for m in models],
+    )
+
+    @jaxtyped
+    @partial(jax.jit, inline=True)
+    def transform_normals(
+        normals: Float[Array, "N 3"],
+        transform: ModelMatrix,
+    ) -> Vertices:
+        """Apply transforms defined in `ModelObject` to vertex normals."""
+        world: Float[Array, "N 3"] = Camera.apply_vec(
+            normals,
+            # transform by inverse transpose
+            jnp.linalg.inv(transform).T,
+        )
+        assert isinstance(world, Float[Array, "N 3"])
+
+        return world
+
+    norms, faces_norm = MergedModel.merge_verts(
+        [transform_normals(obj.model.norms, obj.transform) for obj in objects],
+        [m.faces_norm for m in models],
+    )
+    uvs, faces_uv = MergedModel.merge_verts(
+        [m.uvs for m in models],
+        [m.faces_uv for m in models],
+    )
+
+    return MergedModel(
+        verts=verts,
+        norms=norms,
+        uvs=uvs,
+        faces=faces,
+        faces_norm=faces_norm,
+        faces_uv=faces_uv,
+        texture_shape=map_wh_per_object,
+        texture_index=map_indices,
+        double_sided=double_sided,
+        offset=single_map_shape[0],
+        diffuse_map=diffuse_map,
+        specular_map=specular_map,
+    )
