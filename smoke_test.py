@@ -229,15 +229,9 @@ fig, axs = plt.subplots(
     figsize=(16, 8),
 )
 
-axs[0][0].imshow(transpose_for_display(result.zbuffer), origin='lower')
-axs[0][1].imshow(transpose_for_display(result.targets[0]), origin='lower')
-axs[1][0].imshow(
-    transpose_for_display(perspective_interpolation.zbuffer),
-    origin='lower',
-)
-axs[1][1].imshow(
-    transpose_for_display(perspective_interpolation.targets[0]),
-    origin='lower',
-)
+axs[0][0].imshow(transpose_for_display(result.zbuffer))
+axs[0][1].imshow(transpose_for_display(result.targets[0]))
+axs[1][0].imshow(transpose_for_display(perspective_interpolation.zbuffer))
+axs[1][1].imshow(transpose_for_display(perspective_interpolation.targets[0]))
 
 plt.show()

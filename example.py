@@ -3,8 +3,8 @@ import jax.lax as lax
 import jax.numpy as jnp
 
 from renderer import (CameraParameters, LightParameters, Renderer, Scene,
-                      ShadowParameters, Texture, UpAxis, Vec3f,
-                      transpose_for_display, build_texture_from_PyTinyrenderer)
+                      ShadowParameters, Texture, UpAxis, transpose_for_display,
+                      build_texture_from_PyTinyrenderer)
 
 # PROCESS: Set up models and objects
 
@@ -66,8 +66,8 @@ scene, capsulez_instance_id = scene.add_object_instance(capz_model_id)
 
 width = 640
 height = 480
-eye: Vec3f = jnp.array([2., 4., 1.])
-target: Vec3f = jnp.array([0., 0., 0.])
+eye = [2., 4., 1.]
+target = [0., 0., 0.]
 
 light: LightParameters = LightParameters()
 camera: CameraParameters = CameraParameters(
@@ -163,14 +163,10 @@ fig, ax = plt.subplots()
 # each frame
 ims = []
 for i, img in enumerate(images):
-    im = ax.imshow(
-        transpose_for_display(img),
-        origin='lower',
-        animated=True,
-    )
+    im = ax.imshow(transpose_for_display(img), animated=True)
     if i == 0:
         # show an initial one first
-        ax.imshow(transpose_for_display(img), origin='lower')
+        ax.imshow(transpose_for_display(img))
 
     ims.append([im])
 

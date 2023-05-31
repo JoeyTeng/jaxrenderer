@@ -1,4 +1,4 @@
-from typing import NamedTuple, NewType, Union
+from typing import NamedTuple, NewType, Optional, Union
 
 import jax
 import jax.lax as lax
@@ -52,7 +52,7 @@ class Scene(NamedTuple):
         self,
         half_extents: Union[Float[Array, "3"], tuple[float, float, float]],
         diffuse_map: Texture,
-        texture_scaling: Union[Float[Array, "2"], tuple[float, float]],
+        texture_scaling: Union[Float[Array, "2"], tuple[float, float], float],
     ) -> tuple["Scene", GUID]:
         """Add a cube to the scene.
 
@@ -60,18 +60,21 @@ class Scene(NamedTuple):
           - half_extents: the half-size of the cube. The final cube would have
             x-y-z dimension of 2 * half_extents.
           - diffuse_map: the diffuse map of the cube.
-          - texture_scaling: the scaling factor of the texture, in x and y.
+          - texture_scaling: the scaling factor of the texture, in x and y. If
+            only one number is given, it is used for both x and y.
         """
         # reference: https://github.com/erwincoumans/tinyrenderer/blob/89e8adafb35ecf5134e7b17b71b0f825939dc6d9/model.cpp#L215
         specular_map: SpecularMap = lax.full(diffuse_map.shape[:2], 2.0)
 
         _half_extents = jnp.asarray(half_extents)
         assert isinstance(_half_extents, Float[Array, "3"]), (
-            "Expected 2 floats in half_extends, got {half_extents}")
+            f"Expected 2 floats in half_extends, got {half_extents}")
 
         _texture_scaling = jnp.asarray(texture_scaling)
+        if _texture_scaling.size == 1:
+            _texture_scaling = lax.full((2, ), _texture_scaling)
         assert isinstance(_texture_scaling, Float[Array, "2"]), (
-            "Expected 2 floats in texture_scaling, got {texture_scaling}")
+            f"Expected 2 floats in texture_scaling, got {texture_scaling}")
 
         model: Model = create_cube(
             half_extents=_half_extents,
@@ -202,19 +205,36 @@ class Scene(NamedTuple):
     def set_object_orientation(
         self,
         object_id: GUID,
-        orientation: Vec4f,
+        orientation: Optional[Union[Vec4f, tuple[float, float, float,
+                                                 float]]] = None,
+        rotation_matrix: Optional[Float[Array, "3 3"]] = None,
     ) -> "Scene":
         """Set the orientation of an object in the scene.
 
+        If rotation_matrix is specified, it takes precedence over orientation.
+        If none is specified, the object's orientation is set to identity.
+
         Parameters:
           - object_id: the unique identifier of the object.
-          - orientation: the new orientation of the object.
+          - orientation: the new orientation of the object, optional.
+          - rotation_matrix: the new rotation matrix of the object, optional
         """
-        mat: Float[Array, "3 3"] = transform_matrix_from_rotation(orientation)
-        assert isinstance(mat, Float[Array, "3 3"]), f"{mat}"
+        if rotation_matrix is None:
+            if orientation is None:
+                orientation = (0., 0., 0., 1.)
+
+            _orientation = jnp.asarray(orientation, dtype=float)
+            assert isinstance(_orientation, Vec4f), f"{orientation}"
+            rotation_matrix = transform_matrix_from_rotation(_orientation)
+
+        assert isinstance(
+            rotation_matrix,
+            Float[Array, "3 3"],
+        ), f"{rotation_matrix}"
 
         obj: ModelObject = self.objects[object_id]
-        new_mat: Float[Array, "4 4"] = obj.transform.at[:3, :3].set(mat)
+        new_mat: Float[Array, "4 4"]
+        new_mat = obj.transform.at[:3, :3].set(rotation_matrix)
         new_obj: ModelObject = obj._replace(transform=new_mat)
 
         return self._replace(objects=self.objects | {object_id: new_obj})
@@ -223,7 +243,7 @@ class Scene(NamedTuple):
     def set_object_local_scaling(
         self,
         object_id: GUID,
-        local_scaling: Vec3f,
+        local_scaling: Union[Vec3f, tuple[float, float, float]],
     ) -> "Scene":
         """Set the local scaling of an object in the scene.
 
@@ -231,6 +251,8 @@ class Scene(NamedTuple):
           - object_id: the unique identifier of the object.
           - local_scaling: the new local scaling of the object.
         """
+        local_scaling = jnp.asarray(local_scaling, dtype=float)
+        assert isinstance(local_scaling, Vec3f), f"{local_scaling}"
         obj: ModelObject = self.objects[object_id]
         new_obj: ModelObject = obj._replace(local_scaling=local_scaling)
 

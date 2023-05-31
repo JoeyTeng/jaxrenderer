@@ -1,12 +1,15 @@
-from typing import NamedTuple, Sequence, Union
+from functools import partial
+from typing import NamedTuple, Optional, Sequence, Union
 
 import jax
 import jax.experimental.checkify as checkify
 import jax.lax as lax
 import jax.numpy as jnp
 from jax.tree_util import tree_map
-from jaxtyping import Array, Bool, Float, Integer, Num, Shaped, PyTree, jaxtyped
+from jaxtyping import (Array, Bool, Float, Integer, Num, PyTree, Shaped,
+                       jaxtyped)
 
+from .geometry import Camera
 from .types import (FALSE_ARRAY, FaceIndices, Normals, SpecularMap, Texture,
                     UVCoordinates, Vec3f, Vertices)
 from .value_checker import index_in_bound
@@ -30,6 +33,43 @@ class Model(NamedTuple):
 
     diffuse_map: Texture
     specular_map: SpecularMap
+
+    @classmethod
+    @jaxtyped
+    def create(
+        cls,
+        verts: Vertices,
+        norms: Normals,
+        uvs: UVCoordinates,
+        faces: FaceIndices,
+        diffuse_map: Texture,
+        specular_map: Optional[SpecularMap] = None,
+    ) -> "Model":
+        """A convenient method to create a Model assuming faces_norm and
+            faces_uv are the same as faces. A default specular_map is used if
+            not given, with a constant value of 2.0.
+        """
+        if specular_map is None:
+            # reference: https://github.com/erwincoumans/tinyrenderer/blob/89e8adafb35ecf5134e7b17b71b0f825939dc6d9/model.cpp#L215
+            specular_map = lax.full(diffuse_map.shape[:2], 2.0)
+
+        assert isinstance(verts, Vertices), f"{verts}"
+        assert isinstance(norms, Normals), f"{norms}"
+        assert isinstance(uvs, UVCoordinates), f"{uvs}"
+        assert isinstance(faces, FaceIndices), f"{faces}"
+        assert isinstance(diffuse_map, Texture), f"{diffuse_map}"
+        assert isinstance(specular_map, SpecularMap), f"{specular_map}"
+
+        return cls(
+            verts=verts,
+            norms=norms,
+            uvs=uvs,
+            faces=faces,
+            faces_norm=faces,
+            faces_uv=faces,
+            diffuse_map=diffuse_map,
+            specular_map=specular_map,
+        )
 
     @jaxtyped
     @jax.jit
@@ -277,3 +317,123 @@ class ModelObject(NamedTuple):
     # TODO: Support double_sided
     double_sided: Bool[Array, ""] = FALSE_ARRAY
     """Whether the object is double-sided."""
+
+
+def batch_models(models: Sequence[MergedModel]) -> MergedModel:
+    """Merge multiple MergedModel into one, with each field being a batch, with
+        batch axis at 0. This is intended to facilitate `jax.vmap`.
+    """
+    merged_model = MergedModel._make((lax.concatenate(
+        [jnp.asarray(model[i])[None, ...] for model in models],
+        dimension=0,
+    ) for i in range(len(models[0]))))
+
+    return merged_model
+
+
+@staticmethod
+@jaxtyped
+def merge_objects(objects: Sequence[ModelObject]) -> MergedModel:
+    """Merge objects into a single model.
+
+    Parameters:
+      - objects: a list of objects to merge.
+
+    Returns: A model containing the merged objects into one single mesh.
+    """
+    with jax.ensure_compile_time_eval():
+        models = [obj.model for obj in objects]
+
+        # broadcasted per vertex info
+        counts: list[int] = [len(m.verts) for m in models]
+
+        map_indices: Integer[Array, "vertices"]
+        map_indices = MergedModel.generate_object_vert_info(
+            counts,
+            list(range(len(models))),
+        )
+        assert isinstance(map_indices, Integer[Array, "vertices"])
+
+        map_wh_per_object = jnp.asarray(
+            [m.diffuse_map.shape[:2] for m in models])
+        assert isinstance(map_wh_per_object, Integer[Array, "objects 2"])
+
+        double_sided: Bool[Array, "vertices"]
+        double_sided = MergedModel.generate_object_vert_info(
+            counts,
+            [obj.double_sided for obj in objects],
+        )
+        assert isinstance(double_sided, Bool[Array, "vertices"])
+
+    # merge maps
+    diffuse_map, single_map_shape = MergedModel.merge_maps(
+        [m.diffuse_map for m in models])
+    specular_map, _ = MergedModel.merge_maps([m.specular_map for m in models])
+
+    @jaxtyped
+    @partial(jax.jit, inline=True)
+    def transform_vert(
+        verts: Float[Array, "N 3"],
+        local_scaling: Vec3f,
+        transform: ModelMatrix,
+    ) -> Vertices:
+        """Apply transforms defined in `ModelObject` to vertices."""
+        world: Float[Array, "N 3"] = Camera.apply_pos(
+            verts * local_scaling,
+            transform,
+        )
+        assert isinstance(world, Float[Array, "N 3"])
+
+        return world
+
+    # merge verts
+    verts, faces = MergedModel.merge_verts(
+        [
+            transform_vert(
+                verts=obj.model.verts,
+                local_scaling=obj.local_scaling,
+                transform=obj.transform,
+            ) for obj in objects
+        ],
+        [m.faces for m in models],
+    )
+
+    @jaxtyped
+    @partial(jax.jit, inline=True)
+    def transform_normals(
+        normals: Float[Array, "N 3"],
+        transform: ModelMatrix,
+    ) -> Vertices:
+        """Apply transforms defined in `ModelObject` to vertex normals."""
+        world: Float[Array, "N 3"] = Camera.apply_vec(
+            normals,
+            # transform by inverse transpose
+            jnp.linalg.inv(transform).T,
+        )
+        assert isinstance(world, Float[Array, "N 3"])
+
+        return world
+
+    norms, faces_norm = MergedModel.merge_verts(
+        [transform_normals(obj.model.norms, obj.transform) for obj in objects],
+        [m.faces_norm for m in models],
+    )
+    uvs, faces_uv = MergedModel.merge_verts(
+        [m.uvs for m in models],
+        [m.faces_uv for m in models],
+    )
+
+    return MergedModel(
+        verts=verts,
+        norms=norms,
+        uvs=uvs,
+        faces=faces,
+        faces_norm=faces_norm,
+        faces_uv=faces_uv,
+        texture_shape=map_wh_per_object,
+        texture_index=map_indices,
+        double_sided=double_sided,
+        offset=single_map_shape[0],
+        diffuse_map=diffuse_map,
+        specular_map=specular_map,
+    )

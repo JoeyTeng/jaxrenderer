@@ -1,6 +1,6 @@
 import enum
 from functools import partial
-from typing import Any, NamedTuple, Optional
+from typing import Any, NamedTuple, Optional, Union
 
 import jax
 import jax.lax as lax
@@ -820,6 +820,94 @@ def compute_normal(triangle_verts: Float[Array, "3 3"]) -> Float[Array, "3"]:
 @jax.jit
 def compute_normals(batch_verts: Float[Array, "b 3 3"]) -> Float[Array, "b 3"]:
     return jax.vmap(compute_normal)(batch_verts)
+
+
+@jaxtyped
+@jax.jit
+def quaternion(
+    rotation_axis: Union[Vec3f, tuple[float, float, float]],
+    rotation_angle: Union[Float[Array, ""], float],
+) -> Vec4f:
+    """Generate a quaternion rotation from a rotation axis and angle.
+
+    The rotation axis is normalised internally. The angle is specified in
+    degrees (NOT radian). The rotation is clockwise.
+    """
+    axis = normalise(jnp.asarray(rotation_axis))
+    angle = jnp.radians(jnp.asarray(rotation_angle))
+    assert isinstance(axis, Vec3f), f"{rotation_axis}"
+    assert isinstance(angle, Float[Array, ""]), f"{rotation_angle}"
+
+    quaternion: Vec4f = (
+        jnp.zeros(4)  #
+        .at[:3].set(axis * jnp.sin(angle / 2))  #
+        .at[3].set(jnp.cos(angle / 2))  #
+    )
+
+    return quaternion
+
+
+@jaxtyped
+@jax.jit
+def quaternion_mul(quatA: Vec4f, quatB: Vec4f) -> Vec4f:
+    """Multiply two quaternion rotations, as to composite them.
+
+    Noticed that all quaternions here are in order of (x, y, z, w), thus
+    shuffles are used here to convert from (w, x, y, z) to (x, y, z, w).
+
+    References:
+      - [Quaternion multiplication](https://www.mathworks.com/help/nav/ref/quaternion.mtimes.html)
+    """
+    assert isinstance(quatA, Vec4f)
+    assert isinstance(quatB, Vec4f)
+
+    with jax.ensure_compile_time_eval():
+        shuffle = jnp.array((3, 0, 1, 2))
+        idx103 = jnp.array((1, 0, 3))
+        idx230 = jnp.array((2, 3, 0))
+        idx013 = jnp.array((0, 1, 3))
+        idx320 = jnp.array((3, 2, 0))
+
+    quatA = quatA[shuffle]
+    quatB = quatB[shuffle]
+
+    return jnp.array((
+        quatA[0] * quatB[0] - quatA[1:] @ quatB[1:],
+        quatA[:3] @ quatB[idx103] - quatA[3] * quatB[2],
+        quatA[idx230] @ quatB[:3] - quatA[1] * quatB[3],
+        quatA[idx013] @ quatB[idx320] - quatA[2] * quatB[1],
+    ))[shuffle]
+
+
+@jaxtyped
+@jax.jit
+def rotation_matrix(
+    rotation_axis: Union[Vec3f, tuple[float, float, float]],
+    rotation_angle: Union[Float[Array, ""], float],
+) -> Float[Array, "3 3"]:
+    """Generate a rotation matrix from a rotation axis and angle.
+
+    The rotation axis is normalised internally. The angle is specified in
+    degrees (NOT radian). The rotation is clockwise.
+
+    References:
+      - [glRotated](https://registry.khronos.org/OpenGL-Refpages/gl2.1/xhtml/glRotate.xml)
+    """
+    axis = normalise(jnp.asarray(rotation_axis))
+    angle = jnp.radians(jnp.asarray(rotation_angle))
+    assert isinstance(axis, Vec3f), f"{rotation_axis}"
+    assert isinstance(angle, Float[Array, ""]), f"{rotation_angle}"
+
+    s = jnp.sin(angle)
+    c = jnp.cos(angle)
+
+    rotation_matrix: Float[Array, "3 3"] = (
+        jnp.identity(3) * c  # +c at main diagonal
+        - jnp.sin(angle) * jnp.cross(axis, jnp.identity(3))  # second term
+        + (1 - c) * jnp.outer(axis, axis)  # first term
+    )
+
+    return rotation_matrix
 
 
 @jaxtyped

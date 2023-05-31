@@ -1,13 +1,13 @@
 from functools import partial
-from typing import Any, NamedTuple, Optional, Union
+from typing import NamedTuple, Optional, Sequence, Union
 
 import jax
 import jax.lax as lax
 import jax.numpy as jnp
-from jaxtyping import Array, Bool, Float, Integer, Num, jaxtyped
+from jaxtyping import Array, Bool, Integer, Num, jaxtyped
 
-from .geometry import Camera, View, Projection, Viewport, normalise
-from .model import MergedModel, ModelMatrix, ModelObject
+from .geometry import Camera, Projection, View, Viewport, normalise
+from .model import MergedModel, ModelObject, merge_objects
 from .pipeline import render
 from .shaders.phong_reflection import (PhongReflectionTextureExtraInput,
                                        PhongReflectionTextureShader)
@@ -15,12 +15,10 @@ from .shaders.phong_reflection_shadow import (
     PhongReflectionShadowTextureExtraInput, PhongReflectionShadowTextureShader)
 from .shadow import Shadow
 from .types import (Buffers, Canvas, Colour, DtypeInfo, LightSource, Vec3f,
-                    Vertices, ZBuffer)
+                    ZBuffer)
 
 DoubleSidedFaces = Bool[Array, "faces"]
 """Whether to render both sides of each face (triangle primitive)."""
-ObjectsT = Union[list[ModelObject], tuple[ModelObject, ...]]
-"""A list or tuple of model objects. TODO: Change to `PyTree[ModelObject]`."""
 
 
 class CameraParameters(NamedTuple):
@@ -42,11 +40,11 @@ class CameraParameters(NamedTuple):
     """horizontal field of view, in degrees."""
     vfov: float = 45.
     """vertical field of view, in degrees."""
-    position: Vec3f = jnp.ones(3)
+    position: Union[Vec3f, tuple[float, float, float]] = jnp.ones(3)
     """position of the camera in world space."""
-    target: Vec3f = jnp.zeros(3)
+    target: Union[Vec3f, tuple[float, float, float]] = jnp.zeros(3)
     """target of the camera."""
-    up: Vec3f = jnp.array((0., 0., 1.))
+    up: Union[Vec3f, tuple[float, float, float]] = jnp.array((0., 0., 1.))
     """up direction of the camera."""
 
 
@@ -101,131 +99,18 @@ class Renderer:
     @staticmethod
     @jaxtyped
     @partial(jax.jit, inline=True)
-    def merge_objects(objects: ObjectsT) -> MergedModel:
-        """Merge objects into a single model.
-
-        Parameters:
-          - objects: a list of objects to merge.
-
-        Returns: A model containing the merged objects into one single mesh.
-        """
-        with jax.ensure_compile_time_eval():
-            models = [obj.model for obj in objects]
-
-            # broadcasted per vertex info
-            counts: list[int] = [len(m.verts) for m in models]
-
-            map_indices: Integer[Array, "vertices"]
-            map_indices = MergedModel.generate_object_vert_info(
-                counts,
-                list(range(len(models))),
-            )
-            assert isinstance(map_indices, Integer[Array, "vertices"])
-
-            map_wh_per_object = jnp.asarray(
-                [m.diffuse_map.shape[:2] for m in models])
-            assert isinstance(map_wh_per_object, Integer[Array, "objects 2"])
-
-            double_sided: Bool[Array, "vertices"]
-            double_sided = MergedModel.generate_object_vert_info(
-                counts,
-                [obj.double_sided for obj in objects],
-            )
-            assert isinstance(double_sided, Bool[Array, "vertices"])
-
-        # merge maps
-        diffuse_map, single_map_shape = MergedModel.merge_maps(
-            [m.diffuse_map for m in models])
-        specular_map, _ = MergedModel.merge_maps(
-            [m.specular_map for m in models])
-
-        @jaxtyped
-        @partial(jax.jit, inline=True)
-        def transform_vert(
-            verts: Float[Array, "N 3"],
-            local_scaling: Vec3f,
-            transform: ModelMatrix,
-        ) -> Vertices:
-            """Apply transforms defined in `ModelObject` to vertices."""
-            world: Float[Array, "N 3"] = Camera.apply_pos(
-                verts * local_scaling,
-                transform,
-            )
-            assert isinstance(world, Float[Array, "N 3"])
-
-            return world
-
-        # merge verts
-        verts, faces = MergedModel.merge_verts(
-            [
-                transform_vert(
-                    verts=obj.model.verts,
-                    local_scaling=obj.local_scaling,
-                    transform=obj.transform,
-                ) for obj in objects
-            ],
-            [m.faces for m in models],
-        )
-
-        @jaxtyped
-        @partial(jax.jit, inline=True)
-        def transform_normals(
-            normals: Float[Array, "N 3"],
-            transform: ModelMatrix,
-        ) -> Vertices:
-            """Apply transforms defined in `ModelObject` to vertex normals."""
-            world: Float[Array, "N 3"] = Camera.apply_vec(
-                normals,
-                # transform by inverse transpose
-                jnp.linalg.inv(transform).T,
-            )
-            assert isinstance(world, Float[Array, "N 3"])
-
-            return world
-
-        norms, faces_norm = MergedModel.merge_verts(
-            [
-                transform_normals(obj.model.norms, obj.transform)
-                for obj in objects
-            ],
-            [m.faces_norm for m in models],
-        )
-        uvs, faces_uv = MergedModel.merge_verts(
-            [m.uvs for m in models],
-            [m.faces_uv for m in models],
-        )
-
-        return MergedModel(
-            verts=verts,
-            norms=norms,
-            uvs=uvs,
-            faces=faces,
-            faces_norm=faces_norm,
-            faces_uv=faces_uv,
-            texture_shape=map_wh_per_object,
-            texture_index=map_indices,
-            double_sided=double_sided,
-            offset=single_map_shape[0],
-            diffuse_map=diffuse_map,
-            specular_map=specular_map,
-        )
-
-    @staticmethod
-    @jaxtyped
-    @partial(jax.jit, inline=True)
     def create_camera_from_parameters(camera: CameraParameters) -> Camera:
         """Create a camera from camera parameters."""
-        view_mat: View = Camera.view_matrix(
-            eye=camera.position,
-            centre=camera.target,
-            up=camera.up,
-        )
+        eye: Vec3f = jnp.asarray(camera.position)
+        assert isinstance(eye, Vec3f), f"{eye}"
+        centre: Vec3f = jnp.asarray(camera.target)
+        assert isinstance(centre, Vec3f), f"{centre}"
+        up: Vec3f = jnp.asarray(camera.up)
+        assert isinstance(up, Vec3f), f"{up}"
+
+        view_mat: View = Camera.view_matrix(eye=eye, centre=centre, up=up)
         assert isinstance(view_mat, View), f"{view_mat}"
-        view_inv: View = Camera.view_matrix_inv(
-            eye=camera.position,
-            centre=camera.target,
-            up=camera.up,
-        )
+        view_inv: View = Camera.view_matrix_inv(eye=eye, centre=centre, up=up)
         assert isinstance(view_inv, View), f"{view_inv}"
         projection_mat: Projection = Camera.perspective_projection_matrix(
             fovy=camera.vfov,
@@ -251,6 +136,46 @@ class Renderer:
         assert isinstance(_camera, Camera), f"{_camera}"
 
         return _camera
+
+    @staticmethod
+    @jaxtyped
+    def create_buffers(
+        width: int,
+        height: int,
+        batch: Optional[int] = None,
+        colour_default: Colour = jnp.array((1., 1., 1.), dtype=jnp.single),
+        zbuffer_default: Num[Array, ""] = jnp.array(1, dtype=jnp.single),
+    ) -> Buffers:
+        """Render the scene with the given camera.
+
+        The dtype of `colour_default` and `zbuffer_default` will be used as the
+        dtype of canvas and zbuffer.
+
+        Parameters:
+          - width, height: the size of the image to render.
+          - batch: if specified, will produce a batch of buffers, with batch
+            axis at axis 0.
+          - colour_default: default colours to fill the image with.
+          - zbuffer_default: default zbuffer values to fill with.
+          - shadow_param: the shadow parameters to render the scene with. Keep
+
+        Returns: Buffers, with zbuffer and (coloured image, ).
+        """
+        _batch = (batch, ) if batch is not None else ()
+        zbuffer: ZBuffer = lax.full(
+            (*_batch, width, height),
+            zbuffer_default,
+        )
+        canvas: Canvas = jnp.full(
+            (*_batch, width, height, colour_default.size),
+            colour_default,
+        )
+        buffers: Buffers = Buffers(
+            zbuffer=zbuffer,
+            targets=(canvas, ),
+        )
+
+        return buffers
 
     @classmethod
     @jaxtyped
@@ -371,24 +296,27 @@ class Renderer:
     @jaxtyped
     def get_camera_image(
         cls,
-        objects: ObjectsT,
+        objects: Sequence[ModelObject],
         light: LightParameters,
         camera: Union[Camera, CameraParameters],
         width: int,
         height: int,
         colour_default: Colour = jnp.array((1., 1., 1.), dtype=jnp.single),
-        zbuffer_default: Num[Array, ""] = jnp.array(1),
-        zbuffer_dtype: jnp.dtype[Any] = jnp.single,
+        zbuffer_default: Num[Array, ""] = jnp.array(1, dtype=jnp.single),
         shadow_param: Optional[ShadowParameters] = None,
     ) -> Canvas:
         """Render the scene with the given camera.
+
+        The dtype of `colour_default` and `zbuffer_default` will be used as the
+        dtype of canvas and zbuffer.
 
         Parameters:
           - objects: the objects to render.
           - light: the light to render the scene with.
           - camera: the camera to render the scene with.
           - width, height: the size of the image to render.
-          - colourChannels: the number of colour channels to render.
+          - colour_default: default colours to fill the image with.
+          - zbuffer_default: default zbuffer values to fill with.
           - shadow_param: the shadow parameters to render the scene with. Keep
 
         Returns: Buffers, with zbuffer and (coloured image, ).
@@ -401,22 +329,17 @@ class Renderer:
 
         assert isinstance(_camera, Camera), f"{_camera}"
 
-        zbuffer: ZBuffer = lax.full(
-            (width, height),
-            jnp.array(zbuffer_default, dtype=zbuffer_dtype),
-        )
-        canvas: Canvas = jnp.full(
-            (width, height, colour_default.size),
-            colour_default,
-        )
-        buffers: Buffers = Buffers(
-            zbuffer=zbuffer,
-            targets=(canvas, ),
+        buffers: Buffers = cls.create_buffers(
+            width=width,
+            height=height,
+            colour_default=colour_default,
+            zbuffer_default=zbuffer_default,
         )
 
-        model: MergedModel = cls.merge_objects(objects)
+        model: MergedModel = merge_objects(objects)
         assert isinstance(model, MergedModel), f"{model}"
 
+        canvas: Canvas
         _, (canvas, ) = cls.render(
             model=model,
             light=light,
