@@ -1,4 +1,4 @@
-from typing import NamedTuple, NewType, Union
+from typing import NamedTuple, NewType, Optional, Union
 
 import jax
 import jax.lax as lax
@@ -205,21 +205,36 @@ class Scene(NamedTuple):
     def set_object_orientation(
         self,
         object_id: GUID,
-        orientation: Union[Vec4f, tuple[float, float, float, float]],
+        orientation: Optional[Union[Vec4f, tuple[float, float, float,
+                                                 float]]] = None,
+        rotation_matrix: Optional[Float[Array, "3 3"]] = None,
     ) -> "Scene":
         """Set the orientation of an object in the scene.
 
+        If rotation_matrix is specified, it takes precedence over orientation.
+        If none is specified, the object's orientation is set to identity.
+
         Parameters:
           - object_id: the unique identifier of the object.
-          - orientation: the new orientation of the object.
+          - orientation: the new orientation of the object, optional.
+          - rotation_matrix: the new rotation matrix of the object, optional
         """
-        _orientation = jnp.asarray(orientation, dtype=float)
-        assert isinstance(_orientation, Vec4f), f"{orientation}"
-        mat: Float[Array, "3 3"] = transform_matrix_from_rotation(_orientation)
-        assert isinstance(mat, Float[Array, "3 3"]), f"{mat}"
+        if rotation_matrix is None:
+            if orientation is None:
+                orientation = (0., 0., 0., 1.)
+
+            _orientation = jnp.asarray(orientation, dtype=float)
+            assert isinstance(_orientation, Vec4f), f"{orientation}"
+            rotation_matrix = transform_matrix_from_rotation(_orientation)
+
+        assert isinstance(
+            rotation_matrix,
+            Float[Array, "3 3"],
+        ), f"{rotation_matrix}"
 
         obj: ModelObject = self.objects[object_id]
-        new_mat: Float[Array, "4 4"] = obj.transform.at[:3, :3].set(mat)
+        new_mat: Float[Array, "4 4"]
+        new_mat = obj.transform.at[:3, :3].set(rotation_matrix)
         new_obj: ModelObject = obj._replace(transform=new_mat)
 
         return self._replace(objects=self.objects | {object_id: new_obj})

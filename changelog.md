@@ -22,4 +22,4 @@
 6. `Model` now has a convenient method `create` to create a Model with same face indices shared by `faces`, `faces_norm` and `faces_uv`, and a default `specular_map`. This is useful for creating a mesh where all vertices has its own normal and uv coordinate specified, under same order (thus same face indices).
 7. Correctly support Python Sequence for `utils.build_texture_from_PyTinyrenderer` as texture.
 8. `quaternion` function to create an orientation from axis and angle, and `quaternion_mul` to composite quaternion.
-9. `rotation_matrix` function to create a rotation matrix from axis and angle.
+9. `rotation_matrix` function to create a rotation matrix from axis and angle. Also allows `Scene` to set object orientation directly using rotation matrix.
