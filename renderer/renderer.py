@@ -4,9 +4,9 @@ from typing import NamedTuple, Optional, Sequence, Union
 import jax
 import jax.lax as lax
 import jax.numpy as jnp
-from jaxtyping import Array, Bool, Float, Integer, Num, jaxtyped
+from jaxtyping import Array, Bool, Integer, Num, jaxtyped
 
-from .geometry import Camera, View, Projection, Viewport, normalise
+from .geometry import Camera, Projection, View, Viewport, normalise
 from .model import MergedModel, ModelObject, merge_objects
 from .pipeline import render
 from .shaders.phong_reflection import (PhongReflectionTextureExtraInput,
@@ -137,6 +137,46 @@ class Renderer:
 
         return _camera
 
+    @staticmethod
+    @jaxtyped
+    def create_buffers(
+        width: int,
+        height: int,
+        batch: Optional[int] = None,
+        colour_default: Colour = jnp.array((1., 1., 1.), dtype=jnp.single),
+        zbuffer_default: Num[Array, ""] = jnp.array(1, dtype=jnp.single),
+    ) -> Buffers:
+        """Render the scene with the given camera.
+
+        The dtype of `colour_default` and `zbuffer_default` will be used as the
+        dtype of canvas and zbuffer.
+
+        Parameters:
+          - width, height: the size of the image to render.
+          - batch: if specified, will produce a batch of buffers, with batch
+            axis at axis 0.
+          - colour_default: default colours to fill the image with.
+          - zbuffer_default: default zbuffer values to fill with.
+          - shadow_param: the shadow parameters to render the scene with. Keep
+
+        Returns: Buffers, with zbuffer and (coloured image, ).
+        """
+        _batch = (batch, ) if batch is not None else ()
+        zbuffer: ZBuffer = lax.full(
+            (*_batch, width, height),
+            zbuffer_default,
+        )
+        canvas: Canvas = jnp.full(
+            (*_batch, width, height, colour_default.size),
+            colour_default,
+        )
+        buffers: Buffers = Buffers(
+            zbuffer=zbuffer,
+            targets=(canvas, ),
+        )
+
+        return buffers
+
     @classmethod
     @jaxtyped
     @partial(jax.jit, static_argnames=("cls", ), donate_argnums=(4, ))
@@ -262,18 +302,21 @@ class Renderer:
         width: int,
         height: int,
         colour_default: Colour = jnp.array((1., 1., 1.), dtype=jnp.single),
-        zbuffer_default: Num[Array, ""] = jnp.array(1),
-        zbuffer_dtype: jnp.dtype[Any] = jnp.single,
+        zbuffer_default: Num[Array, ""] = jnp.array(1, dtype=jnp.single),
         shadow_param: Optional[ShadowParameters] = None,
     ) -> Canvas:
         """Render the scene with the given camera.
+
+        The dtype of `colour_default` and `zbuffer_default` will be used as the
+        dtype of canvas and zbuffer.
 
         Parameters:
           - objects: the objects to render.
           - light: the light to render the scene with.
           - camera: the camera to render the scene with.
           - width, height: the size of the image to render.
-          - colourChannels: the number of colour channels to render.
+          - colour_default: default colours to fill the image with.
+          - zbuffer_default: default zbuffer values to fill with.
           - shadow_param: the shadow parameters to render the scene with. Keep
 
         Returns: Buffers, with zbuffer and (coloured image, ).
@@ -286,22 +329,17 @@ class Renderer:
 
         assert isinstance(_camera, Camera), f"{_camera}"
 
-        zbuffer: ZBuffer = lax.full(
-            (width, height),
-            jnp.array(zbuffer_default, dtype=zbuffer_dtype),
-        )
-        canvas: Canvas = jnp.full(
-            (width, height, colour_default.size),
-            colour_default,
-        )
-        buffers: Buffers = Buffers(
-            zbuffer=zbuffer,
-            targets=(canvas, ),
+        buffers: Buffers = cls.create_buffers(
+            width=width,
+            height=height,
+            colour_default=colour_default,
+            zbuffer_default=zbuffer_default,
         )
 
         model: MergedModel = merge_objects(objects)
         assert isinstance(model, MergedModel), f"{model}"
 
+        canvas: Canvas
         _, (canvas, ) = cls.render(
             model=model,
             light=light,

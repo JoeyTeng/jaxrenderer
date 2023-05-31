@@ -319,6 +319,18 @@ class ModelObject(NamedTuple):
     """Whether the object is double-sided."""
 
 
+def batch_models(models: Sequence[MergedModel]) -> MergedModel:
+    """Merge multiple MergedModel into one, with each field being a batch, with
+        batch axis at 0. This is intended to facilitate `jax.vmap`.
+    """
+    merged_model = MergedModel._make((lax.concatenate(
+        [jnp.asarray(model[i])[None, ...] for model in models],
+        dimension=0,
+    ) for i in range(len(models[0]))))
+
+    return merged_model
+
+
 @staticmethod
 @jaxtyped
 def merge_objects(objects: Sequence[ModelObject]) -> MergedModel:

@@ -24,3 +24,4 @@
 8. `quaternion` function to create an orientation from axis and angle, and `quaternion_mul` to composite quaternion.
 9. `rotation_matrix` function to create a rotation matrix from axis and angle. Also allows `Scene` to set object orientation directly using rotation matrix.
 10. Move `Renderer.merge_objects` into `geometry.py`, and expose in `__init__.py`.
+11. `batch_models` and `Renderer.create_buffers` convenient method to facilitate batch rendering of multiple models.
