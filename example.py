@@ -3,8 +3,8 @@ import jax.lax as lax
 import jax.numpy as jnp
 
 from renderer import (CameraParameters, LightParameters, Renderer, Scene,
-                      ShadowParameters, Texture, UpAxis, Vec3f,
-                      transpose_for_display, build_texture_from_PyTinyrenderer)
+                      ShadowParameters, Texture, UpAxis, transpose_for_display,
+                      build_texture_from_PyTinyrenderer)
 
 # PROCESS: Set up models and objects
 
