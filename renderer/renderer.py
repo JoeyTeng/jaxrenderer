@@ -4,6 +4,7 @@ from typing import NamedTuple, Optional, Sequence, Union
 import jax
 import jax.lax as lax
 import jax.numpy as jnp
+from jax.tree_util import tree_map
 from jaxtyping import Array, Bool, Integer, Num, jaxtyped
 
 from .geometry import Camera, Projection, View, Viewport, normalise
@@ -101,11 +102,11 @@ class Renderer:
     @partial(jax.jit, inline=True)
     def create_camera_from_parameters(camera: CameraParameters) -> Camera:
         """Create a camera from camera parameters."""
-        eye: Vec3f = jnp.asarray(camera.position)
+        eye: Vec3f = jnp.asarray(camera.position, dtype=float)
         assert isinstance(eye, Vec3f), f"{eye}"
-        centre: Vec3f = jnp.asarray(camera.target)
+        centre: Vec3f = jnp.asarray(camera.target, dtype=float)
         assert isinstance(centre, Vec3f), f"{centre}"
-        up: Vec3f = jnp.asarray(camera.up)
+        up: Vec3f = jnp.asarray(camera.up, dtype=float)
         assert isinstance(up, Vec3f), f"{up}"
 
         view_mat: View = Camera.view_matrix(eye=eye, centre=centre, up=up)
@@ -328,6 +329,9 @@ class Renderer:
             _camera = camera
 
         assert isinstance(_camera, Camera), f"{_camera}"
+
+        light = tree_map(jnp.asarray, light)
+        assert isinstance(light, LightParameters), f"{light}"
 
         buffers: Buffers = cls.create_buffers(
             width=width,
