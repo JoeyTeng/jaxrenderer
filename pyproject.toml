@@ -32,10 +32,10 @@ include = [
 
 
 [tool.poetry.dependencies]
-python = "^3.10"
-jax = "^0.4.8"
-numpy = "^1.24.1"
-jaxlib = {version = "^0.4.7", source = "jax"}
+python = "^3.9"
+jax = "^0.4.4"
+numpy = "^1.22.0"
+jaxlib = {version = "^0.4.4", source = "jax"}
 jaxtyping = "^0.2.19"
 importlib-metadata = "^6.6.0"
 
