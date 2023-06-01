@@ -348,6 +348,14 @@ class Renderer:
         model: MergedModel = merge_objects(objects)
         assert isinstance(model, MergedModel), f"{model}"
 
+        if shadow_param is not None:
+            shadow_param = tree_map(
+                jnp.asarray,
+                shadow_param,
+                # only flatten one layer
+                is_leaf=lambda x: not isinstance(x, ShadowParameters),
+            )
+
         canvas: Canvas
         _, (canvas, ) = cls.render(
             model=model,
