@@ -912,7 +912,7 @@ def rotation_matrix(
 def transform_matrix_from_rotation(rotation: Vec4f) -> Float[Array, "3 3"]:
     """Generate a transform matrix from a quaternion rotation.
 
-    Supports non-unit rotation.
+    Quaternion is specified in (w, x, y, z) order. Supports non-unit rotation.
 
     References:
           - [Quaternions and spatial rotation#Quaternion-derived rotation matrix](https://en.wikipedia.org/wiki/Quaternions_and_spatial_rotation#Quaternion-derived_rotation_matrix)
@@ -921,11 +921,9 @@ def transform_matrix_from_rotation(rotation: Vec4f) -> Float[Array, "3 3"]:
     d = rotation @ rotation
     s = 2.0 / d  # here s is $2\times s$ in Wikipedia.
 
-    rs: Vec3f = rotation[:3] * s
-    ((wx, wy, wz), (xx, xy, xz), (yy, yz, zz)) = jnp.outer(
-        rotation[jnp.array((3, 0, 1))],
-        rs,
-    )
+    rs: Vec3f = rotation[1:] * s  # x y z
+    ((wx, wy, wz), (xx, xy, xz), (_, yy, yz)) = jnp.outer(rotation[:3], rs)
+    zz = rotation[3] * rs[2]
 
     mat: Float[Array, "3 3"] = jnp.array((
         (1. - (yy + zz), xy - wz, xz + wy),
