@@ -25,3 +25,11 @@
 9. `rotation_matrix` function to create a rotation matrix from axis and angle. Also allows `Scene` to set object orientation directly using rotation matrix.
 10. Move `Renderer.merge_objects` into `geometry.py`, and expose in `__init__.py`.
 11. `batch_models` and `Renderer.create_buffers` convenient method to facilitate batch rendering of multiple models.
+
+## 0.1.2
+
+1. Change the ordering of quaternions (in `geometry.py`) to `(w, x, y, z)` instead of `(x, y, z, w)` to be consistent with the convention used in `pytinyrenderer` and `BRAX`. Reference: [brax/math.py](https://github.com/google/brax/blob/aebd8b8cb34430f6eaf6f914293f901e3c8d9a22/brax/math.py).
+2. Fix: remove unnecessary `@staticmethod` decorator in `merge_objects`.
+3. Changed the way that `Camera` is created in `Renderer.create_camera_from_parameters` to force convert parameters into `float` weak type.
+4. Force convert `LightParameters` to JAX arrays in `Renderer.get_camera_image` to avoid downstream errors.
+5. Downgrade minimum Python version to `3.9`, `numpy` version to `1.22.0`, `jax` and `jaxlib` version to `0.4.4`.

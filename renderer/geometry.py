@@ -832,6 +832,8 @@ def quaternion(
 
     The rotation axis is normalised internally. The angle is specified in
     degrees (NOT radian). The rotation is clockwise.
+
+    The resultant quaternion is in order of (w, x, y, z).
     """
     axis = normalise(jnp.asarray(rotation_axis))
     angle = jnp.radians(jnp.asarray(rotation_angle))
@@ -840,8 +842,8 @@ def quaternion(
 
     quaternion: Vec4f = (
         jnp.zeros(4)  #
-        .at[:3].set(axis * jnp.sin(angle / 2))  #
-        .at[3].set(jnp.cos(angle / 2))  #
+        .at[0].set(jnp.cos(angle / 2))  #
+        .at[1:].set(axis * jnp.sin(angle / 2))  #
     )
 
     return quaternion
@@ -852,8 +854,7 @@ def quaternion(
 def quaternion_mul(quatA: Vec4f, quatB: Vec4f) -> Vec4f:
     """Multiply two quaternion rotations, as to composite them.
 
-    Noticed that all quaternions here are in order of (x, y, z, w), thus
-    shuffles are used here to convert from (w, x, y, z) to (x, y, z, w).
+    Noticed that all quaternions here are in order of (w, x, y, z).
 
     References:
       - [Quaternion multiplication](https://www.mathworks.com/help/nav/ref/quaternion.mtimes.html)
@@ -862,21 +863,17 @@ def quaternion_mul(quatA: Vec4f, quatB: Vec4f) -> Vec4f:
     assert isinstance(quatB, Vec4f)
 
     with jax.ensure_compile_time_eval():
-        shuffle = jnp.array((3, 0, 1, 2))
         idx103 = jnp.array((1, 0, 3))
         idx230 = jnp.array((2, 3, 0))
         idx013 = jnp.array((0, 1, 3))
         idx320 = jnp.array((3, 2, 0))
-
-    quatA = quatA[shuffle]
-    quatB = quatB[shuffle]
 
     return jnp.array((
         quatA[0] * quatB[0] - quatA[1:] @ quatB[1:],
         quatA[:3] @ quatB[idx103] - quatA[3] * quatB[2],
         quatA[idx230] @ quatB[:3] - quatA[1] * quatB[3],
         quatA[idx013] @ quatB[idx320] - quatA[2] * quatB[1],
-    ))[shuffle]
+    ))
 
 
 @jaxtyped

@@ -331,7 +331,6 @@ def batch_models(models: Sequence[MergedModel]) -> MergedModel:
     return merged_model
 
 
-@staticmethod
 @jaxtyped
 def merge_objects(objects: Sequence[ModelObject]) -> MergedModel:
     """Merge objects into a single model.
