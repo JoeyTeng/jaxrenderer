@@ -29,3 +29,4 @@
 ## 0.1.2
 
 1. Change the ordering of quaternions (in `geometry.py`) to `(w, x, y, z)` instead of `(x, y, z, w)` to be consistent with the convention used in `pytinyrenderer` and `BRAX`. Reference: [brax/math.py](https://github.com/google/brax/blob/aebd8b8cb34430f6eaf6f914293f901e3c8d9a22/brax/math.py).
+2. Fix: remove unnecessary `@staticmethod` decorator in `merge_objects`.
