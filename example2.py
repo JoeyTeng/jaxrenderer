@@ -74,7 +74,7 @@ scene, plane_model = scene.add_model(model)
 scene, plane_instance_id = scene.add_object_instance(plane_model)
 scene = scene.set_object_orientation(
     plane_instance_id,
-    (0, 0, 0, 1.),
+    (1., 0, 0, 0),
 )
 
 img = Renderer.get_camera_image(

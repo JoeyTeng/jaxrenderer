@@ -5,7 +5,8 @@ import jax.numpy as jnp
 
 from renderer import (CameraParameters, LightParameters, Renderer, Scene,
                       ShadowParameters, Texture, UpAxis, batch_models,
-                      merge_objects, rotation_matrix, transpose_for_display)
+                      merge_objects, quaternion, rotation_matrix,
+                      transpose_for_display)
 
 # PROCESS: Set up models and objects
 
@@ -29,10 +30,18 @@ for i in range(12):
     scene, capsule_obj_id = scene.add_object_instance(capsule_id)
     capsule_obj_ids.append(capsule_obj_id)
 
-    scene = scene.set_object_orientation(
-        capsule_obj_id,
-        rotation_matrix=rotation_matrix((0., 1., 0.), 30 * (i - 6)),
-    )
+    # to try both ways of setting orientation
+    if i < 6:
+        scene = scene.set_object_orientation(
+            capsule_obj_id,
+            # rotation_matrix=rotation_matrix((0., 1., 0.), 30 * (i - 6)),
+            orientation=quaternion((0., 1., 0.), 30 * (i - 6)),
+        )
+    else:
+        scene = scene.set_object_orientation(
+            capsule_obj_id,
+            rotation_matrix=rotation_matrix((0., 1., 0.), 30 * (i - 6)),
+        )
 
 # PROCESS: Set up camera and light
 

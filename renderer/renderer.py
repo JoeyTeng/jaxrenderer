@@ -330,7 +330,12 @@ class Renderer:
 
         assert isinstance(_camera, Camera), f"{_camera}"
 
-        light = tree_map(jnp.asarray, light)
+        light = tree_map(
+            jnp.asarray,
+            light,
+            # only flatten one layer
+            is_leaf=lambda x: not isinstance(x, LightParameters),
+        )
         assert isinstance(light, LightParameters), f"{light}"
 
         buffers: Buffers = cls.create_buffers(
@@ -342,6 +347,14 @@ class Renderer:
 
         model: MergedModel = merge_objects(objects)
         assert isinstance(model, MergedModel), f"{model}"
+
+        if shadow_param is not None:
+            shadow_param = tree_map(
+                jnp.asarray,
+                shadow_param,
+                # only flatten one layer
+                is_leaf=lambda x: not isinstance(x, ShadowParameters),
+            )
 
         canvas: Canvas
         _, (canvas, ) = cls.render(
