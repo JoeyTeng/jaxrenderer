@@ -43,8 +43,7 @@ class PerPrimitive(NamedTuple):
 @jaxtyped
 @partial(jax.jit, static_argnames=("shader", ), donate_argnums=(1, ))
 def _postprocessing(
-    shader: Union[Shader[ShaderExtraInputT, VaryingT, MixedExtraT],
-                  type[Shader[ShaderExtraInputT, VaryingT, MixedExtraT]]],
+    shader: type[Shader[ShaderExtraInputT, VaryingT, MixedExtraT]],
     buffers: Buffers,
     per_primitive: tuple[Any, ...],  # Batch PerPrimitive
     varyings: VaryingT,
@@ -273,8 +272,7 @@ def _postprocessing(
 @partial(jax.jit, static_argnames=("shader", ), donate_argnums=(2, ))
 def render(
     camera: Camera,
-    shader: Union[Shader[ShaderExtraInputT, VaryingT, MixedExtraT],
-                  type[Shader[ShaderExtraInputT, VaryingT, MixedExtraT]]],
+    shader: type[Shader[ShaderExtraInputT, VaryingT, MixedExtraT]],
     buffers: Buffers,
     face_indices: FaceIndices,
     extra: ShaderExtraInputT,
