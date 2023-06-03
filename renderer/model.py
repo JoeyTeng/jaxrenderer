@@ -9,9 +9,9 @@ from jax.tree_util import tree_map
 from jaxtyping import (Array, Bool, Float, Integer, Num, PyTree, Shaped,
                        jaxtyped)
 
-from .geometry import Camera
+from .geometry import Camera, transform_matrix_from_rotation
 from .types import (FALSE_ARRAY, FaceIndices, Normals, SpecularMap, Texture,
-                    UVCoordinates, Vec3f, Vertices)
+                    UVCoordinates, Vec3f, Vec4f, Vertices)
 from .value_checker import index_in_bound
 
 ModelMatrix = Float[Array, "4 4"]
@@ -317,6 +317,77 @@ class ModelObject(NamedTuple):
     # TODO: Support double_sided
     double_sided: Bool[Array, ""] = FALSE_ARRAY
     """Whether the object is double-sided."""
+
+    @jaxtyped
+    def replace_with_position(self, position: Vec3f) -> "ModelObject":
+        """Return a new ModelObject with given position.
+
+        !!This does not change the original object.
+
+        Parameters:
+          - position: the new position of the object.
+        """
+        return self._replace(transform=self.transform.at[:3, 3].set(position))
+
+    @jaxtyped
+    def replace_with_orientation(
+        self,
+        orientation: Optional[Vec4f] = None,
+        rotation_matrix: Optional[Float[Array, "3 3"]] = None,
+    ) -> "ModelObject":
+        """Return a new ModelObject with given orientation or rotation_matrix.
+
+        If rotation_matrix is specified, it takes precedence over orientation.
+        If none is specified, the object's orientation is set to identity.
+
+        !!This does not change the original object.
+
+        Parameters:
+          - orientation: the new orientation of the object, optional.
+          - rotation_matrix: the new rotation matrix of the object, optional
+        """
+        if rotation_matrix is None:
+            if orientation is None:
+                orientation = jnp.array((0., 0., 0., 1.))
+
+            assert isinstance(orientation, Vec4f), f"{orientation}"
+            rotation_matrix = transform_matrix_from_rotation(orientation)
+
+        assert isinstance(
+            rotation_matrix,
+            Float[Array, "3 3"],
+        ), f"{rotation_matrix}"
+
+        return self._replace(
+            transform=self.transform.at[:3, :3].set(rotation_matrix))
+
+    @jaxtyped
+    def replace_with_local_scaling(
+        self,
+        local_scaling: Vec3f,
+    ) -> "ModelObject":
+        """Return a new ModelObject with given local_scaling.
+
+        !!This does not change the original object.
+
+        Parameters:
+          - local_scaling: the new local scaling of the object.
+        """
+        return self._replace(local_scaling=local_scaling)
+
+    @jaxtyped
+    def replace_with_double_sided(
+        self,
+        double_sided: Bool[Array, ""],
+    ) -> "ModelObject":
+        """Return a new ModelObject with given double_sided.
+
+        !!This does not change the original object.
+
+        Parameters:
+          - double_sided: whether the object is double-sided.
+        """
+        return self._replace(double_sided=double_sided)
 
 
 def batch_models(models: Sequence[MergedModel]) -> MergedModel:
