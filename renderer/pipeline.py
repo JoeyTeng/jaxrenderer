@@ -1,5 +1,5 @@
 from functools import partial
-from typing import Any, NamedTuple, TypeVar, Union
+from typing import Any, NamedTuple, TypeVar
 
 import jax
 import jax.lax as lax
@@ -8,47 +8,87 @@ from jax import lax
 from jax.tree_util import tree_map
 from jaxtyping import Array, Bool, Float, Integer, Num, jaxtyped
 
-from .geometry import (Camera, Interpolation, barycentric, interpolate,
-                       normalise_homogeneous)
+from .geometry import Camera, Interpolation, Viewport, interpolate
 from .shader import (ID, MixedExtraT, MixerOutput, PerFragment, PerVertex,
                      Shader, ShaderExtraInputT, VaryingT)
-from .types import (FALSE_ARRAY, Buffers, FaceIndices, Triangle, Triangle2Df,
-                    Vec2f, Vec2i, Vec3f, Vec4f)
+from .types import (FALSE_ARRAY, Buffers, FaceIndices, Triangle, Vec2f, Vec2i,
+                    Vec3f, Vec4f)
 
 jax.config.update('jax_array', True)
-
-
-class PerVertexInScreen(NamedTuple):
-    """Built-in output from Vertex Shader after Viewport transformation.
-
-    gl_Position is in screen-space.
-    """
-    gl_Position: Vec4f
-    # gl_PointSize is meaningful only when rendering point primitives.
-    # not supported for now
-    # gl_PointSize: Float[Array, ""]
 
 
 class PerPrimitive(NamedTuple):
     """Input for each primitive, using outputs from Vertex Shader.
 
-    gl_Position is in screen-space, normalised homogeneous coordinate
+    gl_Position is in clip-space, not normalised.
     """
     gl_Position: Triangle
     # gl_PointSize is meaningful only when rendering point primitives.
     # not supported for now
     # gl_PointSize: Float[Array, "primitives"]
+    keep: Bool[Array, ""]
+    """Whether to keep this primitive for rasterisation.
+        !!Never keep a primitive with a zero determinant.
+    """
+    determinant: Float[Array, ""]
+    """determinant of the matrix with [x, y, w] of the three vertices in clip
+        space, in a shape of
+
+        [[x0, y0, w0],
+         [x1, y1, w1],
+         [x2, y2, w2]].
+
+        When determinant is 0, the triangle will not be rendered for now.
+    """
+    matrix_inv: Float[Array, "3 3"]
+    """inverse of the matrix described above (of [x, y, w])."""
+
+    @classmethod
+    @jaxtyped
+    @partial(jax.jit, static_argnames=("cls", ))
+    def create(cls, per_vertex: PerVertex) -> "PerPrimitive":
+        """per_vertex is batched with size 3 (3 vertices per triangle)
+            in clip-space, not normalised.
+        """
+        clip: Triangle = per_vertex.gl_Position
+        assert isinstance(clip, Triangle)
+        # matrix with x, y, w
+        matrix: Float[Array, "3 3"] = clip[:, jnp.array((0, 1, 3))]
+        # If == 0, the matrix inverse does not exist, should use another
+        # interpolation method. Early exit for now.
+        # `jnp.linalg.det` has built-in 3x3 det optimisation
+        determinant: Float[Array, ""] = jnp.linalg.det(matrix)
+        assert isinstance(determinant, Float[Array, ""])
+
+        # an arbitrary number for numerical stability
+        keep: Bool[Array, ""] = lax.abs(determinant) > 1e-6
+
+        mat_inv: Float[Array, "3 3"] = lax.cond(
+            # an arbitrary number for numerical stability
+            keep,
+            # may replace with custom implementation for higher precision
+            lambda: jnp.linalg.inv(matrix),
+            lambda: jnp.zeros((3, 3)),
+        )
+        assert isinstance(mat_inv, Float[Array, "3 3"])
+
+        return cls(
+            gl_Position=clip,
+            keep=keep,
+            determinant=determinant,
+            matrix_inv=mat_inv,
+        )
 
 
 @jaxtyped
 @partial(jax.jit, static_argnames=("shader", ), donate_argnums=(1, ))
 def _postprocessing(
-    shader: Union[Shader[ShaderExtraInputT, VaryingT, MixedExtraT],
-                  type[Shader[ShaderExtraInputT, VaryingT, MixedExtraT]]],
+    shader: type[Shader[ShaderExtraInputT, VaryingT, MixedExtraT]],
     buffers: Buffers,
     per_primitive: tuple[Any, ...],  # Batch PerPrimitive
     varyings: VaryingT,
     extra: ShaderExtraInputT,
+    viewport: Viewport,
 ) -> Buffers:
     with jax.ensure_compile_time_eval():
         # loop along first axis, for memory efficiency
@@ -68,47 +108,63 @@ def _postprocessing(
             primitive: PerPrimitive,
             varying_per_primitive: VaryingT,
         ) -> tuple[PerFragment, VaryingT]:
-            screen: Triangle = primitive.gl_Position
+            # PROCESS: Interpolation
 
-            # 2d screen coordinates
-            screen2d: Triangle2Df = screen[:, :2]
-            assert isinstance(screen2d, Triangle2Df)
+            # For early exit when not keep primitive / determinant is 0
+            def _when_keep_primitive() -> tuple[Vec3f, Float[Array, ""]]:
+                """Returns clip_coef, w_reciprocal."""
+                # x/w, y/w, with x, y, w in clip space.
+                xy: Float[Array, "2"] = (
+                    (coord - viewport[:2, 3]) /
+                    viewport[jnp.arange(2), jnp.arange(2)])
+                xy1_ndc: Float[Array, "3"] = jnp.array((xy[0], xy[1], 1))
 
-            # PROCESS: Rasterisation (Interpolate)
-            # barycentric coordinates
-            bc_screen: Vec3f = barycentric(screen2d, coord)
-            assert isinstance(bc_screen, Vec3f)
+                # As the interpolation formula is `xy1_ndc @ (mat_inv @ values)`
+                # we can utilise associativity to generate a set of fixed Vec3f
+                # coefficient for interpolation.
+                # Noticed that this is also the "edge function" values, with
+                # a pseudo-parameter that is zero at the two vertices on the
+                # edge and one at the opposite vertex, as described
+                # in [Olano and Greer, 1997].
+                clip_coef: Vec3f = jnp.dot(xy1_ndc, primitive.matrix_inv)
+                assert isinstance(clip_coef, Vec3f)
+                # 1/w, w in clip space.
+                w_reciprocal: Float[Array, ""] = clip_coef.sum()
+                assert isinstance(w_reciprocal, Float[Array, ""])
 
-            def _when_keep_triangle() -> tuple[PerFragment, VaryingT]:
-                # weight barycentric coordinates by 1/w to obtain
-                # perspective-coorected barycentric coordinates
-                bc_clip: Vec3f = bc_screen * screen[:, 3]
+                return clip_coef, w_reciprocal
 
-                # normalise barycentric coordinates so that it sums to 1.
-                bc_clip = bc_clip / bc_clip.sum()
+            # END OF `_when_keep_primitive`
 
+            # Prepare for interpolation parameters
+            # clip_coef here interpolates to 1/w * target value
+            clip_coef, w_reciprocal = lax.cond(
+                # an arbitrary number for numerical stability
+                primitive.keep,
+                _when_keep_primitive,
+                lambda: (lax.full((3, ), -1.), jnp.zeros(())),
+            )
+
+            def _when_in_triangle() -> tuple[PerFragment, VaryingT]:
                 # Prepare inputs for fragment shader
-                # no need to "normalise" as barycentric coordinates here
-                # ensures it sums to 1, thus result is normalised when inputs
-                # are.
-                # Mode: NOPERSPECTIVE: since inverse of the depth is linear,
-                # the correct way to interpolate it is just to interpolate
-                # under screen space using bc_screen,
-                # or using `NONPERSPECTVIE` mode.
-                gl_FragCoord: Vec4f = interpolate(
-                    screen,
-                    bc_screen,
-                    bc_clip,
-                    mode=Interpolation.NOPERSPECTIVE,
+                z: Float[Array, ""] = interpolate(
+                    values=primitive.gl_Position[:, 2],
+                    barycentric_screen=clip_coef,
+                    barycentric_clip=clip_coef,
+                    mode=Interpolation.SMOOTH,
                 )
-                gl_FragCoord.at[:2].set(coord)
+                # viewport transform for z, from clip space to window space
+                z = z * viewport[2, 2] + viewport[2, 3]
+                gl_FragCoord: Vec4f = jnp.array((
+                    coord[0],
+                    coord[1],
+                    z,
+                    w_reciprocal,
+                ))
                 assert isinstance(gl_FragCoord, Vec4f)
 
                 # Ref: https://registry.khronos.org/OpenGL-Refpages/gl4/html/gl_FrontFacing.xhtml
-                gl_FrontFacing: Bool[Array, ""] = jnp.cross(
-                    screen[1, :3] - screen[0, :3],
-                    screen[2, :3] - screen[0, :3],
-                )[-1] > 0
+                gl_FrontFacing: Bool[Array, ""] = primitive.determinant > 0
                 assert isinstance(gl_FrontFacing, Bool[Array, ""])
 
                 gl_PointCoord: Vec2f
@@ -116,10 +172,14 @@ def _postprocessing(
                     # TODO: implement Point primitive properly.
                     gl_PointCoord = lax.full((2, ), 0)
 
+                # this interpolates to target value u, not u/w
+                true_clip_coef: Vec3f = clip_coef / w_reciprocal
+                assert isinstance(true_clip_coef, Vec3f)
+
                 varying: VaryingT = shader.interpolate(
-                    varying_per_primitive,
-                    bc_screen,
-                    bc_clip,
+                    values=varying_per_primitive,
+                    barycentric_screen=true_clip_coef,
+                    barycentric_clip=true_clip_coef,
                 )
                 assert isinstance(varying, tuple)
 
@@ -146,16 +206,16 @@ def _postprocessing(
 
                 return per_frag, extra_fragment_output
 
-            # END OF `_when_keep_triangle`
+            # END OF `_when_in_triangle`
 
-            in_triangle: Bool[Array, ""] = (bc_screen >= 0).all()
+            in_triangle: Bool[Array, ""] = (clip_coef >= 0).all()
             assert isinstance(in_triangle, Bool[Array, ""])
 
             built_in: PerFragment
             attachments: VaryingT
             built_in, attachments = lax.cond(
-                in_triangle,
-                _when_keep_triangle,
+                jnp.logical_and(primitive.keep, in_triangle),
+                _when_in_triangle,
                 # discard out-of-triangle values
                 lambda: (
                     PerFragment(keeps=FALSE_ARRAY),
@@ -273,8 +333,7 @@ def _postprocessing(
 @partial(jax.jit, static_argnames=("shader", ), donate_argnums=(2, ))
 def render(
     camera: Camera,
-    shader: Union[Shader[ShaderExtraInputT, VaryingT, MixedExtraT],
-                  type[Shader[ShaderExtraInputT, VaryingT, MixedExtraT]]],
+    shader: type[Shader[ShaderExtraInputT, VaryingT, MixedExtraT]],
     buffers: Buffers,
     face_indices: FaceIndices,
     extra: ShaderExtraInputT,
@@ -291,7 +350,7 @@ def render(
     @jax.jit
     def vertex_processing(
             gl_VertexID: Integer[Array, ""],  #
-    ) -> tuple[PerVertexInScreen, VaryingT]:
+    ) -> tuple[PerVertex, VaryingT]:
         """Process one vertex into screen space, and keep varying values."""
         per_vertex: PerVertex
         varying: VaryingT
@@ -304,20 +363,7 @@ def render(
         assert isinstance(per_vertex, PerVertex)
         assert isinstance(varying, tuple)
 
-        # TODO: add clipping in clip space.
-
-        # NDC, normalised device coordinate
-        # Ref: OpenGL Spec 4.6 (Core Profile), Section 15.2.2
-        w: Float[Array, ""] = per_vertex.gl_Position[3]
-        ndc: Vec4f = normalise_homogeneous(per_vertex.gl_Position)
-        assert isinstance(ndc, Vec4f)
-
-        # already normalised; result is still normalised
-        # Ref: OpenGL Spec 4.6 (Core Profile), Section 15.2.2
-        screen: Vec4f = (camera.viewport @ ndc).at[3].divide(w)
-        assert isinstance(screen, Vec4f)
-
-        return PerVertexInScreen(gl_Position=screen), varying
+        return per_vertex, varying
 
     # PROCESS: Vertex Processing
     per_vertices, varyings = jax.vmap(vertex_processing)(
@@ -328,10 +374,13 @@ def render(
     buffers = _postprocessing(
         shader=shader,
         buffers=buffers,
-        per_primitive=tree_map(lambda field: field[face_indices],
-                               per_vertices),
+        per_primitive=jax.vmap(PerPrimitive.create)(tree_map(
+            lambda field: field[face_indices],
+            per_vertices,
+        )),
         varyings=tree_map(lambda field: field[face_indices], varyings),
         extra=extra,
+        viewport=camera.viewport,
     )
     assert isinstance(buffers, Buffers)
 
