@@ -5,7 +5,6 @@ import jax.lax as lax
 import jax.numpy as jnp
 from jaxtyping import Array, Bool, Float, jaxtyped
 
-from .geometry import transform_matrix_from_rotation
 from .model import Model, ModelObject
 from .shapes.capsule import UpAxis, create_capsule
 from .shapes.cube import create_cube
@@ -195,9 +194,7 @@ class Scene(NamedTuple):
         position = jnp.asarray(position, dtype=float)
         assert isinstance(position, Vec3f), f"{position}"
 
-        obj: ModelObject = self.objects[object_id]
-        new_mat: Float[Array, "4 4"] = obj.transform.at[:3, 3].set(position)
-        new_obj: ModelObject = obj._replace(transform=new_mat)
+        new_obj = self.objects[object_id].replace_with_position(position)
 
         return self._replace(objects=self.objects | {object_id: new_obj})
 
@@ -219,23 +216,15 @@ class Scene(NamedTuple):
           - orientation: the new orientation of the object, optional.
           - rotation_matrix: the new rotation matrix of the object, optional
         """
-        if rotation_matrix is None:
-            if orientation is None:
-                orientation = (0., 0., 0., 1.)
+        if orientation is not None:
+            orientation = jnp.asarray(orientation)
+        if rotation_matrix is not None:
+            rotation_matrix = jnp.asarray(rotation_matrix)
 
-            _orientation = jnp.asarray(orientation, dtype=float)
-            assert isinstance(_orientation, Vec4f), f"{orientation}"
-            rotation_matrix = transform_matrix_from_rotation(_orientation)
-
-        assert isinstance(
-            rotation_matrix,
-            Float[Array, "3 3"],
-        ), f"{rotation_matrix}"
-
-        obj: ModelObject = self.objects[object_id]
-        new_mat: Float[Array, "4 4"]
-        new_mat = obj.transform.at[:3, :3].set(rotation_matrix)
-        new_obj: ModelObject = obj._replace(transform=new_mat)
+        new_obj = self.objects[object_id].replace_with_orientation(
+            orientation=orientation,
+            rotation_matrix=rotation_matrix,
+        )
 
         return self._replace(objects=self.objects | {object_id: new_obj})
 
@@ -251,10 +240,10 @@ class Scene(NamedTuple):
           - object_id: the unique identifier of the object.
           - local_scaling: the new local scaling of the object.
         """
-        local_scaling = jnp.asarray(local_scaling, dtype=float)
-        assert isinstance(local_scaling, Vec3f), f"{local_scaling}"
-        obj: ModelObject = self.objects[object_id]
-        new_obj: ModelObject = obj._replace(local_scaling=local_scaling)
+        scaling = jnp.asarray(local_scaling, dtype=float)
+        assert isinstance(scaling, Vec3f), f"{scaling}"
+
+        new_obj = self.objects[object_id].replace_with_local_scaling(scaling)
 
         return self._replace(objects=self.objects | {object_id: new_obj})
 
@@ -270,8 +259,7 @@ class Scene(NamedTuple):
           - object_id: the unique identifier of the object.
           - double_sided: whether the object is double-sided.
         """
-        obj: ModelObject = self.objects[object_id]
-        new_obj: ModelObject
-        new_obj = obj._replace(double_sided=jnp.asarray(double_sided))
+        new_obj = self.objects[object_id].replace_with_double_sided(
+            jnp.asarray(double_sided))
 
         return self._replace(objects=self.objects | {object_id: new_obj})
