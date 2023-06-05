@@ -45,7 +45,7 @@ class PerPrimitive(NamedTuple):
 
     @classmethod
     @jaxtyped
-    @partial(jax.jit, static_argnames=("cls", ))
+    @partial(jax.jit, static_argnames=("cls", ), inline=True)
     def create(cls, per_vertex: PerVertex) -> "PerPrimitive":
         """per_vertex is batched with size 3 (3 vertices per triangle)
             in clip-space, not normalised.
@@ -81,7 +81,12 @@ class PerPrimitive(NamedTuple):
 
 
 @jaxtyped
-@partial(jax.jit, static_argnames=("shader", ), donate_argnums=(1, ))
+@partial(
+    jax.jit,
+    static_argnames=("shader", ),
+    donate_argnums=(1, ),
+    inline=True,
+)
 def _postprocessing(
     shader: type[Shader[ShaderExtraInputT, VaryingT, MixedExtraT]],
     buffers: Buffers,
@@ -98,12 +103,13 @@ def _postprocessing(
         batch_size: int = int(buffers[0].shape[1])
 
     @jaxtyped
-    @jax.jit
+    @partial(jax.jit, inline=True)
     def _per_pixel(coord: Vec2i) -> tuple[MixerOutput, MixedExtraT]:
 
         assert isinstance(coord, Vec2i), f"expected Vec2i, got {coord}"
 
         @jaxtyped
+        @partial(jax.jit, inline=True)
         def _per_primitive_process(
             primitive: PerPrimitive,
             varying_per_primitive: VaryingT,
@@ -111,6 +117,7 @@ def _postprocessing(
             # PROCESS: Interpolation
 
             # For early exit when not keep primitive / determinant is 0
+            @partial(jax.jit, inline=True)
             def _when_keep_primitive() -> tuple[Vec3f, Float[Array, ""]]:
                 """Returns clip_coef, w_reciprocal."""
                 # x/w, y/w, with x, y, w in clip space.
@@ -145,6 +152,7 @@ def _postprocessing(
                 lambda: (lax.full((3, ), -1.), jnp.zeros(())),
             )
 
+            @partial(jax.jit, inline=True)
             def _when_in_triangle() -> tuple[PerFragment, VaryingT]:
                 # Prepare inputs for fragment shader
                 z: Float[Array, ""] = interpolate(
@@ -247,7 +255,7 @@ def _postprocessing(
         return mixed_output, attachments
 
     @jaxtyped
-    @partial(jax.jit, donate_argnums=(1, ))
+    @partial(jax.jit, donate_argnums=(1, ), inline=True)
     def loop_body(
         index: Integer[Array, ""],
         buffers: Buffers,
@@ -256,7 +264,7 @@ def _postprocessing(
         _valueT = TypeVar('_valueT', bound=tuple[Any, ...])
 
         @jaxtyped
-        @partial(jax.jit, donate_argnums=(2, ))
+        @partial(jax.jit, donate_argnums=(2, ), inline=True)
         def select_value_per_pixel(
             keep: Bool[Array, ""],
             new_values: _valueT,
@@ -265,6 +273,7 @@ def _postprocessing(
             """Choose new value of the pixel, or keep the previous."""
             FieldRowT = TypeVar("FieldRowT")
 
+            @partial(jax.jit, donate_argnums=(1, ), inline=True)
             def _select_per_field(
                 new_field_value: FieldRowT,
                 old_field_value: FieldRowT,
@@ -330,7 +339,12 @@ def _postprocessing(
 
 
 @jaxtyped
-@partial(jax.jit, static_argnames=("shader", ), donate_argnums=(2, ))
+@partial(
+    jax.jit,
+    static_argnames=("shader", ),
+    donate_argnums=(2, ),
+    inline=True,
+)
 def render(
     camera: Camera,
     shader: type[Shader[ShaderExtraInputT, VaryingT, MixedExtraT]],
@@ -347,7 +361,7 @@ def render(
         assert isinstance(gl_InstanceID, ID)
 
     @jaxtyped
-    @jax.jit
+    @partial(jax.jit, inline=True)
     def vertex_processing(
             gl_VertexID: Integer[Array, ""],  #
     ) -> tuple[PerVertex, VaryingT]:

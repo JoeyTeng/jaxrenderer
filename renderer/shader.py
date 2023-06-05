@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod
+from functools import partial
 from typing import Generic, NamedTuple, TypeVar
 
 import jax
@@ -76,7 +77,7 @@ class Shader(ABC, Generic[ShaderExtraInputT, VaryingT, MixedExtraT]):
 
     @staticmethod
     @jaxtyped
-    @jax.jit
+    @partial(jax.jit, inline=True)
     @abstractmethod
     def vertex(
         gl_VertexID: ID,
@@ -132,7 +133,7 @@ class Shader(ABC, Generic[ShaderExtraInputT, VaryingT, MixedExtraT]):
 
     @staticmethod
     @jaxtyped
-    @jax.jit
+    @partial(jax.jit, inline=True)
     def interpolate(
         values: VaryingT,
         barycentric_screen: Vec3f,
@@ -170,7 +171,7 @@ class Shader(ABC, Generic[ShaderExtraInputT, VaryingT, MixedExtraT]):
 
     @staticmethod
     @jaxtyped
-    @jax.jit
+    @partial(jax.jit, inline=True)
     def fragment(
         gl_FragCoord: Vec4f,
         gl_FrontFacing: Bool[Array, ""],
@@ -212,7 +213,7 @@ class Shader(ABC, Generic[ShaderExtraInputT, VaryingT, MixedExtraT]):
 
     @staticmethod
     @jaxtyped
-    @jax.jit
+    @partial(jax.jit, inline=True)
     def mix(
         gl_FragDepth: Float[Array, "primitives"],
         keeps: Bool[Array, "primitives"],
@@ -244,6 +245,7 @@ class Shader(ABC, Generic[ShaderExtraInputT, VaryingT, MixedExtraT]):
           - [Blending](https://www.khronos.org/opengl/wiki/Blending)
         """
 
+        @partial(jax.jit, inline=True)
         def has_kept_fragment() -> Integer[Array, ""]:
             depths: Float[Array, "primitives"]
             depths = jnp.where(keeps, gl_FragDepth, jnp.inf)

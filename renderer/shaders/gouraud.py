@@ -1,3 +1,4 @@
+from functools import partial
 from typing import NamedTuple
 
 import jax
@@ -41,7 +42,7 @@ class GouraudShader(Shader[GouraudExtraInput, GouraudExtraFragmentData,
 
     @staticmethod
     @jaxtyped
-    @jax.jit
+    @partial(jax.jit, inline=True)
     def vertex(
         gl_VertexID: ID,
         gl_InstanceID: ID,
@@ -73,7 +74,7 @@ class GouraudShader(Shader[GouraudExtraInput, GouraudExtraFragmentData,
 
     @staticmethod
     @jaxtyped
-    @jax.jit
+    @partial(jax.jit, inline=True)
     def fragment(
         gl_FragCoord: Vec4f,
         gl_FrontFacing: Bool[Array, ""],

@@ -1,3 +1,4 @@
+from functools import partial
 from typing import NamedTuple
 
 import jax
@@ -33,7 +34,7 @@ class DepthShader(Shader[DepthExtraInput, DepthExtraFragmentData,
 
     @staticmethod
     @jaxtyped
-    @jax.jit
+    @partial(jax.jit, inline=True)
     def vertex(
         gl_VertexID: ID,
         gl_InstanceID: ID,
