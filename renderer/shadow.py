@@ -27,7 +27,7 @@ class Shadow(NamedTuple):
 
     @staticmethod
     @jaxtyped
-    @partial(jax.jit, donate_argnums=(0, ))
+    @partial(jax.jit, donate_argnums=(0, ), inline=True)
     def render_shadow_map(
         shadow_map: ZBuffer,
         verts: Vertices,

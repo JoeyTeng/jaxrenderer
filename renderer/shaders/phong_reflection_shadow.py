@@ -1,3 +1,4 @@
+from functools import partial
 from typing import NamedTuple
 
 import jax
@@ -85,7 +86,7 @@ class PhongReflectionShadowTextureShader(
 
     @staticmethod
     @jaxtyped
-    @jax.jit
+    @partial(jax.jit, inline=True)
     def vertex(
         gl_VertexID: ID,
         gl_InstanceID: ID,
@@ -124,7 +125,7 @@ class PhongReflectionShadowTextureShader(
 
     @staticmethod
     @jaxtyped
-    @jax.jit
+    @partial(jax.jit, inline=True)
     def interpolate(
         values: PhongReflectionShadowTextureExtraFragmentData,
         barycentric_screen: Vec3f,
@@ -144,7 +145,7 @@ class PhongReflectionShadowTextureShader(
 
     @staticmethod
     @jaxtyped
-    @jax.jit
+    @partial(jax.jit, inline=True)
     def fragment(
         gl_FragCoord: Vec4f,
         gl_FrontFacing: Bool[Array, ""],
@@ -232,7 +233,7 @@ class PhongReflectionShadowTextureShader(
 
     @staticmethod
     @jaxtyped
-    @jax.jit
+    @partial(jax.jit, inline=True)
     def mix(
         gl_FragDepth: Float[Array, "primitives"],
         keeps: Bool[Array, "primitives"],

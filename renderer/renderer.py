@@ -180,7 +180,12 @@ class Renderer:
 
     @classmethod
     @jaxtyped
-    @partial(jax.jit, static_argnames=("cls", ), donate_argnums=(4, ))
+    @partial(
+        jax.jit,
+        static_argnames=("cls", ),
+        donate_argnums=(4, ),
+        inline=True,
+    )
     def render(
         cls,
         model: MergedModel,
