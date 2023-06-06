@@ -77,6 +77,7 @@ class PhongReflectionTextureShader(
     @staticmethod
     @jaxtyped
     @partial(jax.jit, inline=True)
+    @jax.named_scope("PhongReflectionTextureShader.vertex")
     def vertex(
         gl_VertexID: ID,
         gl_InstanceID: ID,
@@ -110,6 +111,7 @@ class PhongReflectionTextureShader(
     @staticmethod
     @jaxtyped
     @partial(jax.jit, inline=True)
+    @jax.named_scope("PhongReflectionTextureShader.interpolate")
     def interpolate(
         values: PhongReflectionTextureExtraFragmentData,
         barycentric_screen: Vec3f,
@@ -129,6 +131,7 @@ class PhongReflectionTextureShader(
     @staticmethod
     @jaxtyped
     @partial(jax.jit, inline=True)
+    @jax.named_scope("PhongReflectionTextureShader.fragment")
     def fragment(
         gl_FragCoord: Vec4f,
         gl_FrontFacing: Bool[Array, ""],
@@ -200,6 +203,7 @@ class PhongReflectionTextureShader(
     @staticmethod
     @jaxtyped
     @partial(jax.jit, inline=True)
+    @jax.named_scope("PhongReflectionTextureShader.mix")
     def mix(
         gl_FragDepth: Float[Array, "primitives"],
         keeps: Bool[Array, "primitives"],

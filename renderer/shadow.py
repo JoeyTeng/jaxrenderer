@@ -28,6 +28,7 @@ class Shadow(NamedTuple):
     @staticmethod
     @jaxtyped
     @partial(jax.jit, donate_argnums=(0, ), inline=True)
+    @jax.named_scope("Shadow.render_shadow_map")
     def render_shadow_map(
         shadow_map: ZBuffer,
         verts: Vertices,
@@ -99,6 +100,7 @@ class Shadow(NamedTuple):
 
     @jaxtyped
     @partial(jax.jit, inline=True)
+    @jax.named_scope("Shadow.get")
     def get(self, position: Vec2f) -> Float[Array, ""]:
         """Get shadow depth at `position`.
 

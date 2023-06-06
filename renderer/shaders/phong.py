@@ -57,6 +57,7 @@ class PhongTextureShader(Shader[PhongTextureExtraInput,
     @staticmethod
     @jaxtyped
     @partial(jax.jit, inline=True)
+    @jax.named_scope("PhongTextureShader.vertex")
     def vertex(
         gl_VertexID: ID,
         gl_InstanceID: ID,
@@ -88,6 +89,7 @@ class PhongTextureShader(Shader[PhongTextureExtraInput,
     @staticmethod
     @jaxtyped
     @partial(jax.jit, inline=True)
+    @jax.named_scope("PhongTextureShader.fragment")
     def fragment(
         gl_FragCoord: Vec4f,
         gl_FrontFacing: Bool[Array, ""],
@@ -134,6 +136,7 @@ class PhongTextureShader(Shader[PhongTextureExtraInput,
     @staticmethod
     @jaxtyped
     @partial(jax.jit, inline=True)
+    @jax.named_scope("PhongTextureShader.mix")
     def mix(
         gl_FragDepth: Float[Array, "primitives"],
         keeps: Bool[Array, "primitives"],

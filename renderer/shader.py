@@ -78,6 +78,7 @@ class Shader(ABC, Generic[ShaderExtraInputT, VaryingT, MixedExtraT]):
     @staticmethod
     @jaxtyped
     @partial(jax.jit, inline=True)
+    @jax.named_scope("Shader.vertex")
     @abstractmethod
     def vertex(
         gl_VertexID: ID,
@@ -134,6 +135,7 @@ class Shader(ABC, Generic[ShaderExtraInputT, VaryingT, MixedExtraT]):
     @staticmethod
     @jaxtyped
     @partial(jax.jit, inline=True)
+    @jax.named_scope("Shader.interpolate")
     def interpolate(
         values: VaryingT,
         barycentric_screen: Vec3f,
@@ -172,6 +174,7 @@ class Shader(ABC, Generic[ShaderExtraInputT, VaryingT, MixedExtraT]):
     @staticmethod
     @jaxtyped
     @partial(jax.jit, inline=True)
+    @jax.named_scope("Shader.fragment")
     def fragment(
         gl_FragCoord: Vec4f,
         gl_FrontFacing: Bool[Array, ""],
@@ -214,6 +217,7 @@ class Shader(ABC, Generic[ShaderExtraInputT, VaryingT, MixedExtraT]):
     @staticmethod
     @jaxtyped
     @partial(jax.jit, inline=True)
+    @jax.named_scope("Shader.mix")
     def mix(
         gl_FragDepth: Float[Array, "primitives"],
         keeps: Bool[Array, "primitives"],
@@ -246,6 +250,7 @@ class Shader(ABC, Generic[ShaderExtraInputT, VaryingT, MixedExtraT]):
         """
 
         @partial(jax.jit, inline=True)
+        @jax.named_scope("Shader.mix.has_kept_fragment")
         def has_kept_fragment() -> Integer[Array, ""]:
             depths: Float[Array, "primitives"]
             depths = jnp.where(keeps, gl_FragDepth, jnp.inf)

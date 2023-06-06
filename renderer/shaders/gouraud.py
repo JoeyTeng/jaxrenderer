@@ -43,6 +43,7 @@ class GouraudShader(Shader[GouraudExtraInput, GouraudExtraFragmentData,
     @staticmethod
     @jaxtyped
     @partial(jax.jit, inline=True)
+    @jax.named_scope("GouraudShader.vertex")
     def vertex(
         gl_VertexID: ID,
         gl_InstanceID: ID,
@@ -75,6 +76,7 @@ class GouraudShader(Shader[GouraudExtraInput, GouraudExtraFragmentData,
     @staticmethod
     @jaxtyped
     @partial(jax.jit, inline=True)
+    @jax.named_scope("GouraudShader.fragment")
     def fragment(
         gl_FragCoord: Vec4f,
         gl_FrontFacing: Bool[Array, ""],

@@ -100,6 +100,7 @@ class Renderer:
     @staticmethod
     @jaxtyped
     @partial(jax.jit, inline=True)
+    @jax.named_scope("Renderer.create_camera_from_parameters")
     def create_camera_from_parameters(camera: CameraParameters) -> Camera:
         """Create a camera from camera parameters."""
         eye: Vec3f = jnp.asarray(camera.position, dtype=float)
@@ -140,6 +141,7 @@ class Renderer:
 
     @staticmethod
     @jaxtyped
+    @jax.named_scope("Renderer.create_buffers")
     def create_buffers(
         width: int,
         height: int,
@@ -186,6 +188,7 @@ class Renderer:
         donate_argnums=(4, ),
         inline=True,
     )
+    @jax.named_scope("Renderer.render")
     def render(
         cls,
         model: MergedModel,
@@ -300,6 +303,7 @@ class Renderer:
 
     @classmethod
     @jaxtyped
+    @jax.named_scope("Renderer.get_camera_image")
     def get_camera_image(
         cls,
         objects: Sequence[ModelObject],

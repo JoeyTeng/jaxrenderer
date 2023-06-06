@@ -50,6 +50,7 @@ class GouraudTextureShader(Shader[GouraudTextureExtraInput,
     @staticmethod
     @jaxtyped
     @partial(jax.jit, inline=True)
+    @jax.named_scope("GouraudTextureShader.vertex")
     def vertex(
         gl_VertexID: ID,
         gl_InstanceID: ID,
@@ -85,6 +86,7 @@ class GouraudTextureShader(Shader[GouraudTextureExtraInput,
     @staticmethod
     @jaxtyped
     @partial(jax.jit, inline=True)
+    @jax.named_scope("GouraudTextureShader.fragment")
     def fragment(
         gl_FragCoord: Vec4f,
         gl_FrontFacing: Bool[Array, ""],
@@ -125,6 +127,7 @@ class GouraudTextureShader(Shader[GouraudTextureExtraInput,
     @staticmethod
     @jaxtyped
     @partial(jax.jit, inline=True)
+    @jax.named_scope("GouraudTextureShader.mix")
     def mix(
         gl_FragDepth: Float[Array, "primitives"],
         keeps: Bool[Array, "primitives"],

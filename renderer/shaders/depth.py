@@ -35,6 +35,7 @@ class DepthShader(Shader[DepthExtraInput, DepthExtraFragmentData,
     @staticmethod
     @jaxtyped
     @partial(jax.jit, inline=True)
+    @jax.named_scope("DepthShader.vertex")
     def vertex(
         gl_VertexID: ID,
         gl_InstanceID: ID,

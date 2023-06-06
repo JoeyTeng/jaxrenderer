@@ -192,6 +192,7 @@ class MergedModel(NamedTuple):
     @staticmethod
     @jaxtyped
     @partial(jax.jit, inline=True)
+    @jax.named_scope("MergedModel.merge_verts")
     def merge_verts(
         vs: VertsT,
         fs: FaceIndicessT,
@@ -220,6 +221,7 @@ class MergedModel(NamedTuple):
     @staticmethod
     @jaxtyped
     @partial(jax.jit, inline=True)
+    @jax.named_scope("MergedModel.merge_maps")
     def merge_maps(maps: MapsT) -> tuple[MapT, Shape2DT]:
         """Merge maps by concatenating them along the first axis.
 
@@ -270,6 +272,7 @@ class MergedModel(NamedTuple):
     @staticmethod
     @jaxtyped
     @partial(jax.jit, inline=True)
+    @jax.named_scope("MergedModel.uv_repeat")
     def uv_repeat(
         uv: Float[Array, "2"],
         shape: Integer[Array, "2"],
@@ -403,6 +406,7 @@ def batch_models(models: Sequence[MergedModel]) -> MergedModel:
 
 
 @jaxtyped
+@jax.named_scope("model.merge_objects")
 def merge_objects(objects: Sequence[ModelObject]) -> MergedModel:
     """Merge objects into a single model.
 
