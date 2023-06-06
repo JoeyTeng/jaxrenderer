@@ -6,6 +6,7 @@ import jax.lax as lax
 import jax.numpy as jnp
 from jaxtyping import Array, Float, jaxtyped
 
+from ._meta_utils import add_tracing_name
 from .geometry import Camera, View, Viewport
 from .pipeline import render
 from .shaders.depth import DepthExtraInput, DepthShader
@@ -28,7 +29,7 @@ class Shadow(NamedTuple):
     @staticmethod
     @jaxtyped
     @partial(jax.jit, donate_argnums=(0, ), inline=True)
-    @jax.named_scope("Shadow.render_shadow_map")
+    @add_tracing_name
     def render_shadow_map(
         shadow_map: ZBuffer,
         verts: Vertices,
@@ -100,7 +101,7 @@ class Shadow(NamedTuple):
 
     @jaxtyped
     @partial(jax.jit, inline=True)
-    @jax.named_scope("Shadow.get")
+    @add_tracing_name
     def get(self, position: Vec2f) -> Float[Array, ""]:
         """Get shadow depth at `position`.
 

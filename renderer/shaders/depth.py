@@ -4,6 +4,7 @@ from typing import NamedTuple
 import jax
 from jaxtyping import Array, Float, jaxtyped
 
+from .._meta_utils import add_tracing_name
 from ..shader import ID, PerVertex, Shader
 from ..geometry import Camera, to_homogeneous
 from ..types import Vec4f
@@ -35,7 +36,7 @@ class DepthShader(Shader[DepthExtraInput, DepthExtraFragmentData,
     @staticmethod
     @jaxtyped
     @partial(jax.jit, inline=True)
-    @jax.named_scope("DepthShader.vertex")
+    @add_tracing_name
     def vertex(
         gl_VertexID: ID,
         gl_InstanceID: ID,

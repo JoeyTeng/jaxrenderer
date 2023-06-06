@@ -8,6 +8,7 @@ from jax import lax
 from jax.tree_util import tree_map
 from jaxtyping import Array, Bool, Float, Integer, Num, jaxtyped
 
+from ._meta_utils import add_tracing_name
 from .geometry import Camera, Interpolation, Viewport, interpolate
 from .shader import (ID, MixedExtraT, MixerOutput, PerFragment, PerVertex,
                      Shader, ShaderExtraInputT, VaryingT)
@@ -49,7 +50,7 @@ class PerPrimitive(NamedTuple):
     @classmethod
     @jaxtyped
     @partial(jax.jit, static_argnames=("cls", ), inline=True)
-    @jax.named_scope("PerPrimitive.create")
+    @add_tracing_name
     def create(cls, per_vertex: PerVertex) -> "PerPrimitive":
         """per_vertex is batched with size 3 (3 vertices per triangle)
             in clip-space, not normalised.
@@ -91,7 +92,7 @@ class PerPrimitive(NamedTuple):
     donate_argnums=(1, ),
     inline=True,
 )
-@jax.named_scope("pipeline._postprocessing")
+@add_tracing_name
 def _postprocessing(
     shader: type[Shader[ShaderExtraInputT, VaryingT, MixedExtraT]],
     buffers: Buffers,
@@ -109,15 +110,14 @@ def _postprocessing(
 
     @jaxtyped
     @partial(jax.jit, inline=True)
-    @jax.named_scope("pipeline._postprocessing._per_pixel")
+    @add_tracing_name
     def _per_pixel(coord: Vec2i) -> tuple[MixerOutput, MixedExtraT]:
 
         assert isinstance(coord, Vec2i), f"expected Vec2i, got {coord}"
 
         @jaxtyped
         @partial(jax.jit, inline=True)
-        @jax.named_scope("pipeline._postprocessing._per_pixel"
-                         "._per_primitive_process")
+        @add_tracing_name
         def _per_primitive_process(
             primitive: PerPrimitive,
             varying_per_primitive: VaryingT,
@@ -126,8 +126,7 @@ def _postprocessing(
 
             # For early exit when not keep primitive / determinant is 0
             @partial(jax.jit, inline=True)
-            @jax.named_scope("pipeline._postprocessing._per_pixel"
-                             "._per_primitive_process._when_keep_primitive")
+            @add_tracing_name
             def _when_keep_primitive() -> tuple[Vec3f, Float[Array, ""]]:
                 """Returns clip_coef, w_reciprocal."""
                 # x/w, y/w, with x, y, w in clip space.
@@ -163,8 +162,7 @@ def _postprocessing(
             )
 
             @partial(jax.jit, inline=True)
-            @jax.named_scope("pipeline._postprocessing._per_pixel"
-                             "._per_primitive_process._when_in_triangle")
+            @add_tracing_name
             def _when_in_triangle() -> tuple[PerFragment, VaryingT]:
                 # Prepare inputs for fragment shader
                 z: Float[Array, ""] = interpolate(
@@ -272,7 +270,7 @@ def _postprocessing(
 
     @jaxtyped
     @partial(jax.jit, donate_argnums=(1, ), inline=True)
-    @jax.named_scope("pipeline._postprocessing._per_row")
+    @add_tracing_name
     def _per_row(
         i: Integer[Array, ""],
         old_row: _Buffer_Row,
@@ -290,8 +288,7 @@ def _postprocessing(
 
         @jaxtyped
         @partial(jax.jit, donate_argnums=(2, ), inline=True)
-        @jax.named_scope("pipeline._postprocessing._per_row"
-                         "._select_value_per_pixel")
+        @add_tracing_name
         def select_value_per_pixel(
             keep: Bool[Array, ""],
             new_values: _valueT,
@@ -301,8 +298,7 @@ def _postprocessing(
             FieldRowT = TypeVar("FieldRowT")
 
             @partial(jax.jit, donate_argnums=(1, ), inline=True)
-            @jax.named_scope("pipeline._postprocessing._per_row"
-                             "._select_value_per_pixel._select_per_field")
+            @add_tracing_name
             def _select_per_field(
                 new_field_value: FieldRowT,
                 old_field_value: FieldRowT,
@@ -354,7 +350,7 @@ def _postprocessing(
 
     @jaxtyped
     @partial(jax.jit, donate_argnums=(1, ), inline=True)
-    @jax.named_scope("pipeline._postprocessing._loop_batch_body")
+    @add_tracing_name
     def loop_batch_body(
         i: Integer[Array, ""],
         _buffers: Buffers,
@@ -396,7 +392,7 @@ def _postprocessing(
     donate_argnums=(2, ),
     inline=True,
 )
-@jax.named_scope("pipeline.render")
+@add_tracing_name
 def render(
     camera: Camera,
     shader: type[Shader[ShaderExtraInputT, VaryingT, MixedExtraT]],
@@ -437,7 +433,7 @@ def render(
 
     @jaxtyped
     @partial(jax.jit, inline=True)
-    @jax.named_scope("pipeline.vertex_processing")
+    @add_tracing_name
     def vertex_processing(
             gl_VertexID: Integer[Array, ""],  #
     ) -> tuple[PerVertex, VaryingT]:

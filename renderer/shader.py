@@ -8,6 +8,7 @@ import jax.numpy as jnp
 from jax.tree_util import Partial, tree_map
 from jaxtyping import Array, Bool, Float, Integer, PyTree, Shaped, jaxtyped
 
+from ._meta_utils import add_tracing_name
 from .geometry import Camera, Interpolation, interpolate
 from .types import FALSE_ARRAY, INF_ARRAY, TRUE_ARRAY, Vec2f, Vec3f, Vec4f
 
@@ -78,7 +79,7 @@ class Shader(ABC, Generic[ShaderExtraInputT, VaryingT, MixedExtraT]):
     @staticmethod
     @jaxtyped
     @partial(jax.jit, inline=True)
-    @jax.named_scope("Shader.vertex")
+    @add_tracing_name
     @abstractmethod
     def vertex(
         gl_VertexID: ID,
@@ -135,7 +136,7 @@ class Shader(ABC, Generic[ShaderExtraInputT, VaryingT, MixedExtraT]):
     @staticmethod
     @jaxtyped
     @partial(jax.jit, inline=True)
-    @jax.named_scope("Shader.interpolate")
+    @add_tracing_name
     def interpolate(
         values: VaryingT,
         barycentric_screen: Vec3f,
@@ -174,7 +175,7 @@ class Shader(ABC, Generic[ShaderExtraInputT, VaryingT, MixedExtraT]):
     @staticmethod
     @jaxtyped
     @partial(jax.jit, inline=True)
-    @jax.named_scope("Shader.fragment")
+    @add_tracing_name
     def fragment(
         gl_FragCoord: Vec4f,
         gl_FrontFacing: Bool[Array, ""],
@@ -217,7 +218,7 @@ class Shader(ABC, Generic[ShaderExtraInputT, VaryingT, MixedExtraT]):
     @staticmethod
     @jaxtyped
     @partial(jax.jit, inline=True)
-    @jax.named_scope("Shader.mix")
+    @add_tracing_name
     def mix(
         gl_FragDepth: Float[Array, "primitives"],
         keeps: Bool[Array, "primitives"],
@@ -250,7 +251,7 @@ class Shader(ABC, Generic[ShaderExtraInputT, VaryingT, MixedExtraT]):
         """
 
         @partial(jax.jit, inline=True)
-        @jax.named_scope("Shader.mix.has_kept_fragment")
+        @add_tracing_name
         def has_kept_fragment() -> Integer[Array, ""]:
             depths: Float[Array, "primitives"]
             depths = jnp.where(keeps, gl_FragDepth, jnp.inf)

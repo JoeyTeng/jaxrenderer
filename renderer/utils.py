@@ -6,12 +6,13 @@ import jax.numpy as jnp
 from jax import lax
 from jaxtyping import Array, Integer, Num, Shaped, jaxtyped
 
+from ._meta_utils import add_tracing_name
 from .types import Canvas, Texture, ZBuffer
 
 
 @jaxtyped
 @partial(jax.jit, inline=True)
-@jax.named_scope("utils.get_value_from_index")
+@add_tracing_name
 def get_value_from_index(
     matrix: Shaped[Array, "width height batch *valueDimensions"],
     index: Integer[Array, "width height"],
@@ -22,7 +23,7 @@ def get_value_from_index(
 
 @jaxtyped
 @partial(jax.jit, inline=True)
-@jax.named_scope("utils.merge_canvases")
+@add_tracing_name
 def merge_canvases(
     zbuffers: Num[Array, "batch width height"],
     canvases: Shaped[Array, "batch width height channel"],
@@ -51,7 +52,7 @@ def merge_canvases(
 
 @jaxtyped
 @partial(jax.jit, inline=True)
-@jax.named_scope("utils.transpose_for_display")
+@add_tracing_name
 def transpose_for_display(
     matrix: Num[Array, "fst snd *channel"],
     flip_vertical: bool = True,
@@ -73,7 +74,7 @@ def transpose_for_display(
 
 
 @jaxtyped
-@jax.named_scope("utils.build_texture_from_PyTinyrenderer")
+@add_tracing_name
 def build_texture_from_PyTinyrenderer(
     texture: Union[Num[Array, "length"], Sequence[float]],
     width: int,

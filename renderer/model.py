@@ -9,6 +9,7 @@ from jax.tree_util import tree_map
 from jaxtyping import (Array, Bool, Float, Integer, Num, PyTree, Shaped,
                        jaxtyped)
 
+from ._meta_utils import add_tracing_name
 from .geometry import Camera, transform_matrix_from_rotation
 from .types import (FALSE_ARRAY, FaceIndices, Normals, SpecularMap, Texture,
                     UVCoordinates, Vec3f, Vec4f, Vertices)
@@ -162,6 +163,7 @@ class MergedModel(NamedTuple):
 
     @staticmethod
     @jaxtyped
+    @add_tracing_name
     def generate_object_vert_info(
         counts: Sequence[int],
         values: Sequence[Shaped[Array, "..."]],
@@ -192,7 +194,7 @@ class MergedModel(NamedTuple):
     @staticmethod
     @jaxtyped
     @partial(jax.jit, inline=True)
-    @jax.named_scope("MergedModel.merge_verts")
+    @add_tracing_name
     def merge_verts(
         vs: VertsT,
         fs: FaceIndicessT,
@@ -221,7 +223,7 @@ class MergedModel(NamedTuple):
     @staticmethod
     @jaxtyped
     @partial(jax.jit, inline=True)
-    @jax.named_scope("MergedModel.merge_maps")
+    @add_tracing_name
     def merge_maps(maps: MapsT) -> tuple[MapT, Shape2DT]:
         """Merge maps by concatenating them along the first axis.
 
@@ -272,7 +274,7 @@ class MergedModel(NamedTuple):
     @staticmethod
     @jaxtyped
     @partial(jax.jit, inline=True)
-    @jax.named_scope("MergedModel.uv_repeat")
+    @add_tracing_name
     def uv_repeat(
         uv: Float[Array, "2"],
         shape: Integer[Array, "2"],
@@ -393,6 +395,7 @@ class ModelObject(NamedTuple):
         return self._replace(double_sided=double_sided)
 
 
+@add_tracing_name
 def batch_models(models: Sequence[MergedModel]) -> MergedModel:
     """Merge multiple MergedModel into one, with each field being a batch, with
         batch axis at 0. This is intended to facilitate `jax.vmap`.
@@ -406,7 +409,7 @@ def batch_models(models: Sequence[MergedModel]) -> MergedModel:
 
 
 @jaxtyped
-@jax.named_scope("model.merge_objects")
+@add_tracing_name
 def merge_objects(objects: Sequence[ModelObject]) -> MergedModel:
     """Merge objects into a single model.
 
@@ -446,6 +449,7 @@ def merge_objects(objects: Sequence[ModelObject]) -> MergedModel:
 
     @jaxtyped
     @partial(jax.jit, inline=True)
+    @add_tracing_name
     def transform_vert(
         verts: Float[Array, "N 3"],
         local_scaling: Vec3f,
@@ -474,6 +478,7 @@ def merge_objects(objects: Sequence[ModelObject]) -> MergedModel:
 
     @jaxtyped
     @partial(jax.jit, inline=True)
+    @add_tracing_name
     def transform_normals(
         normals: Float[Array, "N 3"],
         transform: ModelMatrix,
