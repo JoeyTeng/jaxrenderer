@@ -1,5 +1,5 @@
 from functools import partial
-from typing import Any, NamedTuple, TypeVar
+from typing import Any, NamedTuple, Optional, TypeVar
 
 import jax
 import jax.lax as lax
@@ -15,6 +15,9 @@ from .types import (FALSE_ARRAY, Buffers, FaceIndices, Triangle, Vec2f, Vec2i,
                     Vec3f, Vec4f)
 
 jax.config.update('jax_array', True)
+
+RowIndices = Integer[Array, "row_batches row_batch_size"]
+"""Indices of the rows in the buffers to be processed in this batch."""
 
 
 class PerPrimitive(NamedTuple):
@@ -94,11 +97,11 @@ def _postprocessing(
     varyings: VaryingT,
     extra: ShaderExtraInputT,
     viewport: Viewport,
+    row_indices: RowIndices,
 ) -> Buffers:
     with jax.ensure_compile_time_eval():
         # loop along first axis, for memory efficiency
-        # TODO: benchmark if this is actually faster
-        loop_size: int = int(buffers[0].shape[0])
+        loop_size: int = int(row_indices.shape[0])
         # vmap batch along second axis
         batch_size: int = int(buffers[0].shape[1])
 
@@ -254,13 +257,23 @@ def _postprocessing(
 
         return mixed_output, attachments
 
+    _Buffer_Row = TypeVar('_Buffer_Row', bound=tuple[Any, ...])
+
     @jaxtyped
     @partial(jax.jit, donate_argnums=(1, ), inline=True)
-    def loop_body(
-        index: Integer[Array, ""],
-        buffers: Buffers,
-    ) -> Buffers:
+    def _per_row(
+        i: Integer[Array, ""],
+        old_row: _Buffer_Row,
+    ) -> _Buffer_Row:
+        """Render one row.
 
+        Parameters:
+          - i: the index of the row to be rendered on the first axis of the
+            resultant buffer.
+          - old_row: the old values of the row to be rendered. It inherits
+            all fields from `Buffers` but with the first axis removed (as
+            batched axis).
+        """
         _valueT = TypeVar('_valueT', bound=tuple[Any, ...])
 
         @jaxtyped
@@ -297,10 +310,10 @@ def _postprocessing(
         keeps: Bool[Array, "height"]
         depths: Num[Array, "height"]
         extras: MixedExtraT
-        # vmap over axis 1 (height) of the buffers. Axis 0 (width) is `index`.
+        # vmap over axis 1 (height) of the buffers. Axis 0 (width) is `i`.
         (keeps, depths), extras = jax.vmap(_per_pixel)(lax.concatenate(
             (
-                lax.full((batch_size, 1), index),
+                lax.full((batch_size, 1), i),
                 lax.broadcasted_iota(int, (batch_size, 1), 0),
             ),
             1,
@@ -311,26 +324,45 @@ def _postprocessing(
 
         # vmap each pixel over axis 1 (height) of the buffers (per row in
         # matrix)
-        buffers_row = jax.vmap(select_value_per_pixel)(
+        new_row = jax.vmap(select_value_per_pixel)(
             keeps,
             Buffers(zbuffer=depths, targets=tuple(extras)),
-            tree_map(lambda field: field[index], buffers),
+            old_row,
+        )
+
+        return new_row
+
+    # END OF `_per_row`
+
+    @jaxtyped
+    @partial(jax.jit, donate_argnums=(1, ), inline=True)
+    def loop_batch_body(
+        i: Integer[Array, ""],
+        _buffers: Buffers,
+    ) -> Buffers:
+        indices: Integer[Array, "row_batch_size"] = row_indices[i]
+        assert isinstance(indices, Integer[Array, "row_batch_size"])
+
+        buffers_rows = jax.vmap(_per_row)(
+            indices,
+            # old values from buffers
+            tree_map(lambda field: field[indices], _buffers),
         )
 
         # tree_map over each field in the PyTree to update all buffers
         return tree_map(
-            lambda field, value: field.at[index].set(value),
-            buffers,
-            buffers_row,
+            lambda field, value: field.at[indices].set(value),
+            _buffers,
+            buffers_rows,
         )
 
-    # END OF `loop_body`
+    # END OF `loop_batch_body`
 
     # iterate over axis 0 (width) of the buffers (one row at a time)
     buffers = lax.fori_loop(
         0,
         loop_size,
-        loop_body,
+        loop_batch_body,
         buffers,
     )
     assert isinstance(buffers, Buffers)
@@ -341,7 +373,7 @@ def _postprocessing(
 @jaxtyped
 @partial(
     jax.jit,
-    static_argnames=("shader", ),
+    static_argnames=("shader"),
     donate_argnums=(2, ),
     inline=True,
 )
@@ -351,7 +383,14 @@ def render(
     buffers: Buffers,
     face_indices: FaceIndices,
     extra: ShaderExtraInputT,
+    row_indices: Optional[RowIndices] = None,
 ) -> Buffers:
+    """Render a scene with a shader.
+
+    Parameters:
+      - row_indices: shape (total batches, rows per batch) by default (None), render 4/2/1 row at a time if the number of rows are a multiple of
+        4/2/1.
+    """
     vertices_count: int
     gl_InstanceID: ID
     with jax.ensure_compile_time_eval():
@@ -359,6 +398,22 @@ def render(
         gl_InstanceID = jnp.array(0, dtype=int)
         assert isinstance(vertices_count, int)
         assert isinstance(gl_InstanceID, ID)
+
+        rows_count: int = int(buffers[0].shape[0])
+        if row_indices is None:
+            row_indices = lax.iota(int, rows_count)
+            if rows_count % 4 == 0:
+                row_indices = row_indices.reshape((-1, 4))
+            elif rows_count % 2 == 0:
+                row_indices = row_indices.reshape((-1, 2))
+            else:
+                row_indices = row_indices.reshape((-1, 1))
+
+        assert isinstance(row_indices, RowIndices)
+        assert rows_count == row_indices.shape[0] * row_indices.shape[1], (
+            "RowIndices shape must match the first axis of the buffers. Got "
+            f"RowIndices shape {row_indices.shape} and "
+            f"buffer's first axis {rows_count}.")
 
     @jaxtyped
     @partial(jax.jit, inline=True)
@@ -395,6 +450,7 @@ def render(
         varyings=tree_map(lambda field: field[face_indices], varyings),
         extra=extra,
         viewport=camera.viewport,
+        row_indices=row_indices,
     )
     assert isinstance(buffers, Buffers)
 
