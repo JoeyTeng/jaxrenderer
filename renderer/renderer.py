@@ -7,6 +7,7 @@ import jax.numpy as jnp
 from jax.tree_util import tree_map
 from jaxtyping import Array, Bool, Integer, Num, jaxtyped
 
+from ._meta_utils import add_tracing_name
 from .geometry import Camera, Projection, View, Viewport, normalise
 from .model import MergedModel, ModelObject, merge_objects
 from .pipeline import render
@@ -100,6 +101,7 @@ class Renderer:
     @staticmethod
     @jaxtyped
     @partial(jax.jit, inline=True)
+    @add_tracing_name
     def create_camera_from_parameters(camera: CameraParameters) -> Camera:
         """Create a camera from camera parameters."""
         eye: Vec3f = jnp.asarray(camera.position, dtype=float)
@@ -140,6 +142,7 @@ class Renderer:
 
     @staticmethod
     @jaxtyped
+    @add_tracing_name
     def create_buffers(
         width: int,
         height: int,
@@ -186,6 +189,7 @@ class Renderer:
         donate_argnums=(4, ),
         inline=True,
     )
+    @add_tracing_name
     def render(
         cls,
         model: MergedModel,
@@ -300,6 +304,7 @@ class Renderer:
 
     @classmethod
     @jaxtyped
+    @add_tracing_name
     def get_camera_image(
         cls,
         objects: Sequence[ModelObject],

@@ -7,6 +7,7 @@ import jax.lax as lax
 import jax.numpy as jnp
 from jaxtyping import Array, Float, Integer, Num, jaxtyped
 
+from ._meta_utils import add_tracing_name
 from .types import Triangle2Df, Vec2f, Vec3f, Vec4f
 
 # Transform matrix that takes a batch of homogeneous 3D vertices and transform
@@ -29,6 +30,7 @@ Viewport = Float[Array, "4 4"]
 
 @jaxtyped
 @partial(jax.jit, donate_argnums=(0, ), inline=True)
+@add_tracing_name
 def normalise(vector: Float[Array, "dim"]) -> Float[Array, "dim"]:
     """normalise vector in-place."""
     return vector / jnp.linalg.norm(vector)
@@ -49,6 +51,7 @@ class Interpolation(enum.Enum):
 
     @jaxtyped
     @partial(jax.jit, static_argnames=("self", ), inline=True)
+    @add_tracing_name
     def __call__(
         self,
         values: Num[Array, "3 *valueDimensions"],
@@ -93,6 +96,7 @@ class Interpolation(enum.Enum):
 
 @jaxtyped
 @partial(jax.jit, static_argnames=("mode", ), inline=True)
+@add_tracing_name
 def interpolate(
     values: Num[Array, "3 *valueDimensions"],
     barycentric_screen: Vec3f,
@@ -116,6 +120,7 @@ def interpolate(
 
 @jaxtyped
 @partial(jax.jit, inline=True)
+@add_tracing_name
 def to_homogeneous(
     coordinates: Float[Array, "*batch dim"],
     value: Float[Array, "*batch"] = jnp.array(1.),
@@ -139,6 +144,7 @@ def to_homogeneous(
 
 @jaxtyped
 @partial(jax.jit, inline=True)
+@add_tracing_name
 def normalise_homogeneous(
     coordinates: Float[Array, "*batch dim"], ) -> Float[Array, "*batch dim"]:
     """Transform the homogenous coordinates to make the scale factor equals to
@@ -153,6 +159,7 @@ def normalise_homogeneous(
 
 @jaxtyped
 @partial(jax.jit, inline=True)
+@add_tracing_name
 def to_cartesian(
     coordinates: Float[Array, "*batch dim"], ) -> Float[Array, "*batch dim-1"]:
     """Transform the homogenous coordinates to cartesian coordinates by divide
@@ -193,6 +200,7 @@ class Camera(NamedTuple):
     @classmethod
     @jaxtyped
     @partial(jax.jit, static_argnames=("cls", ), inline=True)
+    @add_tracing_name
     def create(
         cls,
         view: View,
@@ -241,6 +249,7 @@ class Camera(NamedTuple):
     @staticmethod
     @jaxtyped
     @partial(jax.jit, inline=True)
+    @add_tracing_name
     def apply(
         points: Num[Array, "*N 4"],
         matrix: Num[Array, "4 4"],
@@ -276,6 +285,7 @@ class Camera(NamedTuple):
     @classmethod
     @jaxtyped
     @partial(jax.jit, static_argnames=("cls", ), inline=True)
+    @add_tracing_name
     def apply_pos(
         cls,
         points: Num[Array, "*N 3"],
@@ -306,6 +316,7 @@ class Camera(NamedTuple):
     @classmethod
     @jaxtyped
     @partial(jax.jit, static_argnames=("cls", ), inline=True)
+    @add_tracing_name
     def apply_vec(
         cls,
         vectors: Num[Array, "*N 3"],
@@ -344,6 +355,7 @@ class Camera(NamedTuple):
 
     @jaxtyped
     @partial(jax.jit, inline=True)
+    @add_tracing_name
     def to_screen(
         self,
         points: Num[Array, "*N 4"],
@@ -369,6 +381,7 @@ class Camera(NamedTuple):
 
     @jaxtyped
     @partial(jax.jit, inline=True)
+    @add_tracing_name
     def to_clip(
         self,
         points: Num[Array, "*N 4"],
@@ -391,6 +404,7 @@ class Camera(NamedTuple):
 
     @jaxtyped
     @partial(jax.jit, inline=True)
+    @add_tracing_name
     def to_screen_inv(
         self,
         screen: Float[Array, "*N 4"],
@@ -443,6 +457,7 @@ class Camera(NamedTuple):
     @staticmethod
     @jaxtyped
     @partial(jax.jit, inline=True)
+    @add_tracing_name
     def inv_scale_translation_matrix(
             scale_translation_mat: Float[Array, "4 4"]) -> Float[Array, "4 4"]:
         """Compute the inverse matrix of a (4, 4) matrix representing a scale and translation, in a form of:
@@ -484,6 +499,7 @@ class Camera(NamedTuple):
     @staticmethod
     @jaxtyped
     @partial(jax.jit, inline=True)
+    @add_tracing_name
     def view_matrix(
         eye: Vec3f,
         centre: Vec3f,
@@ -525,6 +541,7 @@ class Camera(NamedTuple):
     @staticmethod
     @jaxtyped
     @partial(jax.jit, inline=True)
+    @add_tracing_name
     def view_matrix_inv(
         eye: Vec3f,
         centre: Vec3f,
@@ -578,6 +595,7 @@ class Camera(NamedTuple):
     @staticmethod
     @jaxtyped
     @partial(jax.jit, inline=True)
+    @add_tracing_name
     def perspective_projection_matrix(
         fovy: jnp.floating[Any],
         aspect: jnp.floating[Any],
@@ -622,6 +640,7 @@ class Camera(NamedTuple):
     @classmethod
     @jaxtyped
     @partial(jax.jit, static_argnames=("cls", ), inline=True)
+    @add_tracing_name
     def perspective_projection_matrix_inv(cls, mat: Projection) -> Projection:
         """Create the inverse of a perspective projection matrix as defined in
             `perspective_projection_matrix`.
@@ -651,6 +670,7 @@ class Camera(NamedTuple):
     @staticmethod
     @jaxtyped
     @partial(jax.jit, inline=True)
+    @add_tracing_name
     def orthographic_projection_matrix(
         left: jnp.floating[Any],
         right: jnp.floating[Any],
@@ -694,6 +714,7 @@ class Camera(NamedTuple):
     @classmethod
     @jaxtyped
     @partial(jax.jit, static_argnames=("cls", ))
+    @add_tracing_name
     def orthographic_projection_matrix_inv(cls, mat: Projection) -> Projection:
         """Create the inverse of a orthographic projection matrix as defined in
             `orthographic_projection_matrix`. Since orthographic projection
@@ -708,6 +729,7 @@ class Camera(NamedTuple):
     @staticmethod
     @jaxtyped
     @partial(jax.jit, inline=True)
+    @add_tracing_name
     def perspective_projection_matrix_tinyrenderer(
         eye: Vec3f,
         centre: Vec3f,
@@ -735,6 +757,7 @@ class Camera(NamedTuple):
     @staticmethod
     @jaxtyped
     @partial(jax.jit, inline=True)
+    @add_tracing_name
     def viewport_matrix(
         lowerbound: Num[Array, "2"],
         dimension: Integer[Array, "2"],
@@ -767,6 +790,7 @@ class Camera(NamedTuple):
     @classmethod
     @jaxtyped
     @partial(jax.jit, static_argnames=("cls", ), inline=True)
+    @add_tracing_name
     def viewport_matrix_inv(cls, viewport: Viewport) -> Viewport:
         """Create the inverse of a viewport matrix as defined in `viewport_matrix`.
 
@@ -783,6 +807,7 @@ class Camera(NamedTuple):
     @staticmethod
     @jaxtyped
     @partial(jax.jit, inline=True)
+    @add_tracing_name
     def world_to_screen_matrix(width: int, height: int) -> World2Screen:
         """Generate the projection matrix to convert model coordinates to
             screen/canvas coordinates.
@@ -805,6 +830,7 @@ class Camera(NamedTuple):
 
 @jaxtyped
 @partial(jax.jit, inline=True)
+@add_tracing_name
 def compute_normal(triangle_verts: Float[Array, "3 3"]) -> Float[Array, "3"]:
     normal: Float[Array, "3"] = jnp.cross(
         triangle_verts[2, :] - triangle_verts[0, :],
@@ -818,12 +844,14 @@ def compute_normal(triangle_verts: Float[Array, "3 3"]) -> Float[Array, "3"]:
 
 @jaxtyped
 @partial(jax.jit, inline=True)
+@add_tracing_name
 def compute_normals(batch_verts: Float[Array, "b 3 3"]) -> Float[Array, "b 3"]:
     return jax.vmap(compute_normal)(batch_verts)
 
 
 @jaxtyped
 @partial(jax.jit, inline=True)
+@add_tracing_name
 def quaternion(
     rotation_axis: Union[Vec3f, tuple[float, float, float]],
     rotation_angle: Union[Float[Array, ""], float],
@@ -851,6 +879,7 @@ def quaternion(
 
 @jaxtyped
 @partial(jax.jit, inline=True)
+@add_tracing_name
 def quaternion_mul(quatA: Vec4f, quatB: Vec4f) -> Vec4f:
     """Multiply two quaternion rotations, as to composite them.
 
@@ -878,6 +907,7 @@ def quaternion_mul(quatA: Vec4f, quatB: Vec4f) -> Vec4f:
 
 @jaxtyped
 @partial(jax.jit, inline=True)
+@add_tracing_name
 def rotation_matrix(
     rotation_axis: Union[Vec3f, tuple[float, float, float]],
     rotation_angle: Union[Float[Array, ""], float],
@@ -909,6 +939,7 @@ def rotation_matrix(
 
 @jaxtyped
 @partial(jax.jit, inline=True)
+@add_tracing_name
 def transform_matrix_from_rotation(rotation: Vec4f) -> Float[Array, "3 3"]:
     """Generate a transform matrix from a quaternion rotation.
 
@@ -937,6 +968,7 @@ def transform_matrix_from_rotation(rotation: Vec4f) -> Float[Array, "3 3"]:
 
 @jaxtyped
 @partial(jax.jit, inline=True)
+@add_tracing_name
 def barycentric(pts: Triangle2Df, p: Vec2f) -> Vec3f:
     """Compute the barycentric coordinate of `p`.
         Returns u[-1] < 0 if `p` is outside of the triangle.

@@ -8,6 +8,7 @@ from jax import lax
 from jax.tree_util import tree_map
 from jaxtyping import Array, Bool, Float, Integer, Num, jaxtyped
 
+from ._meta_utils import add_tracing_name
 from .geometry import Camera, Interpolation, Viewport, interpolate
 from .shader import (ID, MixedExtraT, MixerOutput, PerFragment, PerVertex,
                      Shader, ShaderExtraInputT, VaryingT)
@@ -49,6 +50,7 @@ class PerPrimitive(NamedTuple):
     @classmethod
     @jaxtyped
     @partial(jax.jit, static_argnames=("cls", ), inline=True)
+    @add_tracing_name
     def create(cls, per_vertex: PerVertex) -> "PerPrimitive":
         """per_vertex is batched with size 3 (3 vertices per triangle)
             in clip-space, not normalised.
@@ -90,6 +92,7 @@ class PerPrimitive(NamedTuple):
     donate_argnums=(1, ),
     inline=True,
 )
+@add_tracing_name
 def _postprocessing(
     shader: type[Shader[ShaderExtraInputT, VaryingT, MixedExtraT]],
     buffers: Buffers,
@@ -107,12 +110,14 @@ def _postprocessing(
 
     @jaxtyped
     @partial(jax.jit, inline=True)
+    @add_tracing_name
     def _per_pixel(coord: Vec2i) -> tuple[MixerOutput, MixedExtraT]:
 
         assert isinstance(coord, Vec2i), f"expected Vec2i, got {coord}"
 
         @jaxtyped
         @partial(jax.jit, inline=True)
+        @add_tracing_name
         def _per_primitive_process(
             primitive: PerPrimitive,
             varying_per_primitive: VaryingT,
@@ -121,6 +126,7 @@ def _postprocessing(
 
             # For early exit when not keep primitive / determinant is 0
             @partial(jax.jit, inline=True)
+            @add_tracing_name
             def _when_keep_primitive() -> tuple[Vec3f, Float[Array, ""]]:
                 """Returns clip_coef, w_reciprocal."""
                 # x/w, y/w, with x, y, w in clip space.
@@ -156,6 +162,7 @@ def _postprocessing(
             )
 
             @partial(jax.jit, inline=True)
+            @add_tracing_name
             def _when_in_triangle() -> tuple[PerFragment, VaryingT]:
                 # Prepare inputs for fragment shader
                 z: Float[Array, ""] = interpolate(
@@ -257,10 +264,13 @@ def _postprocessing(
 
         return mixed_output, attachments
 
+    # END OF `_per_pixel`
+
     _Buffer_Row = TypeVar('_Buffer_Row', bound=tuple[Any, ...])
 
     @jaxtyped
     @partial(jax.jit, donate_argnums=(1, ), inline=True)
+    @add_tracing_name
     def _per_row(
         i: Integer[Array, ""],
         old_row: _Buffer_Row,
@@ -278,6 +288,7 @@ def _postprocessing(
 
         @jaxtyped
         @partial(jax.jit, donate_argnums=(2, ), inline=True)
+        @add_tracing_name
         def select_value_per_pixel(
             keep: Bool[Array, ""],
             new_values: _valueT,
@@ -287,6 +298,7 @@ def _postprocessing(
             FieldRowT = TypeVar("FieldRowT")
 
             @partial(jax.jit, donate_argnums=(1, ), inline=True)
+            @add_tracing_name
             def _select_per_field(
                 new_field_value: FieldRowT,
                 old_field_value: FieldRowT,
@@ -306,6 +318,8 @@ def _postprocessing(
             )
 
             return result
+
+        # END OF `select_value_per_pixel`
 
         keeps: Bool[Array, "height"]
         depths: Num[Array, "height"]
@@ -336,6 +350,7 @@ def _postprocessing(
 
     @jaxtyped
     @partial(jax.jit, donate_argnums=(1, ), inline=True)
+    @add_tracing_name
     def loop_batch_body(
         i: Integer[Array, ""],
         _buffers: Buffers,
@@ -377,6 +392,7 @@ def _postprocessing(
     donate_argnums=(2, ),
     inline=True,
 )
+@add_tracing_name
 def render(
     camera: Camera,
     shader: type[Shader[ShaderExtraInputT, VaryingT, MixedExtraT]],
@@ -417,6 +433,7 @@ def render(
 
     @jaxtyped
     @partial(jax.jit, inline=True)
+    @add_tracing_name
     def vertex_processing(
             gl_VertexID: Integer[Array, ""],  #
     ) -> tuple[PerVertex, VaryingT]:

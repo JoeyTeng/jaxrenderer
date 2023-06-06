@@ -5,6 +5,7 @@ import jax
 import jax.numpy as jnp
 from jaxtyping import Array, Bool, Float, jaxtyped
 
+from .._meta_utils import add_tracing_name
 from ..shader import ID, PerFragment, PerVertex, Shader
 from ..geometry import Camera, normalise, to_homogeneous
 from ..types import Colour, LightSource, Vec2f, Vec3f, Vec4f
@@ -43,6 +44,7 @@ class GouraudShader(Shader[GouraudExtraInput, GouraudExtraFragmentData,
     @staticmethod
     @jaxtyped
     @partial(jax.jit, inline=True)
+    @add_tracing_name
     def vertex(
         gl_VertexID: ID,
         gl_InstanceID: ID,
@@ -75,6 +77,7 @@ class GouraudShader(Shader[GouraudExtraInput, GouraudExtraFragmentData,
     @staticmethod
     @jaxtyped
     @partial(jax.jit, inline=True)
+    @add_tracing_name
     def fragment(
         gl_FragCoord: Vec4f,
         gl_FrontFacing: Bool[Array, ""],

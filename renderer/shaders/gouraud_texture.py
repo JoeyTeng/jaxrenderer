@@ -6,6 +6,7 @@ import jax.lax as lax
 import jax.numpy as jnp
 from jaxtyping import Array, Bool, Float, jaxtyped
 
+from .._meta_utils import add_tracing_name
 from ..geometry import Camera, normalise, to_homogeneous
 from ..shader import ID, MixerOutput, PerFragment, PerVertex, Shader
 from ..types import Colour, LightSource, Texture, Vec2f, Vec3f, Vec4f
@@ -50,6 +51,7 @@ class GouraudTextureShader(Shader[GouraudTextureExtraInput,
     @staticmethod
     @jaxtyped
     @partial(jax.jit, inline=True)
+    @add_tracing_name
     def vertex(
         gl_VertexID: ID,
         gl_InstanceID: ID,
@@ -85,6 +87,7 @@ class GouraudTextureShader(Shader[GouraudTextureExtraInput,
     @staticmethod
     @jaxtyped
     @partial(jax.jit, inline=True)
+    @add_tracing_name
     def fragment(
         gl_FragCoord: Vec4f,
         gl_FrontFacing: Bool[Array, ""],
@@ -125,6 +128,7 @@ class GouraudTextureShader(Shader[GouraudTextureExtraInput,
     @staticmethod
     @jaxtyped
     @partial(jax.jit, inline=True)
+    @add_tracing_name
     def mix(
         gl_FragDepth: Float[Array, "primitives"],
         keeps: Bool[Array, "primitives"],

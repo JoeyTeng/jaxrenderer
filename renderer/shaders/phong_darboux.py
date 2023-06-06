@@ -7,6 +7,7 @@ import jax.numpy as jnp
 from jax.tree_util import Partial
 from jaxtyping import Array, Bool, Float, Integer, jaxtyped
 
+from .._meta_utils import add_tracing_name
 from ..geometry import (Camera, Interpolation, interpolate, normalise,
                         to_cartesian, to_homogeneous)
 from ..shader import ID, MixerOutput, PerFragment, PerVertex, Shader
@@ -81,6 +82,7 @@ class PhongTextureDarbouxShader(Shader[PhongTextureDarbouxExtraInput,
     @staticmethod
     @jaxtyped
     @partial(jax.jit, inline=True)
+    @add_tracing_name
     def vertex(
         gl_VertexID: ID,
         gl_InstanceID: ID,
@@ -134,6 +136,7 @@ class PhongTextureDarbouxShader(Shader[PhongTextureDarbouxExtraInput,
     @staticmethod
     @jaxtyped
     @partial(jax.jit, inline=True)
+    @add_tracing_name
     def interpolate(
         values: PhongTextureDarbouxExtraFragmentData,
         barycentric_screen: Vec3f,
@@ -169,6 +172,7 @@ class PhongTextureDarbouxShader(Shader[PhongTextureDarbouxExtraInput,
     @staticmethod
     @jaxtyped
     @partial(jax.jit, inline=True)
+    @add_tracing_name
     def fragment(
         gl_FragCoord: Vec4f,
         gl_FrontFacing: Bool[Array, ""],
@@ -238,6 +242,7 @@ class PhongTextureDarbouxShader(Shader[PhongTextureDarbouxExtraInput,
     @staticmethod
     @jaxtyped
     @partial(jax.jit, inline=True)
+    @add_tracing_name
     def mix(
         gl_FragDepth: Float[Array, "primitives"],
         keeps: Bool[Array, "primitives"],
