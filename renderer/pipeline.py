@@ -366,7 +366,7 @@ def _postprocessing(
 @jaxtyped
 @partial(
     jax.jit,
-    static_argnames=("shader"),
+    static_argnames=("shader", "minibatch_size_to_try"),
     donate_argnums=(2, ),
     inline=True,
 )
@@ -378,12 +378,20 @@ def render(
     face_indices: FaceIndices,
     extra: ShaderExtraInputT,
     row_indices: Optional[RowIndices] = None,
+    minibatch_size_to_try: tuple[int, ...] = (64, 32, 16, 8, 4, 2, 1),
 ) -> Buffers:
     """Render a scene with a shader.
 
     Parameters:
-      - row_indices: shape (total batches, rows per batch) by default (None), render 4/2/1 row at a time if the number of rows are a multiple of
-        4/2/1.
+      Adjust below two parameters to achieve a balance between performance and
+        memory usage.
+      - row_indices: shape (total batches, rows per batch) by default (None),
+        render 4/2/1 row at a time if the number of rows are a multiple of
+        4/2/1 (the exact number of rows per batch, when None, depends on
+        `minibatch_size_to_try`).
+      - minibatch_size_to_try: default is (64, 32, 16, 8, 4, 2, 1). The number
+        of rows to be rendered at a time, only useful if `row_indices` is None.
+        They must be specified in order.
     """
     vertices_count: int
     gl_InstanceID: ID
@@ -396,12 +404,10 @@ def render(
         rows_count: int = int(buffers[0].shape[0])
         if row_indices is None:
             row_indices = lax.iota(int, rows_count)
-            if rows_count % 4 == 0:
-                row_indices = row_indices.reshape((-1, 4))
-            elif rows_count % 2 == 0:
-                row_indices = row_indices.reshape((-1, 2))
-            else:
-                row_indices = row_indices.reshape((-1, 1))
+            for i in minibatch_size_to_try:
+                if rows_count % i == 0:
+                    row_indices = row_indices.reshape((-1, i))
+                    break
 
         assert isinstance(row_indices, RowIndices)
         assert rows_count == row_indices.shape[0] * row_indices.shape[1], (
