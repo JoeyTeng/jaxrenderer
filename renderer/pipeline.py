@@ -1,5 +1,5 @@
 from functools import partial
-from typing import Any, NamedTuple, Optional, TypeVar
+from typing import Any, NamedTuple, Optional
 
 import jax
 import jax.lax as lax
@@ -12,8 +12,8 @@ from ._meta_utils import add_tracing_name
 from .geometry import Camera, Interpolation, Viewport, interpolate
 from .shader import (ID, MixedExtraT, MixerOutput, PerFragment, PerVertex,
                      Shader, ShaderExtraInputT, VaryingT)
-from .types import (FALSE_ARRAY, Buffers, FaceIndices, Triangle, Vec2f, Vec2i,
-                    Vec3f, Vec4f)
+from .types import (FALSE_ARRAY, Buffers, CanvasMask, FaceIndices, Triangle,
+                    Vec2f, Vec2i, Vec3f, Vec4f, ZBuffer)
 
 jax.config.update('jax_array', True)
 
@@ -103,8 +103,6 @@ def _postprocessing(
     row_indices: RowIndices,
 ) -> Buffers:
     with jax.ensure_compile_time_eval():
-        # loop along first axis, for memory efficiency
-        loop_size: int = int(row_indices.shape[0])
         # vmap batch along second axis
         batch_size: int = int(buffers[0].shape[1])
 
@@ -266,61 +264,18 @@ def _postprocessing(
 
     # END OF `_per_pixel`
 
-    _Buffer_Row = TypeVar('_Buffer_Row', bound=tuple[Any, ...])
-
     @jaxtyped
-    @partial(jax.jit, donate_argnums=(1, ), inline=True)
+    @partial(jax.jit, inline=True)
     @add_tracing_name
-    def _per_row(
-        i: Integer[Array, ""],
-        old_row: _Buffer_Row,
-    ) -> _Buffer_Row:
+    def _per_row(i: Integer[Array, ""], ) -> tuple[MixerOutput, MixedExtraT]:
         """Render one row.
 
         Parameters:
           - i: the index of the row to be rendered on the first axis of the
             resultant buffer.
-          - old_row: the old values of the row to be rendered. It inherits
-            all fields from `Buffers` but with the first axis removed (as
-            batched axis).
+
+        Returns: one row from `Shader.mixer`, `MixerOutput` and `MixerExtraT`.
         """
-        _valueT = TypeVar('_valueT', bound=tuple[Any, ...])
-
-        @jaxtyped
-        @partial(jax.jit, donate_argnums=(2, ), inline=True)
-        @add_tracing_name
-        def select_value_per_pixel(
-            keep: Bool[Array, ""],
-            new_values: _valueT,
-            old_values: _valueT,
-        ) -> _valueT:
-            """Choose new value of the pixel, or keep the previous."""
-            FieldRowT = TypeVar("FieldRowT")
-
-            @partial(jax.jit, donate_argnums=(1, ), inline=True)
-            @add_tracing_name
-            def _select_per_field(
-                new_field_value: FieldRowT,
-                old_field_value: FieldRowT,
-            ) -> FieldRowT:
-                """Choose this pixel for this field in the PyTree."""
-                return lax.cond(
-                    keep,
-                    lambda: new_field_value,
-                    lambda: old_field_value,
-                )
-
-            # tree_map over each field in the PyTree
-            result: _valueT = tree_map(
-                _select_per_field,
-                new_values,
-                old_values,
-            )
-
-            return result
-
-        # END OF `select_value_per_pixel`
-
         keeps: Bool[Array, "height"]
         depths: Num[Array, "height"]
         extras: MixedExtraT
@@ -336,50 +291,73 @@ def _postprocessing(
         assert isinstance(depths, Num[Array, "height"])
         assert isinstance(extras, tuple)
 
-        # vmap each pixel over axis 1 (height) of the buffers (per row in
-        # matrix)
-        new_row = jax.vmap(select_value_per_pixel)(
-            keeps,
-            Buffers(zbuffer=depths, targets=tuple(extras)),
-            old_row,
-        )
-
-        return new_row
+        return MixerOutput(keep=keeps, zbuffer=depths), extras
 
     # END OF `_per_row`
 
     @jaxtyped
-    @partial(jax.jit, donate_argnums=(1, ), inline=True)
+    @partial(jax.jit, inline=True)
     @add_tracing_name
     def loop_batch_body(
-        i: Integer[Array, ""],
-        _buffers: Buffers,
-    ) -> Buffers:
-        indices: Integer[Array, "row_batch_size"] = row_indices[i]
-        assert isinstance(indices, Integer[Array, "row_batch_size"])
-
-        buffers_rows = jax.vmap(_per_row)(
-            indices,
-            # old values from buffers
-            tree_map(lambda field: field[indices], _buffers),
-        )
-
-        # tree_map over each field in the PyTree to update all buffers
-        return tree_map(
-            lambda field, value: field.at[indices].set(value),
-            _buffers,
-            buffers_rows,
-        )
+        indices: Integer[Array, "row_batch_size"]
+    ) -> tuple[MixerOutput, MixedExtraT]:
+        return jax.vmap(_per_row)(indices)
 
     # END OF `loop_batch_body`
 
-    # iterate over axis 0 (width) of the buffers (one row at a time)
-    buffers = lax.fori_loop(
-        0,
-        loop_size,
-        loop_batch_body,
-        buffers,
-    )
+    @jaxtyped
+    @partial(jax.jit, donate_argnums=(1, ), inline=True)
+    @add_tracing_name
+    def merge_buffers(
+        mixer_outputs: tuple[MixerOutput, MixedExtraT],
+        old_buffers: Buffers,
+    ) -> Buffers:
+        """Merge the rendered row into the buffers.
+
+        Parameters:
+          - mixer_outputs: the output from `Shader.mixer`, `MixerOutput` and
+            `MixerExtraT`.
+          - old_buffers: the buffers to be updated.
+
+        Returns: the updated buffers.
+        """
+        with jax.ensure_compile_time_eval():
+            zbuffer_shape: tuple[int, int] = old_buffers.zbuffer.shape
+
+        keeps: CanvasMask = mixer_outputs[0].keep.reshape(zbuffer_shape)
+        depths: ZBuffer = mixer_outputs[0].zbuffer.reshape(zbuffer_shape)
+        extras: MixedExtraT = tree_map(
+            lambda field: field.reshape((zbuffer_shape[0], *field.shape[2:])
+                                        if field.ndim > 2 else zbuffer_shape),
+            mixer_outputs[1],
+        )
+
+        @partial(jax.jit, donate_argnums=(2, ), inline=True)
+        def _merge_first_axis(_mask, _new, _old):
+
+            @partial(jax.jit, donate_argnums=(2, ), inline=True)
+            def _merge_second_axis(__mask, __new, __old):
+                return lax.cond(__mask, lambda: __new, lambda: __old)
+
+            return jax.vmap(_merge_second_axis)(_mask, _new, _old)
+
+        # TODO: batch merge!
+        new_buffers: Buffers = tree_map(
+            lambda new, old: jax.vmap(_merge_first_axis)(keeps, new, old),
+            Buffers(zbuffer=depths, targets=tuple(extras)),
+            old_buffers,
+        )
+        assert isinstance(new_buffers, Buffers)
+
+        return new_buffers
+
+    # END OF `merge_buffers`
+
+    # iterate over axis 0 (width) of the buffers
+    # (multiple row at a time, according to `row_indices``)
+    # Not using vmap due to memory constraints
+    mixer_outputs = lax.map(loop_batch_body, row_indices)
+    buffers = merge_buffers(mixer_outputs, buffers)
     assert isinstance(buffers, Buffers)
 
     return buffers
