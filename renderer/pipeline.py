@@ -1,5 +1,5 @@
 from functools import partial
-from typing import Any, NamedTuple, Optional
+from typing import Any, NamedTuple
 
 import jax
 import jax.lax as lax
@@ -88,7 +88,7 @@ class PerPrimitive(NamedTuple):
 @jaxtyped
 @partial(
     jax.jit,
-    static_argnames=("shader", ),
+    static_argnames=("shader", "loop_unroll"),
     donate_argnums=(1, ),
     inline=True,
 )
@@ -100,11 +100,13 @@ def _postprocessing(
     varyings: VaryingT,
     extra: ShaderExtraInputT,
     viewport: Viewport,
-    row_indices: RowIndices,
+    loop_unroll: int,
 ) -> Buffers:
     with jax.ensure_compile_time_eval():
         # vmap batch along second axis
         batch_size: int = int(buffers[0].shape[1])
+        row_indices: Integer[Array, "width"]
+        row_indices = lax.iota(int, int(buffers[0].shape[0]))
 
     @jaxtyped
     @partial(jax.jit, inline=True)
@@ -321,16 +323,9 @@ def _postprocessing(
 
         Returns: the updated buffers.
         """
-        with jax.ensure_compile_time_eval():
-            zbuffer_shape: tuple[int, int] = old_buffers.zbuffer.shape
-
-        keeps: CanvasMask = mixer_outputs[0].keep.reshape(zbuffer_shape)
-        depths: ZBuffer = mixer_outputs[0].zbuffer.reshape(zbuffer_shape)
-        extras: MixedExtraT = tree_map(
-            lambda field: field.reshape((zbuffer_shape[0], *field.shape[2:])
-                                        if field.ndim > 2 else zbuffer_shape),
-            mixer_outputs[1],
-        )
+        keeps: CanvasMask = mixer_outputs[0].keep
+        depths: ZBuffer = mixer_outputs[0].zbuffer
+        extras: MixedExtraT = mixer_outputs[1]
 
         @partial(jax.jit, donate_argnums=(2, ), inline=True)
         def _merge_first_axis(_mask, _new, _old):
@@ -341,7 +336,6 @@ def _postprocessing(
 
             return jax.vmap(_merge_second_axis)(_mask, _new, _old)
 
-        # TODO: batch merge!
         new_buffers: Buffers = tree_map(
             lambda new, old: jax.vmap(_merge_first_axis)(keeps, new, old),
             Buffers(zbuffer=depths, targets=tuple(extras)),
@@ -356,7 +350,15 @@ def _postprocessing(
     # iterate over axis 0 (width) of the buffers
     # (multiple row at a time, according to `row_indices``)
     # Not using vmap due to memory constraints
-    mixer_outputs = lax.map(loop_batch_body, row_indices)
+    # TODO: using map for readability when map supports unroll.
+    # Reference: https://jax.readthedocs.io/en/latest/_modules/jax/_src/lax/control_flow/loops.html#map
+    mixer_outputs = lax.scan(
+        lambda _, x: ((), _per_row(x)),
+        init=(),
+        xs=row_indices,
+        unroll=loop_unroll,
+    )[1]
+
     buffers = merge_buffers(mixer_outputs, buffers)
     assert isinstance(buffers, Buffers)
 
@@ -366,7 +368,7 @@ def _postprocessing(
 @jaxtyped
 @partial(
     jax.jit,
-    static_argnames=("shader"),
+    static_argnames=("shader", "loop_unroll"),
     donate_argnums=(2, ),
     inline=True,
 )
@@ -377,13 +379,14 @@ def render(
     buffers: Buffers,
     face_indices: FaceIndices,
     extra: ShaderExtraInputT,
-    row_indices: Optional[RowIndices] = None,
+    loop_unroll: int = 1,
 ) -> Buffers:
     """Render a scene with a shader.
 
     Parameters:
-      - row_indices: shape (total batches, rows per batch) by default (None), render 4/2/1 row at a time if the number of rows are a multiple of
-        4/2/1.
+      - loop_unroll: the number of rows to be rendered in one loop. This may
+        help improve the performance at the cost of increasing compilation time.
+        Default: 1
     """
     vertices_count: int
     gl_InstanceID: ID
@@ -392,22 +395,6 @@ def render(
         gl_InstanceID = jnp.array(0, dtype=int)
         assert isinstance(vertices_count, int)
         assert isinstance(gl_InstanceID, ID)
-
-        rows_count: int = int(buffers[0].shape[0])
-        if row_indices is None:
-            row_indices = lax.iota(int, rows_count)
-            if rows_count % 4 == 0:
-                row_indices = row_indices.reshape((-1, 4))
-            elif rows_count % 2 == 0:
-                row_indices = row_indices.reshape((-1, 2))
-            else:
-                row_indices = row_indices.reshape((-1, 1))
-
-        assert isinstance(row_indices, RowIndices)
-        assert rows_count == row_indices.shape[0] * row_indices.shape[1], (
-            "RowIndices shape must match the first axis of the buffers. Got "
-            f"RowIndices shape {row_indices.shape} and "
-            f"buffer's first axis {rows_count}.")
 
     @jaxtyped
     @partial(jax.jit, inline=True)
@@ -445,7 +432,7 @@ def render(
         varyings=tree_map(lambda field: field[face_indices], varyings),
         extra=extra,
         viewport=camera.viewport,
-        row_indices=row_indices,
+        loop_unroll=loop_unroll,
     )
     assert isinstance(buffers, Buffers)
 
