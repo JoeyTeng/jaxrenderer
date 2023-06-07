@@ -28,7 +28,12 @@ class Shadow(NamedTuple):
 
     @staticmethod
     @jaxtyped
-    @partial(jax.jit, donate_argnums=(0, ), inline=True)
+    @partial(
+        jax.jit,
+        static_argnames=("loop_unroll", ),
+        donate_argnums=(0, ),
+        inline=True,
+    )
     @add_tracing_name
     def render_shadow_map(
         shadow_map: ZBuffer,
@@ -41,6 +46,7 @@ class Shadow(NamedTuple):
         strength: Colour,
         offset: float = 0.001,
         distance: float = 10.,
+        loop_unroll: int = 64,
     ) -> "Shadow":
         """Render shadow map from light source's point of view.
 
@@ -59,6 +65,7 @@ class Shadow(NamedTuple):
             the light.
           - distance: Distance from the light source to the centre of the
             scene. This is mainly to avoid objects being clipped.
+          - loop_unroll: passed directly to `render`. See `pipeline:render`.
 
         Returns: Updated `Shadow` object with shadow_map updated.
         """
@@ -87,7 +94,14 @@ class Shadow(NamedTuple):
 
         buffers = Buffers(zbuffer=shadow_map, targets=tuple())
         extra = DepthExtraInput(position=verts)
-        shadow_map, _ = render(_camera, DepthShader, buffers, faces, extra)
+        shadow_map, _ = render(
+            _camera,
+            DepthShader,
+            buffers,
+            faces,
+            extra,
+            loop_unroll=loop_unroll,
+        )
         shadow_map = shadow_map + offset
         assert isinstance(shadow_map, ZBuffer)
 

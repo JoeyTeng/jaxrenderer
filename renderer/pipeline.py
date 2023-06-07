@@ -386,6 +386,7 @@ def render(
     Parameters:
       - loop_unroll: the number of rows to be rendered in one loop. This may
         help improve the performance at the cost of increasing compilation time.
+        Default: 64
     """
     vertices_count: int
     gl_InstanceID: ID
