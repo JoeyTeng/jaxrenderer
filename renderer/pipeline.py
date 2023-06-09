@@ -68,13 +68,10 @@ class PerPrimitive(NamedTuple):
         # an arbitrary number for numerical stability
         keep: Bool[Array, ""] = lax.abs(determinant) > 1e-6
 
-        mat_inv: Float[Array, "3 3"] = lax.cond(
-            # an arbitrary number for numerical stability
-            keep,
-            # may replace with custom implementation for higher precision
-            lambda: jnp.linalg.inv(matrix),
-            lambda: jnp.zeros((3, 3)),
-        )
+        # although this may result in NaN or Inf when keep is False,
+        # it will be discarded later.
+        # Perf: Remove lax.cond to reduce extra operations `select_n` in HLO.
+        mat_inv: Float[Array, "3 3"] = jnp.linalg.inv(matrix)
         assert isinstance(mat_inv, Float[Array, "3 3"])
 
         return cls(
@@ -152,18 +149,12 @@ def _postprocessing(
 
             # END OF `_when_keep_primitive`
 
-            # Prepare for interpolation parameters
-            # clip_coef here interpolates to 1/w * target value
-            clip_coef, w_reciprocal = lax.cond(
-                # an arbitrary number for numerical stability
-                primitive.keep,
-                _when_keep_primitive,
-                lambda: (lax.full((3, ), -1.), jnp.zeros(())),
-            )
-
             @partial(jax.jit, inline=True)
             @add_tracing_name
-            def _when_in_triangle() -> tuple[PerFragment, VaryingT]:
+            def _when_in_triangle(
+                clip_coef: Vec3f,
+                w_reciprocal: Float[Array, ""],
+            ) -> tuple[PerFragment, VaryingT]:
                 # Prepare inputs for fragment shader
                 z: Float[Array, ""] = interpolate(
                     values=primitive.gl_Position[:, 2],
@@ -214,7 +205,7 @@ def _postprocessing(
                 assert isinstance(per_frag, PerFragment)
                 assert isinstance(extra_fragment_output, tuple)
 
-                # enforce default `gl_FragDepth` when it is None
+                # enforce default `gl_FragDepth` when `use_default_depth`
                 per_frag = lax.cond(
                     per_frag.use_default_depth,
                     lambda: per_frag._replace(gl_FragDepth=gl_FragCoord[2]),
@@ -226,21 +217,31 @@ def _postprocessing(
 
             # END OF `_when_in_triangle`
 
+            # Prepare for interpolation parameters
+            # clip_coef here interpolates to 1/w * target value
+            # Perf: although this may result in garbage values (NaN or Inf)
+            # when keep is False, since it will be discarded later, we can
+            # remove the lax.cond to reduce extra operations `select_n` in HLO
+            # as the computation is quite cheap.
+            # also see google/brax#8409 for why `_when_keep_primitive` is
+            # always executed.
+            clip_coef, w_reciprocal = _when_keep_primitive()
+
             in_triangle: Bool[Array, ""] = (clip_coef >= 0).all()
             assert isinstance(in_triangle, Bool[Array, ""])
 
             built_in: PerFragment
             attachments: VaryingT
-            built_in, attachments = lax.cond(
-                jnp.logical_and(primitive.keep, in_triangle),
-                _when_in_triangle,
-                # discard out-of-triangle values
-                lambda: (
-                    PerFragment(keeps=FALSE_ARRAY),
-                    # dummy values
-                    tree_map(lambda field: field[0], varying_per_primitive),
-                ),
-            )
+            # Perf: although this may result in garbage values (NaN or Inf)
+            # when keep or in_triangle is False, since it will be discarded
+            # later, we can remove the lax.cond to reduce extra operations
+            # `select_n` in HLO.
+            # See google/brax#8409 for why `_when_keep_primitive` is always
+            # executed.
+            # TODO: change back to `lax.cond` when it does not force execute both branches under vmap.
+            built_in, attachments = _when_in_triangle(clip_coef, w_reciprocal)
+            built_in = built_in._replace(keeps=(primitive.keep & in_triangle
+                                                & built_in.keeps))
             assert isinstance(built_in, PerFragment)
             assert isinstance(attachments, tuple)
 
@@ -296,16 +297,6 @@ def _postprocessing(
         return MixerOutput(keep=keeps, zbuffer=depths), extras
 
     # END OF `_per_row`
-
-    @jaxtyped
-    @partial(jax.jit, inline=True)
-    @add_tracing_name
-    def loop_batch_body(
-        indices: Integer[Array, "row_batch_size"]
-    ) -> tuple[MixerOutput, MixedExtraT]:
-        return jax.vmap(_per_row)(indices)
-
-    # END OF `loop_batch_body`
 
     @jaxtyped
     @partial(jax.jit, donate_argnums=(1, ), inline=True)

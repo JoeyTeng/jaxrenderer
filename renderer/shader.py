@@ -232,7 +232,7 @@ class Shader(ABC, Generic[ShaderExtraInputT, VaryingT, MixedExtraT]):
         For the default behaviour, the values from fragment with maximum
         `gl_FragDepth` value AND `keeps` being True will be used as the output.
         In the default implementation, if no fragment has `keeps` being True,
-        then mixed value will be the first fragment's value for both
+        then mixed value will be the an arbitrary fragment's value for both
         `gl_FragDepth` and `extra`.
 
         Returns: Built-in MixerOutput and user-defined extras.
@@ -250,28 +250,21 @@ class Shader(ABC, Generic[ShaderExtraInputT, VaryingT, MixedExtraT]):
           - [Blending](https://www.khronos.org/opengl/wiki/Blending)
         """
 
-        @partial(jax.jit, inline=True)
-        @add_tracing_name
-        def has_kept_fragment() -> Integer[Array, ""]:
-            depths: Float[Array, "primitives"]
-            depths = jnp.where(keeps, gl_FragDepth, jnp.inf)
-            assert isinstance(depths, Float[Array, "primitives"])
+        depths: Float[Array, "primitives"]
+        depths = jnp.where(keeps, gl_FragDepth, jnp.inf)
+        assert isinstance(depths, Float[Array, "primitives"])
 
-            idx: Integer[Array, ""] = jnp.argmin(depths)
+        # when all keeps are false, all depths will be inf, and there will
+        # still be a valid idx generated, as promised by argmin.
+        idx: Integer[Array, ""] = jnp.argmin(depths)
+        assert isinstance(idx, Integer[Array, ""])
 
-            return idx
-
-        has_valid_fragment = jnp.any(keeps)
-
-        idx: Integer[Array, ""] = lax.cond(
-            has_valid_fragment,
-            has_kept_fragment,
-            lambda: jnp.array(0),
-        )
-        depth: Float[Array, ""] = gl_FragDepth[idx]
+        keep: Bool[Array, ""] = keeps[idx]
+        assert isinstance(keep, Bool[Array, ""])
+        depth: Float[Array, ""] = depths[idx]
         assert isinstance(depth, Float[Array, ""])
 
         return (
-            MixerOutput(keep=has_valid_fragment, zbuffer=depth),
+            MixerOutput(keep=keep, zbuffer=depth),
             tree_map(lambda x: x[idx], extra),
         )
