@@ -240,8 +240,14 @@ def _postprocessing(
             # executed.
             # TODO: change back to `lax.cond` when it does not force execute both branches under vmap.
             built_in, attachments = _when_in_triangle(clip_coef, w_reciprocal)
-            built_in = built_in._replace(keeps=(primitive.keep & in_triangle
-                                                & built_in.keeps))
+            # ~12% speedup compared with using logical_and/bitwise_and/&/.all()
+            # Ref: https://github.com/google/jax/discussions/16329
+            keeps = jnp.array((
+                primitive.keep,
+                in_triangle,
+                built_in.keeps,
+            )).astype(jnp.uint8).min() != 0
+            built_in = built_in._replace(keeps=keeps)
             assert isinstance(built_in, PerFragment)
             assert isinstance(attachments, tuple)
 
