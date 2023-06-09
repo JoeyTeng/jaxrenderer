@@ -225,11 +225,7 @@ class PhongReflectionShadowTextureShader(
                 use_default_depth=built_in.use_default_depth,
             ),
             PhongReflectionShadowTextureExtraFragmentData(
-                colour=lax.cond(
-                    (colour >= 0).all(),
-                    lambda: colour,
-                    lambda: jnp.zeros(3),
-                ),
+                colour=colour,
                 uv=varying.uv,
                 normal=varying.normal,
             ),

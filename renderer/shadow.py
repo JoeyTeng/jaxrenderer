@@ -127,13 +127,13 @@ class Shadow(NamedTuple):
         pos: Vec2i = lax.round(position[:2]).astype(int)
         assert isinstance(pos, Vec2i)
 
-        value: Float[Array, ""] = lax.cond(
-            jnp.logical_or(
-                pos < 0,
-                pos >= jnp.asarray(self.shadow_map.shape[:2]),
-            ).any(),
-            lambda: jnp.inf,  # outside shadow map, no shadow
-            lambda: self.shadow_map[pos[0], pos[1]],
+        value: Float[Array, ""]
+        value = self.shadow_map.at[pos[0], pos[1]].get(
+            mode="fill",
+            indices_are_sorted=True,
+            unique_indices=True,
+            # outside shadow map, no shadow
+            fill_value=jnp.inf,
         )
         assert isinstance(value, Float[Array, ""])
 
