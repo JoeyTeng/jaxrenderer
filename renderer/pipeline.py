@@ -173,7 +173,8 @@ def _postprocessing(
                 assert isinstance(gl_FragCoord, Vec4f)
 
                 # Ref: https://registry.khronos.org/OpenGL-Refpages/gl4/html/gl_FrontFacing.xhtml
-                gl_FrontFacing: Bool[Array, ""] = primitive.determinant > 0
+                # True if not back-facing.
+                gl_FrontFacing: Bool[Array, ""] = primitive.determinant >= 0
                 assert isinstance(gl_FrontFacing, Bool[Array, ""])
 
                 gl_PointCoord: Vec2f
