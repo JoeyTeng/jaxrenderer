@@ -137,6 +137,93 @@ class Shader(ABC, Generic[ShaderExtraInputT, VaryingT, MixedExtraT]):
     @jaxtyped
     @partial(jax.jit, inline=True)
     @add_tracing_name
+    def primitive_chooser(
+        gl_FragCoord: Float[Array, "primitives 4"],
+        gl_FrontFacing: Bool[Array, "primitives"],
+        gl_PointCoord: Float[Array, "primitives 2"],
+        keeps: Bool[Array, "primitives"],
+        values: VaryingT,
+        barycentric_screen: Float[Array, "primitives 3"],
+        barycentric_clip: Float[Array, "primitives 3"],
+    ) -> tuple[  #
+            Float[Array, "kept_primitives 4"],  # gl_FragCoord
+            Bool[Array, "kept_primitives"],  # gl_FrontFacing
+            Float[Array, "kept_primitives 2"],  # gl_PointCoord
+            Bool[Array, "kept_primitives"],  # keeps
+            VaryingT,  # values
+            Float[Array, "kept_primitives 3"],  # barycentric_screen
+            Float[Array, "kept_primitives 3"],  # barycentric_clip
+    ]:
+        """Override this to customise the primitive choosing stage.
+
+        The default implementation is to only keep the primitive with minimum
+        `gl_FragCoord[2]` and `gl_FrontFacing` and `keeps` (interpolated `z`
+        value in window space is minimum), i.e., the closest primitive that is
+        kept and is not back-facing.
+
+        Parameters:
+          - gl_FragCoord: batch of coordinates in screen space. (x, y, z, 1/w).
+          - gl_FrontFacing: batch of bool, True if the primitive is NOT back
+            facing.
+          - gl_PointCoord: batch of 2d coordinates in screen space. Not supported for now.
+          - keeps: batch of bool, whether the primitive is kept. This is used
+            to filter out the primitives that are not visible, or with garbage
+            values.
+
+          The parameters below are batched values over primitives, with each
+          value same as the input given to `Shader.interpolate`
+
+          - values: values at the vertices of the triangle, with axis 0 being
+            the batch axis. It is expected to be a tuple of multiple batched
+            values.
+          - barycentric_screen: barycentric coordinates in screen space of the
+            point to interpolate
+          - barycentric_clip: barycentric coordinates in clip space of the
+            point to interpolate
+
+        Return:
+          tuple of values from kept primitives, in same order and structure of
+          the input parameters. The returned fields must be batched.
+        """
+        depths: Float[Array, "primitives"]
+        depths = jnp.where(keeps & gl_FrontFacing, gl_FragCoord[:, 2], jnp.inf)
+        assert isinstance(depths, Float[Array, "primitives"])
+
+        # when all keeps are false, all depths will be inf, and there will
+        # still be a valid idx generated, as promised by argmin.
+        idx: Integer[Array, ""] = jnp.argmin(depths)
+        assert isinstance(idx, Integer[Array, ""])
+
+        _get = partial(
+            # use `dynamic_slice` instead of `slice` according to benchmark
+            # https://colab.research.google.com/drive/1idBbgEDbxI6wi5kzlHF6kzWryoFSm8-p#scrollTo=-bHrz3kZ5A0p
+            lax.dynamic_slice_in_dim,
+            start_index=idx,
+            slice_size=1,
+            axis=0,
+        )
+
+        _gl_FragCoord: Float[Array, "kept_primitives 4"] = _get(gl_FragCoord)
+        assert isinstance(_gl_FragCoord, Float[Array, "kept_primitives 4"])
+        _gl_FrontFacing: Bool[Array, "kept_primitives"] = _get(gl_FrontFacing)
+        assert isinstance(_gl_FrontFacing, Bool[Array, "kept_primitives"])
+        _gl_PointCoord: Float[Array, "kept_primitives 2"] = _get(gl_PointCoord)
+        assert isinstance(_gl_PointCoord, Float[Array, "kept_primitives 2"])
+        _keeps: Bool[Array, "kept_primitives"] = _get(keeps)
+        assert isinstance(_keeps, Bool[Array, "kept_primitives"])
+        _values: VaryingT = tree_map(_get, values)
+        _screen: Float[Array, "kept_primitives 3"] = _get(barycentric_screen)
+        assert isinstance(_screen, Float[Array, "kept_primitives 3"])
+        _clip: Float[Array, "kept_primitives 3"] = _get(barycentric_clip)
+        assert isinstance(_clip, Float[Array, "kept_primitives 3"])
+
+        return (_gl_FragCoord, _gl_FrontFacing, _gl_PointCoord, _keeps,
+                _values, _screen, _clip)
+
+    @staticmethod
+    @jaxtyped
+    @partial(jax.jit, inline=True)
+    @add_tracing_name
     def interpolate(
         values: VaryingT,
         barycentric_screen: Vec3f,
@@ -220,8 +307,8 @@ class Shader(ABC, Generic[ShaderExtraInputT, VaryingT, MixedExtraT]):
     @partial(jax.jit, inline=True)
     @add_tracing_name
     def mix(
-        gl_FragDepth: Float[Array, "primitives"],
-        keeps: Bool[Array, "primitives"],
+        gl_FragDepth: Float[Array, "kept_primitives"],
+        keeps: Bool[Array, "kept_primitives"],
         extra: VaryingT,
     ) -> tuple[MixerOutput, MixedExtraT]:
         """Override this to customise the mixing behaviour per fragment over

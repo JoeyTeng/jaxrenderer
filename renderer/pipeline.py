@@ -112,14 +112,24 @@ def _postprocessing(
 
         assert isinstance(coord, Vec2i), f"expected Vec2i, got {coord}"
 
+        ReturnT = tuple[  #
+            Float[Array, "kept_primitives 4"],  #
+            Bool[Array, "kept_primitives"],  #
+            Float[Array, "kept_primitives 2"],  #
+            Bool[Array, "kept_primitives"],  #
+            VaryingT,  #
+            Float[Array, "kept_primitives 3"],  #
+            Float[Array, "kept_primitives 3"],  #
+        ]
+
         @jaxtyped
         @partial(jax.jit, inline=True)
         @add_tracing_name
-        def _per_primitive_process(
+        def _per_primitive_preprocess(
             primitive: PerPrimitive,
             varying_per_primitive: VaryingT,
-        ) -> tuple[PerFragment, VaryingT]:
-            # PROCESS: Interpolation
+        ) -> ReturnT:
+            # PROCESS: Early Culling (`primitive_chooser`)
 
             # For early exit when not keep primitive / determinant is 0
             @partial(jax.jit, inline=True)
@@ -154,7 +164,12 @@ def _postprocessing(
             def _when_in_triangle(
                 clip_coef: Vec3f,
                 w_reciprocal: Float[Array, ""],
-            ) -> tuple[PerFragment, VaryingT]:
+            ) -> tuple[  #
+                    Float[Array, "kept_primitives 4"],  # gl_FragCoord
+                    Bool[Array, "kept_primitives"],  # gl_FrontFacing
+                    Float[Array, "kept_primitives 2"],  # gl_PointCoord
+                    Float[Array, "kept_primitives 3"],  # true_clip_coef
+            ]:
                 # Prepare inputs for fragment shader
                 z: Float[Array, ""] = interpolate(
                     values=primitive.gl_Position[:, 2],
@@ -180,41 +195,14 @@ def _postprocessing(
                 gl_PointCoord: Vec2f
                 with jax.ensure_compile_time_eval():
                     # TODO: implement Point primitive properly.
-                    gl_PointCoord = lax.full((2, ), 0)
+                    gl_PointCoord = lax.full((2, ), 0.)
 
                 # this interpolates to target value u, not u/w
                 true_clip_coef: Vec3f = clip_coef / w_reciprocal
                 assert isinstance(true_clip_coef, Vec3f)
 
-                varying: VaryingT = shader.interpolate(
-                    values=varying_per_primitive,
-                    barycentric_screen=true_clip_coef,
-                    barycentric_clip=true_clip_coef,
-                )
-                assert isinstance(varying, tuple)
-
-                # PROCESS: Fragment Processing
-                per_frag: PerFragment
-                extra_fragment_output: VaryingT
-                per_frag, extra_fragment_output = shader.fragment(
-                    gl_FragCoord=gl_FragCoord,
-                    gl_FrontFacing=gl_FrontFacing,
-                    gl_PointCoord=gl_PointCoord,
-                    varying=varying,
-                    extra=extra,
-                )
-                assert isinstance(per_frag, PerFragment)
-                assert isinstance(extra_fragment_output, tuple)
-
-                # enforce default `gl_FragDepth` when `use_default_depth`
-                per_frag = lax.cond(
-                    per_frag.use_default_depth,
-                    lambda: per_frag._replace(gl_FragDepth=gl_FragCoord[2]),
-                    lambda: per_frag,
-                )
-                assert isinstance(per_frag, PerFragment)
-
-                return per_frag, extra_fragment_output
+                return (gl_FragCoord, gl_FrontFacing, gl_PointCoord,
+                        true_clip_coef)
 
             # END OF `_when_in_triangle`
 
@@ -231,8 +219,6 @@ def _postprocessing(
             in_triangle: Bool[Array, ""] = (clip_coef >= 0).all()
             assert isinstance(in_triangle, Bool[Array, ""])
 
-            built_in: PerFragment
-            attachments: VaryingT
             # Perf: although this may result in garbage values (NaN or Inf)
             # when keep or in_triangle is False, since it will be discarded
             # later, we can remove the lax.cond to reduce extra operations
@@ -240,28 +226,83 @@ def _postprocessing(
             # See google/brax#8409 for why `_when_keep_primitive` is always
             # executed.
             # TODO: change back to `lax.cond` when it does not force execute both branches under vmap.
-            built_in, attachments = _when_in_triangle(clip_coef, w_reciprocal)
-            # ~12% speedup compared with using logical_and/bitwise_and/&/.all()
-            # Ref: https://github.com/google/jax/discussions/16329
-            keeps = jnp.array((
-                primitive.keep,
-                in_triangle,
-                built_in.keeps,
-            )).astype(jnp.uint8).min() != 0
-            built_in = built_in._replace(keeps=keeps)
-            assert isinstance(built_in, PerFragment)
-            assert isinstance(attachments, tuple)
+            r = _when_in_triangle(clip_coef, w_reciprocal)
+            gl_FragCoord, gl_FrontFacing, gl_PointCoord, true_clip_coef = r
 
-            return built_in, attachments
+            return (
+                gl_FragCoord,
+                gl_FrontFacing,
+                gl_PointCoord,
+                primitive.keep & in_triangle,
+                varying_per_primitive,
+                true_clip_coef,
+                true_clip_coef,
+            )
 
-        # END OF `_per_primitive_process`
+        # END OF `_per_primitive_preprocess`
 
-        built_in, extra_outputs = jax.vmap(_per_primitive_process)(
+        @partial(jax.jit, inline=True)
+        @add_tracing_name
+        def _interpolate_and_fragment_shading(
+            gl_FragCoord: Vec4f,
+            gl_FrontFacing: Bool[Array, ""],
+            gl_PointCoord: Vec2f,
+            keeps: Bool[Array, ""],
+            values: VaryingT,
+            barycentric_screen: Vec3f,
+            barycentric_clip: Vec3f,
+        ) -> tuple[PerFragment, VaryingT]:
+            # PROCESS: Interpolation
+            varying: VaryingT = shader.interpolate(
+                values=values,
+                barycentric_screen=barycentric_screen,
+                barycentric_clip=barycentric_clip,
+            )
+            assert isinstance(varying, tuple)
+
+            # PROCESS: Fragment Processing
+            per_frag: PerFragment
+            extra_fragment_output: VaryingT
+            per_frag, extra_fragment_output = shader.fragment(
+                gl_FragCoord=gl_FragCoord,
+                gl_FrontFacing=gl_FrontFacing,
+                gl_PointCoord=gl_PointCoord,
+                varying=varying,
+                extra=extra,
+            )
+            assert isinstance(per_frag, PerFragment)
+            assert isinstance(extra_fragment_output, tuple)
+
+            # enforce default `gl_FragDepth` when `use_default_depth`
+            per_frag = lax.cond(
+                per_frag.use_default_depth,
+                lambda: per_frag._replace(gl_FragDepth=gl_FragCoord[2]),
+                lambda: per_frag,
+            )
+            assert isinstance(per_frag, PerFragment)
+
+            per_frag = per_frag._replace(keeps=keeps & per_frag.keeps)
+
+            return per_frag, extra_fragment_output
+
+        # END OF `_interpolate_fragment_shading`
+
+        args = jax.vmap(_per_primitive_preprocess)(
             per_primitive,
             varyings,
         )
+        chosen_args = shader.primitive_chooser(*args)
+
+        built_in: PerFragment
+        extra_outputs: VaryingT
+        _f = jax.vmap(_interpolate_and_fragment_shading)
+        built_in, extra_outputs = _f(*chosen_args)
+        assert isinstance(built_in, PerFragment)
+
         gl_Depths = built_in.gl_FragDepth
         keeps = built_in.keeps
+        assert isinstance(gl_Depths, Float[Array, "kept_primitives"])
+        assert isinstance(keeps, Bool[Array, "kept_primitives"])
 
         # PROCESS: Per-Sample Operations (Mixing: depth test + colour blending)
         mixed_output: MixerOutput
