@@ -1,3 +1,4 @@
+from functools import partial
 from typing import NamedTuple
 
 import jax
@@ -5,6 +6,7 @@ import jax.lax as lax
 import jax.numpy as jnp
 from jaxtyping import Array, Bool, Float, Integer, jaxtyped
 
+from .._meta_utils import add_tracing_name
 from ..geometry import Camera, normalise, to_homogeneous
 from ..model import MergedModel
 from ..shader import ID, MixerOutput, PerFragment, PerVertex, Shader
@@ -75,7 +77,8 @@ class PhongReflectionTextureShader(
 
     @staticmethod
     @jaxtyped
-    @jax.jit
+    @partial(jax.jit, inline=True)
+    @add_tracing_name
     def vertex(
         gl_VertexID: ID,
         gl_InstanceID: ID,
@@ -108,7 +111,8 @@ class PhongReflectionTextureShader(
 
     @staticmethod
     @jaxtyped
-    @jax.jit
+    @partial(jax.jit, inline=True)
+    @add_tracing_name
     def interpolate(
         values: PhongReflectionTextureExtraFragmentData,
         barycentric_screen: Vec3f,
@@ -127,7 +131,8 @@ class PhongReflectionTextureShader(
 
     @staticmethod
     @jaxtyped
-    @jax.jit
+    @partial(jax.jit, inline=True)
+    @add_tracing_name
     def fragment(
         gl_FragCoord: Vec4f,
         gl_FrontFacing: Bool[Array, ""],
@@ -186,11 +191,7 @@ class PhongReflectionTextureShader(
                 use_default_depth=built_in.use_default_depth,
             ),
             PhongReflectionTextureExtraFragmentData(
-                colour=lax.cond(
-                    (colour >= 0).all(),
-                    lambda: colour,
-                    lambda: jnp.zeros(3),
-                ),
+                colour=colour,
                 uv=varying.uv,
                 normal=varying.normal,
             ),
@@ -198,7 +199,8 @@ class PhongReflectionTextureShader(
 
     @staticmethod
     @jaxtyped
-    @jax.jit
+    @partial(jax.jit, inline=True)
+    @add_tracing_name
     def mix(
         gl_FragDepth: Float[Array, "primitives"],
         keeps: Bool[Array, "primitives"],

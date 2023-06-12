@@ -6,6 +6,7 @@ import jax.lax as lax
 import jax.numpy as jnp
 from jaxtyping import Array, Float, jaxtyped
 
+from ._meta_utils import add_tracing_name
 from .geometry import Camera, View, Viewport
 from .pipeline import render
 from .shaders.depth import DepthExtraInput, DepthShader
@@ -27,7 +28,13 @@ class Shadow(NamedTuple):
 
     @staticmethod
     @jaxtyped
-    @partial(jax.jit, donate_argnums=(0, ))
+    @partial(
+        jax.jit,
+        static_argnames=("loop_unroll", ),
+        donate_argnums=(0, ),
+        inline=True,
+    )
+    @add_tracing_name
     def render_shadow_map(
         shadow_map: ZBuffer,
         verts: Vertices,
@@ -39,6 +46,7 @@ class Shadow(NamedTuple):
         strength: Colour,
         offset: float = 0.001,
         distance: float = 10.,
+        loop_unroll: int = 1,
     ) -> "Shadow":
         """Render shadow map from light source's point of view.
 
@@ -57,6 +65,7 @@ class Shadow(NamedTuple):
             the light.
           - distance: Distance from the light source to the centre of the
             scene. This is mainly to avoid objects being clipped.
+          - loop_unroll: passed directly to `render`. See `pipeline:render`.
 
         Returns: Updated `Shadow` object with shadow_map updated.
         """
@@ -85,7 +94,14 @@ class Shadow(NamedTuple):
 
         buffers = Buffers(zbuffer=shadow_map, targets=tuple())
         extra = DepthExtraInput(position=verts)
-        shadow_map, _ = render(_camera, DepthShader, buffers, faces, extra)
+        shadow_map, _ = render(
+            _camera,
+            DepthShader,
+            buffers,
+            faces,
+            extra,
+            loop_unroll=loop_unroll,
+        )
         shadow_map = shadow_map + offset
         assert isinstance(shadow_map, ZBuffer)
 
@@ -99,6 +115,7 @@ class Shadow(NamedTuple):
 
     @jaxtyped
     @partial(jax.jit, inline=True)
+    @add_tracing_name
     def get(self, position: Vec2f) -> Float[Array, ""]:
         """Get shadow depth at `position`.
 
@@ -110,13 +127,13 @@ class Shadow(NamedTuple):
         pos: Vec2i = lax.round(position[:2]).astype(int)
         assert isinstance(pos, Vec2i)
 
-        value: Float[Array, ""] = lax.cond(
-            jnp.logical_or(
-                pos < 0,
-                pos >= jnp.asarray(self.shadow_map.shape[:2]),
-            ).any(),
-            lambda: jnp.inf,  # outside shadow map, no shadow
-            lambda: self.shadow_map[pos[0], pos[1]],
+        value: Float[Array, ""]
+        value = self.shadow_map.at[pos[0], pos[1]].get(
+            mode="fill",
+            indices_are_sorted=True,
+            unique_indices=True,
+            # outside shadow map, no shadow
+            fill_value=jnp.inf,
         )
         assert isinstance(value, Float[Array, ""])
 

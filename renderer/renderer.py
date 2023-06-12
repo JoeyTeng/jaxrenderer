@@ -7,6 +7,7 @@ import jax.numpy as jnp
 from jax.tree_util import tree_map
 from jaxtyping import Array, Bool, Integer, Num, jaxtyped
 
+from ._meta_utils import add_tracing_name
 from .geometry import Camera, Projection, View, Viewport, normalise
 from .model import MergedModel, ModelObject, merge_objects
 from .pipeline import render
@@ -100,6 +101,7 @@ class Renderer:
     @staticmethod
     @jaxtyped
     @partial(jax.jit, inline=True)
+    @add_tracing_name
     def create_camera_from_parameters(camera: CameraParameters) -> Camera:
         """Create a camera from camera parameters."""
         eye: Vec3f = jnp.asarray(camera.position, dtype=float)
@@ -140,6 +142,7 @@ class Renderer:
 
     @staticmethod
     @jaxtyped
+    @add_tracing_name
     def create_buffers(
         width: int,
         height: int,
@@ -180,7 +183,13 @@ class Renderer:
 
     @classmethod
     @jaxtyped
-    @partial(jax.jit, static_argnames=("cls", ), donate_argnums=(4, ))
+    @partial(
+        jax.jit,
+        static_argnames=("cls", "loop_unroll"),
+        donate_argnums=(4, ),
+        inline=True,
+    )
+    @add_tracing_name
     def render(
         cls,
         model: MergedModel,
@@ -188,6 +197,7 @@ class Renderer:
         camera: Camera,
         buffers: Buffers,
         shadow_param: Optional[ShadowParameters] = None,
+        loop_unroll: int = 1,
     ) -> Buffers:
         """Render the scene with the given camera.
 
@@ -198,6 +208,7 @@ class Renderer:
           - buffers: the buffers to render the scene with.
           - shadow_param: the shadow parameters to render the scene with. Keep
             it None to disable shadows.
+          - loop_unroll: passed directly to `render`. See `pipeline:render`.
 
         Returns: Buffers, with zbuffer and (coloured image, ).
         """
@@ -249,6 +260,7 @@ class Renderer:
                 buffers=buffers,
                 face_indices=face_indices,
                 extra=extra,
+                loop_unroll=loop_unroll,
             )
             assert isinstance(buffers, Buffers), f"{buffers}"
 
@@ -272,6 +284,7 @@ class Renderer:
                 up=shadow_param.up,
                 strength=shadow_param.strength,
                 offset=shadow_param.offset,
+                loop_unroll=loop_unroll,
             )
             assert isinstance(shadow, Shadow), f"{shadow}"
 
@@ -288,6 +301,7 @@ class Renderer:
                 buffers=buffers,
                 face_indices=face_indices,
                 extra=_extra,
+                loop_unroll=loop_unroll,
             )
             assert isinstance(buffers, Buffers), f"{buffers}"
 
@@ -295,6 +309,12 @@ class Renderer:
 
     @classmethod
     @jaxtyped
+    @partial(
+        jax.jit,
+        static_argnames=("cls", "width", "height", "loop_unroll"),
+        inline=True,
+    )
+    @add_tracing_name
     def get_camera_image(
         cls,
         objects: Sequence[ModelObject],
@@ -305,6 +325,7 @@ class Renderer:
         colour_default: Colour = jnp.array((1., 1., 1.), dtype=jnp.single),
         zbuffer_default: Num[Array, ""] = jnp.array(1, dtype=jnp.single),
         shadow_param: Optional[ShadowParameters] = None,
+        loop_unroll: int = 1,
     ) -> Canvas:
         """Render the scene with the given camera.
 
@@ -319,6 +340,8 @@ class Renderer:
           - colour_default: default colours to fill the image with.
           - zbuffer_default: default zbuffer values to fill with.
           - shadow_param: the shadow parameters to render the scene with. Keep
+            it None to disable shadows.
+          - loop_unroll: passed directly to `render`. See `pipeline:render`.
 
         Returns: Buffers, with zbuffer and (coloured image, ).
         """
@@ -363,6 +386,7 @@ class Renderer:
             camera=_camera,
             buffers=buffers,
             shadow_param=shadow_param,
+            loop_unroll=loop_unroll,
         )
         assert isinstance(canvas, Canvas), f"{canvas}"
 

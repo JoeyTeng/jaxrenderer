@@ -1,8 +1,10 @@
+from functools import partial
 from typing import NamedTuple
 
 import jax
 from jaxtyping import Array, Float, jaxtyped
 
+from .._meta_utils import add_tracing_name
 from ..shader import ID, PerVertex, Shader
 from ..geometry import Camera, to_homogeneous
 from ..types import Vec4f
@@ -33,7 +35,8 @@ class DepthShader(Shader[DepthExtraInput, DepthExtraFragmentData,
 
     @staticmethod
     @jaxtyped
-    @jax.jit
+    @partial(jax.jit, inline=True)
+    @add_tracing_name
     def vertex(
         gl_VertexID: ID,
         gl_InstanceID: ID,
