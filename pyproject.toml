@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "jaxrenderer"
-version = "0.2.1"
+version = "0.3.0"
 description = "Jax implementation of rasterizer renderer."
 authors = ["Joey Teng <joey.teng.dev@gmail.com>"]
 license = "Apache-2.0"
