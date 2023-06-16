@@ -1,9 +1,15 @@
-from typing import Any, NamedTuple, Union
+import sys
+from typing import Any, Generic, TypeVar, Union
 
 import jax
 import jax.lax as lax
 import jax.numpy as jnp
-from jaxtyping import Array, Bool, Float, Integer, Shaped, jaxtyped
+from jaxtyping import Array, Bool, Float, Integer, jaxtyped
+
+if sys.version_info < (3, 11):
+    from typing_extensions import NamedTuple
+else:
+    from typing import NamedTuple
 
 jax.config.update('jax_array', True)
 
@@ -46,10 +52,12 @@ SpecularMap = Float[Array, "textureWidth textureHeight"]
 NormalMap = Float[Array, "textureWidth textureHeight 3"]
 
 
-class DtypeInfo(NamedTuple):
-    # TODO: use Generic NamedTuple when bump to Python 3.11
-    min: Union[jnp.floating[Any], jnp.integer[Any]]
-    max: Union[jnp.floating[Any], jnp.integer[Any]]
+_DtypeT = TypeVar("_DtypeT", bound=Union[jnp.floating[Any], jnp.integer[Any]])
+
+
+class DtypeInfo(NamedTuple, Generic[_DtypeT]):
+    min: _DtypeT
+    max: _DtypeT
     bits: int
     dtype: type
 
@@ -90,8 +98,14 @@ class LightSource(NamedTuple):
     colour: Colour = jax.numpy.ones(3)
 
 
-class Buffers(NamedTuple):
-    """Use lax.full to create buffers and attach here."""
-    # TODO: use Generic NamedTuple when bump to Python 3.11
+_TargetsT = TypeVar("_TargetsT", bound=tuple)
+"""Extra target buffers, must be in shape of (width, height, ...)."""
+
+
+class Buffers(NamedTuple, Generic[_TargetsT]):
+    """Use lax.full to create buffers and attach here.
+
+    targets must be a tuple of arrays with shape of (width, height, ...).
+    """
     zbuffer: ZBuffer
-    targets: tuple[Shaped[Array, "width height ..."]]
+    targets: _TargetsT
