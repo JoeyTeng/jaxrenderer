@@ -38,6 +38,7 @@ numpy = "^1.22.0"
 jaxlib = {version = ">=0.3.25,<5.0.0", source = "jax"}
 jaxtyping = "^0.2.19"
 importlib-metadata = "^6.6.0"
+typing_extensions = "^4.3.0"
 
 
 [tool.poetry.group.dev.dependencies]
