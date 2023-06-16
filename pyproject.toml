@@ -32,7 +32,7 @@ include = [
 
 
 [tool.poetry.dependencies]
-python = "^3.10"
+python = "^3.9"
 jax = ">=0.3.25,<5.0.0"
 numpy = "^1.22.0"
 jaxlib = {version = ">=0.3.25,<5.0.0", source = "jax"}
