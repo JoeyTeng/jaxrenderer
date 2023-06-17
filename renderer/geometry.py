@@ -1,6 +1,8 @@
+from __future__ import annotations  # tolerate "subscriptable 'type' for < 3.9
+
 import enum
 from functools import partial
-from typing import Any, NamedTuple, Optional, Union
+from typing import NamedTuple, Optional, Union
 
 import jax
 import jax.lax as lax
@@ -8,7 +10,7 @@ import jax.numpy as jnp
 from jaxtyping import Array, Float, Integer, Num, jaxtyped
 
 from ._meta_utils import add_tracing_name
-from .types import Triangle2Df, Vec2f, Vec3f, Vec4f
+from .types import JaxFloating, Triangle2Df, Vec2f, Vec3f, Vec4f
 
 # Transform matrix that takes a batch of homogeneous 3D vertices and transform
 # them into 2D cartesian vertices in screen space + Z value (making it 3D)
@@ -597,10 +599,10 @@ class Camera(NamedTuple):
     @partial(jax.jit, inline=True)
     @add_tracing_name
     def perspective_projection_matrix(
-        fovy: jnp.floating[Any],
-        aspect: jnp.floating[Any],
-        z_near: jnp.floating[Any],
-        z_far: jnp.floating[Any],
+        fovy: JaxFloating,
+        aspect: JaxFloating,
+        z_near: JaxFloating,
+        z_far: JaxFloating,
     ) -> Projection:
         """Create a projection matrix to map the model in the camera frame (eye
             coordinates) onto the viewing volume (clip coordinates), using
@@ -672,12 +674,12 @@ class Camera(NamedTuple):
     @partial(jax.jit, inline=True)
     @add_tracing_name
     def orthographic_projection_matrix(
-        left: jnp.floating[Any],
-        right: jnp.floating[Any],
-        bottom: jnp.floating[Any],
-        top: jnp.floating[Any],
-        z_near: jnp.floating[Any],
-        z_far: jnp.floating[Any],
+        left: JaxFloating,
+        right: JaxFloating,
+        bottom: JaxFloating,
+        top: JaxFloating,
+        z_near: JaxFloating,
+        z_far: JaxFloating,
     ) -> Projection:
         """Create a projection matrix to map the model in the camera frame (eye
             coordinates) onto the viewing volume (clip coordinates), using

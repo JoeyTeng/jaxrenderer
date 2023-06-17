@@ -1,14 +1,10 @@
 import functools
 import inspect
-import sys
 from typing import Callable, TypeVar
 
-if sys.version_info < (3, 10):
-    from typing_extensions import ParamSpec
-else:
-    from typing import ParamSpec
-
 import jax
+
+from ._backport import ParamSpec
 
 ArgT = ParamSpec("ArgT")
 RetT = TypeVar("RetT")

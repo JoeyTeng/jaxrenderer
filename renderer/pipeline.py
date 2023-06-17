@@ -1,3 +1,5 @@
+from __future__ import annotations  # tolerate "subscriptable 'type' for < 3.9
+
 from functools import partial
 from typing import Any, NamedTuple
 
@@ -8,6 +10,7 @@ from jax import lax
 from jax.tree_util import tree_map
 from jaxtyping import Array, Bool, Float, Integer, Num, jaxtyped
 
+from ._backport import Tuple, TypeAlias
 from ._meta_utils import add_tracing_name
 from .geometry import Camera, Interpolation, Viewport, interpolate
 from .shader import (ID, MixedExtraT, MixerOutput, PerFragment, PerVertex,
@@ -112,7 +115,7 @@ def _postprocessing(
 
         assert isinstance(coord, Vec2i), f"expected Vec2i, got {coord}"
 
-        ReturnT = tuple[  #
+        ReturnT = Tuple[  #
             Float[Array, "kept_primitives 4"],  #
             Bool[Array, "kept_primitives"],  #
             Float[Array, "kept_primitives 2"],  #

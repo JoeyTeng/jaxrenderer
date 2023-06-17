@@ -1,15 +1,11 @@
-import sys
-from typing import Any, Generic, TypeVar, Union
+from typing import Generic, TypeVar, Union
 
 import jax
 import jax.lax as lax
 import jax.numpy as jnp
 from jaxtyping import Array, Bool, Float, Integer, jaxtyped
 
-if sys.version_info < (3, 11):
-    from typing_extensions import NamedTuple
-else:
-    from typing import NamedTuple
+from ._backport import JaxFloating, JaxInteger, NamedTuple, TypeAlias
 
 jax.config.update('jax_array', True)
 
@@ -17,42 +13,40 @@ TRUE_ARRAY: Bool[Array, ""] = lax.full((), True, dtype=jnp.bool_)
 FALSE_ARRAY: Bool[Array, ""] = lax.full((), False, dtype=jnp.bool_)
 INF_ARRAY: Float[Array, ""] = lax.full((), jnp.inf)
 
-Index = Integer[Array, ""]
+Index: TypeAlias = Integer[Array, ""]
 
-CanvasMask = Bool[Array, "#width #height"]
-BatchCanvasMask = Bool[Array, "#batch #width #height"]
-Canvas = Float[Array, "width height channel"]
-ZBuffer = Float[Array, "width height"]
-Colour = Float[Array, "channel"]
-# triangle thus 3 "colour"s
-TriangleColours = Float[Array, "3 channel"]
-Vec2i = Integer[Array, "2"]
-Vec3i = Integer[Array, "3"]
-Vec2f = Float[Array, "2"]
-Vec3f = Float[Array, "3"]
+CanvasMask: TypeAlias = Bool[Array, "#width #height"]
+BatchCanvasMask: TypeAlias = Bool[Array, "#batch #width #height"]
+Canvas: TypeAlias = Float[Array, "width height channel"]
+ZBuffer: TypeAlias = Float[Array, "width height"]
+Colour: TypeAlias = Float[Array, "channel"]
+
+Vec2i: TypeAlias = Integer[Array, "2"]
+Vec3i: TypeAlias = Integer[Array, "3"]
+Vec2f: TypeAlias = Float[Array, "2"]
+Vec3f: TypeAlias = Float[Array, "3"]
 # usually used only for 3D homogeneous coordinates
-Vec4f = Float[Array, "4"]
+Vec4f: TypeAlias = Float[Array, "4"]
 # 3 vertices, with each vertex defined in Vec2i in screen(canvas) space
-Triangle2D = Integer[Array, "3 2"]
+Triangle2D: TypeAlias = Integer[Array, "3 2"]
 # 3 vertices, with each vertex defined in Vec2f
-Triangle2Df = Float[Array, "3 2"]
+Triangle2Df: TypeAlias = Float[Array, "3 2"]
 # 3 vertices, each vertex defined in Vec2i in 3d (world/model) space + Float z
-Triangle = Float[Array, "3 4"]
+Triangle: TypeAlias = Float[Array, "3 4"]
 # Barycentric coordinates has 3 components
-TriangleBarycentric = Float[Array, "3 3"]
+TriangleBarycentric: TypeAlias = Float[Array, "3 3"]
 
 # each face has 3 vertices
-FaceIndices = Integer[Array, "faces 3"]
+FaceIndices: TypeAlias = Integer[Array, "faces 3"]
 # each vertex is defined by 3 float numbers, x-y-z
-Vertices = Float[Array, "vertices 3"]
-Normals = Float[Array, "normals 3"]
-UVCoordinates = Float[Array, "uv_counts 2"]
-Texture = Float[Array, "textureWidth textureHeight channel"]
-SpecularMap = Float[Array, "textureWidth textureHeight"]
-NormalMap = Float[Array, "textureWidth textureHeight 3"]
+Vertices: TypeAlias = Float[Array, "vertices 3"]
+Normals: TypeAlias = Float[Array, "normals 3"]
+UVCoordinates: TypeAlias = Float[Array, "uv_counts 2"]
+Texture: TypeAlias = Float[Array, "textureWidth textureHeight channel"]
+SpecularMap: TypeAlias = Float[Array, "textureWidth textureHeight"]
+NormalMap: TypeAlias = Float[Array, "textureWidth textureHeight 3"]
 
-
-_DtypeT = TypeVar("_DtypeT", bound=Union[jnp.floating[Any], jnp.integer[Any]])
+_DtypeT = TypeVar("_DtypeT", bound=Union[JaxFloating, JaxInteger])
 
 
 class DtypeInfo(NamedTuple, Generic[_DtypeT]):
