@@ -57,3 +57,8 @@
 3. Expose `loop_unroll` static option to allow unrolling several operations (row rendering) within a single iteration of the outmost loop (iterating along first axis of the canvas). This may be useful in some cases for performance improvement, but careful benchmarking is needed to determine the optimal value. The default value is `1` (no unrolling) as it is the most general case in larger canvases (benchmarked on `960x540` using [GPU T4 in Colab](https://colab.research.google.com/drive/1xhkYNz5WjvUCjQWpp72CLf9SIy3i5PnN)).
 4. Bump the minimum Python version to Python 3.10
 5. Lower the minimum jax & jaxlib version to 0.3.25.
+
+## 0.3.1
+
+1. Lower minimum Python version to 3.8
+2. Introducing `type_extensions` package and improved typing annotations.
