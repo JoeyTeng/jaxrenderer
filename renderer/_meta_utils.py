@@ -1,8 +1,10 @@
 import functools
 import inspect
-from typing import Callable, ParamSpec, TypeVar
+from typing import Callable, TypeVar
 
 import jax
+
+from ._backport import ParamSpec
 
 ArgT = ParamSpec("ArgT")
 RetT = TypeVar("RetT")

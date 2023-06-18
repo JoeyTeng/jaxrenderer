@@ -1,5 +1,7 @@
+from __future__ import annotations  # tolerate "subscriptable 'type' for < 3.9
+
 from functools import partial
-from typing import NamedTuple, Optional, Sequence, Union
+from typing import Optional
 
 import jax
 import jax.experimental.checkify as checkify
@@ -9,13 +11,14 @@ from jax.tree_util import tree_map
 from jaxtyping import (Array, Bool, Float, Integer, Num, PyTree, Shaped,
                        jaxtyped)
 
+from ._backport import NamedTuple, Sequence, Tuple, TypeAlias
 from ._meta_utils import add_tracing_name
 from .geometry import Camera, transform_matrix_from_rotation
 from .types import (FALSE_ARRAY, FaceIndices, Normals, SpecularMap, Texture,
                     UVCoordinates, Vec3f, Vec4f, Vertices)
 from .value_checker import index_in_bound
 
-ModelMatrix = Float[Array, "4 4"]
+ModelMatrix: TypeAlias = Float[Array, "4 4"]
 
 
 class Model(NamedTuple):
@@ -127,14 +130,14 @@ class Model(NamedTuple):
         )
 
 
-VertT = Num[Array, "_dim ..."]
-VertsT = Union[list[VertT], tuple[VertT, ...]]
-FaceIndicesT = Num[Array, "_faces 3"]
-FaceIndicessT = Union[list[FaceIndicesT], tuple[FaceIndicesT, ...]]
+VertT: TypeAlias = Num[Array, "_dim ..."]
+VertsT: TypeAlias = Sequence[VertT]
+FaceIndicesT: TypeAlias = Num[Array, "_faces 3"]
+FaceIndicessT: TypeAlias = Sequence[FaceIndicesT]
 
-MapT = Num[Array, "_width _height ..."]
-MapsT = Union[list[MapT], tuple[MapT, ...]]
-Shape2DT = tuple[Integer[Array, ""], Integer[Array, ""]]
+MapT: TypeAlias = Num[Array, "_width _height ..."]
+MapsT: TypeAlias = Sequence[MapT]
+Shape2DT: TypeAlias = Tuple[Integer[Array, ""], Integer[Array, ""]]
 """Shape of first two components of a map, i.e., (width, height)."""
 
 

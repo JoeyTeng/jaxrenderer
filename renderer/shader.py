@@ -1,3 +1,5 @@
+from __future__ import annotations  # tolerate "subscriptable 'type' for < 3.9
+
 from abc import ABC, abstractmethod
 from functools import partial
 from typing import Generic, NamedTuple, TypeVar
@@ -8,6 +10,7 @@ import jax.numpy as jnp
 from jax.tree_util import Partial, tree_map
 from jaxtyping import Array, Bool, Float, Integer, PyTree, Shaped, jaxtyped
 
+from ._backport import Tuple
 from ._meta_utils import add_tracing_name
 from .geometry import Camera, Interpolation, interpolate
 from .types import FALSE_ARRAY, INF_ARRAY, TRUE_ARRAY, Vec2f, Vec3f, Vec4f
@@ -48,13 +51,13 @@ class PerFragment(NamedTuple):
 
 VaryingT = TypeVar(
     "VaryingT",
-    bound=tuple[Shaped[Array, "..."], ...],
+    bound=Tuple[Shaped[Array, "..."], ...],
 )
 """The user-defined input and second (extra) output of fragment shader."""
 
 MixedExtraT = TypeVar(
     "MixedExtraT",
-    bound=tuple[Shaped[Array, "..."], ...],
+    bound=Tuple[Shaped[Array, "..."], ...],
 )
 """The user-defined second (extra) output of mix shader."""
 

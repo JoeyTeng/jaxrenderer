@@ -1,3 +1,5 @@
+from __future__ import annotations  # tolerate "subscriptable 'type' for < 3.9
+
 from typing import NamedTuple, NewType, Optional, Union
 
 import jax
@@ -5,6 +7,7 @@ import jax.lax as lax
 import jax.numpy as jnp
 from jaxtyping import Array, Bool, Float, jaxtyped
 
+from ._backport import replace_dict
 from .model import Model, ModelObject
 from .shapes.capsule import UpAxis, create_capsule
 from .shapes.cube import create_cube
@@ -180,6 +183,19 @@ class Scene(NamedTuple):
         return self._replace(objects=objects)
 
     @jaxtyped
+    def _replace_obj(self, object_id: GUID, new_obj: ModelObject) -> "Scene":
+        """Replace an object in the scene.
+
+        Parameters:
+          - object_id: the unique identifier of the object to replace.
+          - new_obj: the new object.
+        """
+        return self._replace(objects=replace_dict(
+            self.objects,
+            {object_id: new_obj},
+        ))
+
+    @jaxtyped
     def set_object_position(
         self,
         object_id: GUID,
@@ -196,7 +212,7 @@ class Scene(NamedTuple):
 
         new_obj = self.objects[object_id].replace_with_position(position)
 
-        return self._replace(objects=self.objects | {object_id: new_obj})
+        return self._replace_obj(object_id, new_obj)
 
     @jaxtyped
     def set_object_orientation(
@@ -226,7 +242,7 @@ class Scene(NamedTuple):
             rotation_matrix=rotation_matrix,
         )
 
-        return self._replace(objects=self.objects | {object_id: new_obj})
+        return self._replace_obj(object_id, new_obj)
 
     @jaxtyped
     def set_object_local_scaling(
@@ -245,7 +261,7 @@ class Scene(NamedTuple):
 
         new_obj = self.objects[object_id].replace_with_local_scaling(scaling)
 
-        return self._replace(objects=self.objects | {object_id: new_obj})
+        return self._replace_obj(object_id, new_obj)
 
     @jaxtyped
     def set_object_double_sided(
@@ -262,4 +278,4 @@ class Scene(NamedTuple):
         new_obj = self.objects[object_id].replace_with_double_sided(
             jnp.asarray(double_sided))
 
-        return self._replace(objects=self.objects | {object_id: new_obj})
+        return self._replace_obj(object_id, new_obj)
