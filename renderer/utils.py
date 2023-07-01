@@ -53,7 +53,7 @@ def merge_canvases(
 
 
 @jaxtyped
-@partial(jax.jit, inline=True)
+@partial(jax.jit, inline=True, static_argnames=("flip_vertical", ))
 @add_tracing_name
 def transpose_for_display(
     matrix: Num[Array, "fst snd *channel"],
