@@ -50,6 +50,10 @@ pillow = "^9.4.0"
 importlib-resources = "^5.12.0"
 
 
+[tool.poetry.group.test.dependencies]
+pytest = "^7.0.0"
+
+
 [[tool.poetry.source]]
 name = "jax"
 url = "https://storage.googleapis.com/jax-releases/jax_releases.html"
@@ -61,5 +65,11 @@ priority = "explicit"
 
 
 [build-system]
-requires = ["poetry-core"]
+requires = ["poetry-core>=1.0.0"]
 build-backend = "poetry.core.masonry.api"
+
+
+[tool.pytest.ini_options]
+addopts = [
+    "--import-mode=importlib",
+]
