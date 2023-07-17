@@ -65,7 +65,7 @@ def transpose_for_display(
     be at bottom-left. Thus, the correct way to display the matrix is to using
     tools like matplotlib is to specify `origin="lower"`.
     To be compatible with PyTinyrenderer and most image processing programs,
-    the default behavior is to flip vertically.
+    the default behaviour is to flip vertically.
     """
     mat = jnp.swapaxes(matrix, 0, 1)
     assert isinstance(mat, Num[Array, "snd fst *channel"])
