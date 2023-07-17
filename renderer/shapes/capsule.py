@@ -6,8 +6,14 @@ import jax.numpy as jnp
 from jaxtyping import Array, Float, Integer, jaxtyped
 
 from ..model import Model
-from ..types import (FaceIndices, Normals, SpecularMap, Texture, UVCoordinates,
-                     Vertices)
+from ..types import (
+    FaceIndices,
+    Normals,
+    SpecularMap,
+    Texture,
+    UVCoordinates,
+    Vertices,
+)
 
 with jax.ensure_compile_time_eval():
     _verts: Vertices = jnp.array((

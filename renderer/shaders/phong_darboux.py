@@ -10,11 +10,27 @@ from jax.tree_util import Partial
 from jaxtyping import Array, Bool, Float, Integer, jaxtyped
 
 from .._meta_utils import add_tracing_name
-from ..geometry import (Camera, Interpolation, interpolate, normalise,
-                        to_cartesian, to_homogeneous)
+from ..geometry import (
+    Camera,
+    Interpolation,
+    interpolate,
+    normalise,
+    to_cartesian,
+    to_homogeneous,
+)
 from ..shader import ID, MixerOutput, PerFragment, PerVertex, Shader
-from ..types import (Colour, FaceIndices, LightSource, NormalMap, Texture,
-                     Triangle, Vec2f, Vec2i, Vec3f, Vec4f)
+from ..types import (
+    Colour,
+    FaceIndices,
+    LightSource,
+    NormalMap,
+    Texture,
+    Triangle,
+    Vec2f,
+    Vec2i,
+    Vec3f,
+    Vec4f,
+)
 
 jax.config.update('jax_array', True)
 

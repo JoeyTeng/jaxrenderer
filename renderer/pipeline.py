@@ -4,19 +4,37 @@ from functools import partial
 from typing import Any, NamedTuple
 
 import jax
+from jax import lax
 import jax.lax as lax
 import jax.numpy as jnp
-from jax import lax
 from jax.tree_util import tree_map
 from jaxtyping import Array, Bool, Float, Integer, Num, jaxtyped
 
 from ._backport import Tuple, TypeAlias
 from ._meta_utils import add_tracing_name
 from .geometry import Camera, Interpolation, Viewport, interpolate
-from .shader import (ID, MixedExtraT, MixerOutput, PerFragment, PerVertex,
-                     Shader, ShaderExtraInputT, VaryingT)
-from .types import (FALSE_ARRAY, Buffers, CanvasMask, FaceIndices, Triangle,
-                    Vec2f, Vec2i, Vec3f, Vec4f, ZBuffer)
+from .shader import (
+    ID,
+    MixedExtraT,
+    MixerOutput,
+    PerFragment,
+    PerVertex,
+    Shader,
+    ShaderExtraInputT,
+    VaryingT,
+)
+from .types import (
+    FALSE_ARRAY,
+    Buffers,
+    CanvasMask,
+    FaceIndices,
+    Triangle,
+    Vec2f,
+    Vec2i,
+    Vec3f,
+    Vec4f,
+    ZBuffer,
+)
 
 jax.config.update('jax_array', True)
 

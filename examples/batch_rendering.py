@@ -3,10 +3,20 @@
 import jax
 import jax.numpy as jnp
 
-from renderer import (CameraParameters, LightParameters, Renderer, Scene,
-                      ShadowParameters, Texture, UpAxis, batch_models,
-                      merge_objects, quaternion, rotation_matrix,
-                      transpose_for_display)
+from renderer import (
+    CameraParameters,
+    LightParameters,
+    Renderer,
+    Scene,
+    ShadowParameters,
+    Texture,
+    UpAxis,
+    batch_models,
+    merge_objects,
+    quaternion,
+    rotation_matrix,
+    transpose_for_display,
+)
 
 # PROCESS: Set up models and objects
 

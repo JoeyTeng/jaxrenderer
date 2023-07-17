@@ -2,9 +2,18 @@ import jax
 import jax.lax as lax
 import jax.numpy as jnp
 
-from renderer import (CameraParameters, LightParameters, Renderer, Scene,
-                      ShadowParameters, Texture, UpAxis, Vec3f,
-                      build_texture_from_PyTinyrenderer, transpose_for_display)
+from renderer import (
+    CameraParameters,
+    LightParameters,
+    Renderer,
+    Scene,
+    ShadowParameters,
+    Texture,
+    UpAxis,
+    Vec3f,
+    build_texture_from_PyTinyrenderer,
+    transpose_for_display,
+)
 
 scene: Scene = Scene()
 

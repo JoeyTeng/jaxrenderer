@@ -13,8 +13,16 @@ from ..geometry import Camera, normalise, normalise_homogeneous, to_homogeneous
 from ..model import MergedModel
 from ..shader import ID, MixerOutput, PerFragment, PerVertex, Shader
 from ..shadow import Shadow
-from ..types import (Colour, LightSource, SpecularMap, Texture, Vec2f, Vec2i,
-                     Vec3f, Vec4f)
+from ..types import (
+    Colour,
+    LightSource,
+    SpecularMap,
+    Texture,
+    Vec2f,
+    Vec2i,
+    Vec3f,
+    Vec4f,
+)
 
 jax.config.update('jax_array', True)
 

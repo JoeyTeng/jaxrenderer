@@ -15,8 +15,10 @@ def add_tracing_name(func: Callable[ArgT, RetT]) -> Callable[ArgT, RetT]:
 
     members: dict[str, str]
     members = dict(inspect.getmembers(func, lambda v: isinstance(v, str)))
-    annotation: str = (f"{members.get('__module__', '')}"
-                       f":{members.get('__qualname__', '')}")
+    annotation: str = (
+        f"{members.get('__module__', '')}"
+        f":{members.get('__qualname__', '')}"
+    )
 
     @functools.wraps(func)
     def wrapper(*args: ArgT.args, **kwargs: ArgT.kwargs) -> RetT:

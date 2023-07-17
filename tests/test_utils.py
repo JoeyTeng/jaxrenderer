@@ -4,9 +4,9 @@ from functools import partial
 
 import jax.numpy as jnp
 import jax.random as random
+from jaxtyping import Array, Shaped, jaxtyped
 import numpy as np
 import pytest
-from jaxtyping import Array, Shaped, jaxtyped
 
 from renderer.utils import transpose_for_display
 

@@ -12,8 +12,16 @@ from .._meta_utils import add_tracing_name
 from ..geometry import Camera, normalise, to_homogeneous
 from ..model import MergedModel
 from ..shader import ID, MixerOutput, PerFragment, PerVertex, Shader
-from ..types import (Colour, LightSource, SpecularMap, Texture, Vec2f, Vec2i,
-                     Vec3f, Vec4f)
+from ..types import (
+    Colour,
+    LightSource,
+    SpecularMap,
+    Texture,
+    Vec2f,
+    Vec2i,
+    Vec3f,
+    Vec4f,
+)
 
 jax.config.update('jax_array', True)
 

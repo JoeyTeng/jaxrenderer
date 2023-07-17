@@ -3,8 +3,8 @@ from typing import NamedTuple
 import jax
 import jax.lax as lax
 import jax.numpy as jnp
-import matplotlib.pyplot as plt
 from jaxtyping import Array, Bool, Float, jaxtyped
+import matplotlib.pyplot as plt
 
 from renderer.geometry import Camera, normalise, to_homogeneous
 from renderer.pipeline import render

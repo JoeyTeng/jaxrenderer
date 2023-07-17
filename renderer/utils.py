@@ -4,8 +4,8 @@ from functools import partial
 from typing import Sequence, Union
 
 import jax
-import jax.numpy as jnp
 from jax import lax
+import jax.numpy as jnp
 from jaxtyping import Array, Integer, Num, Shaped, jaxtyped
 
 from ._meta_utils import add_tracing_name
@@ -53,7 +53,7 @@ def merge_canvases(
 
 
 @jaxtyped
-@partial(jax.jit, inline=True, static_argnames=("flip_vertical", ))
+@partial(jax.jit, inline=True, static_argnames=("flip_vertical",))
 @add_tracing_name
 def transpose_for_display(
     matrix: Num[Array, "fst snd *channel"],

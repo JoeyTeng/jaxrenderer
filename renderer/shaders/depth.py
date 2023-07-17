@@ -7,8 +7,8 @@ import jax
 from jaxtyping import Array, Float, jaxtyped
 
 from .._meta_utils import add_tracing_name
-from ..shader import ID, PerVertex, Shader
 from ..geometry import Camera, to_homogeneous
+from ..shader import ID, PerVertex, Shader
 from ..types import Vec4f
 
 jax.config.update('jax_array', True)
@@ -31,7 +31,8 @@ class DepthExtraMixerOutput(NamedTuple):
     pass
 
 
-class DepthShader(Shader[DepthExtraInput, DepthExtraFragmentData,
+class DepthShader(Shader[DepthExtraInput,
+                         DepthExtraFragmentData,
                          DepthExtraMixerOutput]):
     """Depth Shading."""
 

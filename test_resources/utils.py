@@ -1,15 +1,22 @@
-import re
 from dataclasses import dataclass
+import re
 from typing import List
 
+from PIL import Image
 import jax
 import jax.numpy as jnp
 from jaxtyping import jaxtyped
 import numpy as np
-from PIL import Image
 
-from renderer.types import (FaceIndices, Normals, Texture, UVCoordinates,
-                            Vec2f, Vec3f, Vertices)
+from renderer.types import (
+    FaceIndices,
+    Normals,
+    Texture,
+    UVCoordinates,
+    Vec2f,
+    Vec3f,
+    Vertices,
+)
 
 jax.config.update('jax_array', True)
 

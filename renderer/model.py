@@ -8,14 +8,31 @@ import jax.experimental.checkify as checkify
 import jax.lax as lax
 import jax.numpy as jnp
 from jax.tree_util import tree_map
-from jaxtyping import (Array, Bool, Float, Integer, Num, PyTree, Shaped,
-                       jaxtyped)
+from jaxtyping import (
+    Array,
+    Bool,
+    Float,
+    Integer,
+    Num,
+    PyTree,
+    Shaped,
+    jaxtyped,
+)
 
 from ._backport import NamedTuple, Sequence, Tuple, TypeAlias
 from ._meta_utils import add_tracing_name
 from .geometry import Camera, transform_matrix_from_rotation
-from .types import (FALSE_ARRAY, FaceIndices, Normals, SpecularMap, Texture,
-                    UVCoordinates, Vec3f, Vec4f, Vertices)
+from .types import (
+    FALSE_ARRAY,
+    FaceIndices,
+    Normals,
+    SpecularMap,
+    Texture,
+    UVCoordinates,
+    Vec3f,
+    Vec4f,
+    Vertices,
+)
 from .value_checker import index_in_bound
 
 ModelMatrix: TypeAlias = Float[Array, "4 4"]

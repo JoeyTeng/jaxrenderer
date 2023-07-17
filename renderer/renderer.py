@@ -13,13 +13,24 @@ from ._meta_utils import add_tracing_name
 from .geometry import Camera, Projection, View, Viewport, normalise
 from .model import MergedModel, ModelObject, merge_objects
 from .pipeline import render
-from .shaders.phong_reflection import (PhongReflectionTextureExtraInput,
-                                       PhongReflectionTextureShader)
+from .shaders.phong_reflection import (
+    PhongReflectionTextureExtraInput,
+    PhongReflectionTextureShader,
+)
 from .shaders.phong_reflection_shadow import (
-    PhongReflectionShadowTextureExtraInput, PhongReflectionShadowTextureShader)
+    PhongReflectionShadowTextureExtraInput,
+    PhongReflectionShadowTextureShader,
+)
 from .shadow import Shadow
-from .types import (Buffers, Canvas, Colour, DtypeInfo, LightSource, Vec3f,
-                    ZBuffer)
+from .types import (
+    Buffers,
+    Canvas,
+    Colour,
+    DtypeInfo,
+    LightSource,
+    Vec3f,
+    ZBuffer,
+)
 
 DoubleSidedFaces = Bool[Array, "faces"]
 """Whether to render both sides of each face (triangle primitive)."""

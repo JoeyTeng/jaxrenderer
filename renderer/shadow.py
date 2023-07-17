@@ -10,8 +10,16 @@ from ._meta_utils import add_tracing_name
 from .geometry import Camera, View, Viewport
 from .pipeline import render
 from .shaders.depth import DepthExtraInput, DepthShader
-from .types import (Buffers, Colour, FaceIndices, Vec2f, Vec2i, Vec3f,
-                    Vertices, ZBuffer)
+from .types import (
+    Buffers,
+    Colour,
+    FaceIndices,
+    Vec2f,
+    Vec2i,
+    Vec3f,
+    Vertices,
+    ZBuffer,
+)
 
 
 class Shadow(NamedTuple):
@@ -30,8 +38,8 @@ class Shadow(NamedTuple):
     @jaxtyped
     @partial(
         jax.jit,
-        static_argnames=("loop_unroll", ),
-        donate_argnums=(0, ),
+        static_argnames=("loop_unroll",),
+        donate_argnums=(0,),
         inline=True,
     )
     @add_tracing_name
