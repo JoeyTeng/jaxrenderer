@@ -8,6 +8,21 @@
 # 'pre-commit run --all'
 
 repos:
+  - repo: https://github.com/PyCQA/isort
+    rev: "5.12.0"
+    hooks:
+      - id: isort
+        files: (renderer/|examples/|test_resources/tests/).*.py$
+        args:
+          [
+            --only-modified,
+            --combine-star,
+            --order-by-type,
+            --use-parentheses,
+            --case-sensitive,
+            --force-sort-within-sections,
+          ]
+
   - repo: https://github.com/streetsidesoftware/cspell-cli
     rev: "v6.31.0"
     hooks:
