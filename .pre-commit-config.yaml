@@ -49,6 +49,15 @@ repos:
             --force-sort-within-sections,
           ]
 
+  - repo: https://github.com/psf/black
+    # The `refs/tags/<tag>:refs/tags/<tag>` is needed for black's required-version to work:
+    # https://github.com/psf/black/issues/2493#issuecomment-1081987650
+    rev: "refs/tags/23.7.0:refs/tags/23.7.0"
+    hooks:
+      - id: black
+        files: (renderer/|examples/|test_resources/tests/).*.py$
+        language_version: python3.11
+
   - repo: https://github.com/streetsidesoftware/cspell-cli
     rev: "v6.31.0"
     hooks:
