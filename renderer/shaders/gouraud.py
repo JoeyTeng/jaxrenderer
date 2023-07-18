@@ -12,7 +12,7 @@ from ..geometry import Camera, normalise, to_homogeneous
 from ..shader import ID, PerFragment, PerVertex, Shader
 from ..types import Colour, LightSource, Vec2f, Vec3f, Vec4f
 
-jax.config.update('jax_array', True)
+jax.config.update("jax_array", True)
 
 
 class GouraudExtraInput(NamedTuple):
@@ -24,6 +24,7 @@ class GouraudExtraInput(NamedTuple):
       - normal: in world space, of each vertex.
       - light: parallel light source, shared by all vertices.
     """
+
     position: Float[Array, "vertices 3"]  # in world space
     colour: Float[Array, "vertices 3"]
     normal: Float[Array, "vertices 3"]  # in world space
@@ -36,11 +37,13 @@ class GouraudExtraFragmentData(NamedTuple):
 
 class GouraudExtraMixerOutput(NamedTuple):
     """When render to only one target, for simplicity."""
+
     canvas: Colour
 
 
-class GouraudShader(Shader[GouraudExtraInput, GouraudExtraFragmentData,
-                           GouraudExtraMixerOutput]):
+class GouraudShader(
+    Shader[GouraudExtraInput, GouraudExtraFragmentData, GouraudExtraMixerOutput]
+):
     """Gouraud Shading with simple parallel lighting."""
 
     @staticmethod
@@ -98,11 +101,13 @@ class GouraudShader(Shader[GouraudExtraInput, GouraudExtraFragmentData,
 
         return (
             PerFragment(
-                keeps=jnp.array((
-                    built_in.keeps,
-                    gl_FrontFacing,
-                    (varying.colour >= 0).all(),
-                )).all(),
+                keeps=jnp.array(
+                    (
+                        built_in.keeps,
+                        gl_FrontFacing,
+                        (varying.colour >= 0).all(),
+                    )
+                ).all(),
                 use_default_depth=built_in.use_default_depth,
             ),
             varying,

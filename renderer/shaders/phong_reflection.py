@@ -23,7 +23,7 @@ from ..types import (
     Vec4f,
 )
 
-jax.config.update('jax_array', True)
+jax.config.update("jax_array", True)
 
 
 class PhongReflectionTextureExtraInput(NamedTuple):
@@ -44,6 +44,7 @@ class PhongReflectionTextureExtraInput(NamedTuple):
       - diffuse: diffuse strength, shared by all vertices.
       - specular: specular strength, shared by all vertices.
     """
+
     position: Float[Array, "vertices 3"]  # in world space
     normal: Float[Array, "vertices 3"]  # in world space
     uv: Float[Array, "vertices 2"]  # in texture space
@@ -68,6 +69,7 @@ class PhongReflectionTextureExtraFragmentData(NamedTuple):
       - texture_index: index of texture map for each fragment; From VS to FS.
       - colour: colour when passing from FS to mixer.
     """
+
     normal: Vec3f = jnp.zeros(3)
     uv: Vec2f = jnp.zeros(2)
     texture_index: Integer[Array, ""] = jnp.array(0)
@@ -76,13 +78,17 @@ class PhongReflectionTextureExtraFragmentData(NamedTuple):
 
 class PhongReflectionTextureExtraMixerOutput(NamedTuple):
     """When render to only one target, for simplicity."""
+
     canvas: Colour
 
 
 class PhongReflectionTextureShader(
-        Shader[PhongReflectionTextureExtraInput,
-               PhongReflectionTextureExtraFragmentData,
-               PhongReflectionTextureExtraMixerOutput]):
+    Shader[
+        PhongReflectionTextureExtraInput,
+        PhongReflectionTextureExtraFragmentData,
+        PhongReflectionTextureExtraMixerOutput,
+    ]
+):
     """PhongReflection Shading with simple parallel lighting and texture."""
 
     @staticmethod
@@ -179,21 +185,23 @@ class PhongReflectionTextureShader(
         diffuse: float = jnp.maximum(lax.dot(normal, light_dir), 0)
         # as `light_dir * -1` should be used here, if
         # using `light_dir - 2 * diffuse * normal`
-        reflected_light: Vec3f = normalise(2 * lax.dot(normal, light_dir) *
-                                           normal - light_dir)
+        reflected_light: Vec3f = normalise(
+            2 * lax.dot(normal, light_dir) * normal - light_dir
+        )
         assert isinstance(reflected_light, Vec3f)
 
         specular: float = lax.pow(
-            lax.max(reflected_light[2], 0.),
+            lax.max(reflected_light[2], 0.0),
             extra.specular_map[uv[0], uv[1]],
         )
 
         # compute colour
         colour: Colour = (
-            extra.ambient * texture_colour +
-            (extra.diffuse * diffuse + extra.specular * specular) *
+            extra.ambient * texture_colour
+            + (extra.diffuse * diffuse + extra.specular * specular) *
             # intensity * light colour * texture colour
-            extra.light.colour * texture_colour)
+            extra.light.colour * texture_colour
+        )
 
         return (
             PerFragment(
@@ -220,8 +228,7 @@ class PhongReflectionTextureShader(
         extra_output: PhongReflectionTextureExtraFragmentData
         mixer_output, extra_output = Shader.mix(gl_FragDepth, keeps, extra)
         assert isinstance(mixer_output, MixerOutput)
-        assert isinstance(extra_output,
-                          PhongReflectionTextureExtraFragmentData)
+        assert isinstance(extra_output, PhongReflectionTextureExtraFragmentData)
 
         return (
             mixer_output,

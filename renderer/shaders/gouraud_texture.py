@@ -13,7 +13,7 @@ from ..geometry import Camera, normalise, to_homogeneous
 from ..shader import ID, MixerOutput, PerFragment, PerVertex, Shader
 from ..types import Colour, LightSource, Texture, Vec2f, Vec3f, Vec4f
 
-jax.config.update('jax_array', True)
+jax.config.update("jax_array", True)
 
 
 class GouraudTextureExtraInput(NamedTuple):
@@ -26,6 +26,7 @@ class GouraudTextureExtraInput(NamedTuple):
       - light: parallel light source, shared by all vertices.
       - texture: texture, shared by all vertices.
     """
+
     position: Float[Array, "vertices 3"]  # in world space
     normal: Float[Array, "vertices 3"]  # in world space
     uv: Float[Array, "vertices 2"]  # in texture space
@@ -42,12 +43,17 @@ class GouraudTextureExtraFragmentData(NamedTuple):
 
 class GouraudTextureExtraMixerOutput(NamedTuple):
     """When render to only one target, for simplicity."""
+
     canvas: Colour
 
 
-class GouraudTextureShader(Shader[GouraudTextureExtraInput,
-                                  GouraudTextureExtraFragmentData,
-                                  GouraudTextureExtraMixerOutput]):
+class GouraudTextureShader(
+    Shader[
+        GouraudTextureExtraInput,
+        GouraudTextureExtraFragmentData,
+        GouraudTextureExtraMixerOutput,
+    ]
+):
     """Gouraud Shading with simple parallel lighting and texture."""
 
     @staticmethod
@@ -107,18 +113,19 @@ class GouraudTextureShader(Shader[GouraudTextureExtraInput,
         assert isinstance(built_in, PerFragment)
 
         # repeat texture
-        uv = (lax.floor(varying.uv).astype(int) %
-              jnp.asarray(extra.texture.shape[:2]))
+        uv = lax.floor(varying.uv).astype(int) % jnp.asarray(extra.texture.shape[:2])
         texture_colour: Colour = extra.texture[uv[0], uv[1]]
         light_colour: Colour = varying.colour
 
         return (
             PerFragment(
-                keeps=jnp.array((
-                    built_in.keeps,
-                    gl_FrontFacing,
-                    (light_colour >= 0).all(),
-                )).all(),
+                keeps=jnp.array(
+                    (
+                        built_in.keeps,
+                        gl_FrontFacing,
+                        (light_colour >= 0).all(),
+                    )
+                ).all(),
                 use_default_depth=built_in.use_default_depth,
             ),
             GouraudTextureExtraFragmentData(

@@ -35,6 +35,7 @@ K = TypeVar("K")
 V = TypeVar("V")
 if sys.version_info < (3, 9):
     from typing import Dict
+
     DictT: TypeAlias = Dict[K, V]
 else:
     DictT: TypeAlias = dict[K, V]

@@ -13,9 +13,9 @@ from renderer.shaders.gouraud import GouraudExtraInput, GouraudShader
 from renderer.types import Buffers, Colour, LightSource, Vec2f, Vec3f, Vec4f
 from renderer.utils import transpose_for_display
 
-eye = jnp.array((0., 0, 2))
-center = jnp.array((0., 0, 0))
-up = jnp.array((0., 1, 0))
+eye = jnp.array((0.0, 0, 2))
+center = jnp.array((0.0, 0, 0))
+up = jnp.array((0.0, 1, 0))
 
 width = 1920
 height = 1080
@@ -26,10 +26,10 @@ depth = 255
 camera: Camera = Camera.create(
     view=Camera.view_matrix(eye=eye, centre=center, up=up),
     projection=Camera.perspective_projection_matrix(
-        fovy=90.,
-        aspect=1.,
-        z_near=-1.,
-        z_far=1.,
+        fovy=90.0,
+        aspect=1.0,
+        z_near=-1.0,
+        z_far=1.0,
     ),
     viewport=Camera.viewport_matrix(
         lowerbound=lowerbound,
@@ -39,34 +39,40 @@ camera: Camera = Camera.create(
 )
 
 buffers = Buffers(
-    zbuffer=lax.full((width, height), 1.),
-    targets=(lax.full((width, height, 3), 0.), ),
+    zbuffer=lax.full((width, height), 1.0),
+    targets=(lax.full((width, height, 3), 0.0),),
 )
-face_indices = jnp.array((
-    (0, 1, 2),
-    (1, 3, 2),
-    (0, 2, 4),
-    (0, 4, 3),
-    (2, 5, 1),
-))
-position = jnp.array((
-    (0., 0., 0.),
-    (2., 0., 0.),
-    (0., 1., 0.),
-    (1., 1., 0.),
-    (-1, -1, 1.),
-    (-2, 0., 0.),
-))
+face_indices = jnp.array(
+    (
+        (0, 1, 2),
+        (1, 3, 2),
+        (0, 2, 4),
+        (0, 4, 3),
+        (2, 5, 1),
+    )
+)
+position = jnp.array(
+    (
+        (0.0, 0.0, 0.0),
+        (2.0, 0.0, 0.0),
+        (0.0, 1.0, 0.0),
+        (1.0, 1.0, 0.0),
+        (-1, -1, 1.0),
+        (-2, 0.0, 0.0),
+    )
+)
 extra = GouraudExtraInput(
     position=position,
-    colour=jnp.array((
-        (1., 0., 0.),
-        (0., 1., 0.),
-        (0., 0., 1.),
-        (0., 0., 0.),
-        (1., 1., 1.),
-        (1., 1., 0.),
-    )),
+    colour=jnp.array(
+        (
+            (1.0, 0.0, 0.0),
+            (0.0, 1.0, 0.0),
+            (0.0, 0.0, 1.0),
+            (0.0, 0.0, 0.0),
+            (1.0, 1.0, 1.0),
+            (1.0, 1.0, 0.0),
+        )
+    ),
     normal=jax.vmap(lambda _: LightSource().direction)(position),
     light=LightSource(),
 )
@@ -93,7 +99,6 @@ class ExtraMixerOutput(NamedTuple):
 
 
 class _Shader(Shader[ExtraInput, ExtraFragmentData, ExtraMixerOutput]):
-
     @staticmethod
     @jaxtyped
     @jax.jit
@@ -172,17 +177,17 @@ class _Shader(Shader[ExtraInput, ExtraFragmentData, ExtraMixerOutput]):
         )
 
 
-eye = jnp.array((0., 0, 1))
-center = jnp.array((0., 0, 0))
-up = jnp.array((0., 1, 0))
+eye = jnp.array((0.0, 0, 1))
+center = jnp.array((0.0, 0, 0))
+up = jnp.array((0.0, 1, 0))
 
 camera: Camera = Camera.create(
     view=Camera.view_matrix(eye=eye, centre=center, up=up),
     projection=Camera.perspective_projection_matrix(
-        fovy=90.,
-        aspect=1.,
-        z_near=-1.,
-        z_far=1.,
+        fovy=90.0,
+        aspect=1.0,
+        z_near=-1.0,
+        z_far=1.0,
     ),
     viewport=Camera.viewport_matrix(
         lowerbound=lowerbound,
@@ -192,33 +197,38 @@ camera: Camera = Camera.create(
 )
 
 buffers = Buffers(
-    zbuffer=lax.full((width, height), 1.),
-    targets=(lax.full((width, height, 3), 0.), ),
+    zbuffer=lax.full((width, height), 1.0),
+    targets=(lax.full((width, height, 3), 0.0),),
 )
-face_indices = jnp.array(((0, 1, 2), ))
-position = jnp.array((
-    (-1., -1., -2.),
-    (1., -1., -1.),
-    (0., 1., -1.),
-))
+face_indices = jnp.array(((0, 1, 2),))
+position = jnp.array(
+    (
+        (-1.0, -1.0, -2.0),
+        (1.0, -1.0, -1.0),
+        (0.0, 1.0, -1.0),
+    )
+)
 extra = ExtraInput(
     position=position,
-    colour=jnp.array((
-        (1., 0., 0.),
-        (0., 1., 0.),
-        (0., 0., 1.),
-    )),
-    uv=jnp.array((
-        (0., 0.),
-        (10., 0.),
-        (0., 10.),
-    )),
+    colour=jnp.array(
+        (
+            (1.0, 0.0, 0.0),
+            (0.0, 1.0, 0.0),
+            (0.0, 0.0, 1.0),
+        )
+    ),
+    uv=jnp.array(
+        (
+            (0.0, 0.0),
+            (10.0, 0.0),
+            (0.0, 10.0),
+        )
+    ),
     normal=jax.vmap(lambda _: LightSource().direction)(position),
     light=LightSource(),
 )
 
-perspective_interpolation = render(camera, _Shader, buffers, face_indices,
-                                   extra)
+perspective_interpolation = render(camera, _Shader, buffers, face_indices, extra)
 
 # show
 fig, axs = plt.subplots(

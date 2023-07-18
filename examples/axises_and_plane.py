@@ -17,24 +17,29 @@ from renderer import (
 # PROCESS: Set up models and objects
 
 scene: Scene = Scene()
-texture: Texture = build_texture_from_PyTinyrenderer(
-    jnp.array((
-        255,
-        255,
-        255,  # White
-        255,
-        0,
-        0,  # Red
-        0,
-        255,
-        0,  # Green
-        0,
-        0,
-        255  # Blue
-    )),
-    2,
-    2,
-) / 255.0
+texture: Texture = (
+    build_texture_from_PyTinyrenderer(
+        jnp.array(
+            (
+                255,
+                255,
+                255,  # White
+                255,
+                0,
+                0,  # Red
+                0,
+                255,
+                0,  # Green
+                0,
+                0,
+                255,  # Blue
+            )
+        ),
+        2,
+        2,
+    )
+    / 255.0
+)
 
 scene, capx_model_id = scene.add_capsule(
     radius=0.1,
@@ -58,11 +63,11 @@ scene, capz_model_id = scene.add_capsule(
 scene, cube_model = scene.add_cube(
     half_extents=(1.5, 1.5, 0.03),
     diffuse_map=jnp.ones((1, 1, 3)),
-    texture_scaling=(16., 16.),
+    texture_scaling=(16.0, 16.0),
 )
 
 scene, cube_instance_id = scene.add_object_instance(cube_model)
-scene = scene.set_object_position(cube_instance_id, (0., 0., -0.5))
+scene = scene.set_object_position(cube_instance_id, (0.0, 0.0, -0.5))
 
 # PROCESS: Set up objects
 
@@ -74,8 +79,8 @@ scene, capsulez_instance_id = scene.add_object_instance(capz_model_id)
 
 width = 640
 height = 480
-eye = [2., 4., 1.]
-target = [0., 0., 0.]
+eye = [2.0, 4.0, 1.0]
+target = [0.0, 0.0, 0.0]
 
 light: LightParameters = LightParameters()
 camera: CameraParameters = CameraParameters(
@@ -92,7 +97,8 @@ images = []
 
 img = Renderer.get_camera_image(
     objects=[
-        scene.objects[obj_id] for obj_id in [
+        scene.objects[obj_id]
+        for obj_id in [
             cube_instance_id,
             capsulex_instance_id,
         ]
@@ -103,33 +109,16 @@ img = Renderer.get_camera_image(
     height=height,
     shadow_param=shadow_param,
 )
-rgb_array = lax.clamp(0., img * 255, 255.).astype(jnp.uint8)
+rgb_array = lax.clamp(0.0, img * 255, 255.0).astype(jnp.uint8)
 images.append(rgb_array)
 
 img = Renderer.get_camera_image(
     objects=[
-        scene.objects[obj_id] for obj_id in [
-            cube_instance_id,
-            capsulex_instance_id,
-            capsuley_instance_id,
-        ]
-    ],
-    light=light,
-    camera=camera,
-    width=width,
-    height=height,
-    shadow_param=shadow_param,
-)
-rgb_array = lax.clamp(0., img * 255, 255.).astype(jnp.uint8)
-images.append(rgb_array)
-
-img = Renderer.get_camera_image(
-    objects=[
-        scene.objects[obj_id] for obj_id in [
+        scene.objects[obj_id]
+        for obj_id in [
             cube_instance_id,
             capsulex_instance_id,
             capsuley_instance_id,
-            capsulez_instance_id,
         ]
     ],
     light=light,
@@ -138,12 +127,13 @@ img = Renderer.get_camera_image(
     height=height,
     shadow_param=shadow_param,
 )
-rgb_array = lax.clamp(0., img * 255, 255.).astype(jnp.uint8)
+rgb_array = lax.clamp(0.0, img * 255, 255.0).astype(jnp.uint8)
 images.append(rgb_array)
 
 img = Renderer.get_camera_image(
     objects=[
-        scene.objects[obj_id] for obj_id in [
+        scene.objects[obj_id]
+        for obj_id in [
             cube_instance_id,
             capsulex_instance_id,
             capsuley_instance_id,
@@ -156,7 +146,26 @@ img = Renderer.get_camera_image(
     height=height,
     shadow_param=shadow_param,
 )
-rgb_array = lax.clamp(0., img * 255, 255.).astype(jnp.uint8)
+rgb_array = lax.clamp(0.0, img * 255, 255.0).astype(jnp.uint8)
+images.append(rgb_array)
+
+img = Renderer.get_camera_image(
+    objects=[
+        scene.objects[obj_id]
+        for obj_id in [
+            cube_instance_id,
+            capsulex_instance_id,
+            capsuley_instance_id,
+            capsulez_instance_id,
+        ]
+    ],
+    light=light,
+    camera=camera,
+    width=width,
+    height=height,
+    shadow_param=shadow_param,
+)
+rgb_array = lax.clamp(0.0, img * 255, 255.0).astype(jnp.uint8)
 images.append(rgb_array)
 
 # PROCESS: show

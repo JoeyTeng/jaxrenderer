@@ -15,12 +15,12 @@ from ._meta_utils import add_tracing_name
 from .geometry import Camera, Interpolation, interpolate
 from .types import FALSE_ARRAY, INF_ARRAY, TRUE_ARRAY, Vec2f, Vec3f, Vec4f
 
-jax.config.update('jax_array', True)
+jax.config.update("jax_array", True)
 
 ID = Integer[Array, ""]
 
 ShaderExtraInputT = TypeVar(
-    'ShaderExtraInputT',
+    "ShaderExtraInputT",
     bound=PyTree[Shaped[Array, "..."]],
 )
 """Extra input for vertex shader & fragment shader, shared by all."""
@@ -31,6 +31,7 @@ class PerVertex(NamedTuple):
 
     gl_Position is in clip-space.
     """
+
     gl_Position: Vec4f
     # gl_PointSize is meaningful only when rendering point primitives.
     # not supported for now
@@ -43,6 +44,7 @@ class PerFragment(NamedTuple):
     If use_default_depth is True (default False), gl_FragCoord[2] will be used
     later by default.
     """
+
     gl_FragDepth: Float[Array, ""] = INF_ARRAY
     # not discard
     keeps: Bool[Array, ""] = TRUE_ARRAY
@@ -68,6 +70,7 @@ class MixerOutput(NamedTuple):
     keep: bool, whether the output should be used to update buffers
     zbuffer: store depth value, and the result is used to set zbuffer.
     """
+
     keep: Bool[Array, ""]
     zbuffer: Float[Array, ""]
 
@@ -149,13 +152,13 @@ class Shader(ABC, Generic[ShaderExtraInputT, VaryingT, MixedExtraT]):
         barycentric_screen: Float[Array, "primitives 3"],
         barycentric_clip: Float[Array, "primitives 3"],
     ) -> tuple[  #
-            Float[Array, "kept_primitives 4"],  # gl_FragCoord
-            Bool[Array, "kept_primitives"],  # gl_FrontFacing
-            Float[Array, "kept_primitives 2"],  # gl_PointCoord
-            Bool[Array, "kept_primitives"],  # keeps
-            VaryingT,  # values
-            Float[Array, "kept_primitives 3"],  # barycentric_screen
-            Float[Array, "kept_primitives 3"],  # barycentric_clip
+        Float[Array, "kept_primitives 4"],  # gl_FragCoord
+        Bool[Array, "kept_primitives"],  # gl_FrontFacing
+        Float[Array, "kept_primitives 2"],  # gl_PointCoord
+        Bool[Array, "kept_primitives"],  # keeps
+        VaryingT,  # values
+        Float[Array, "kept_primitives 3"],  # barycentric_screen
+        Float[Array, "kept_primitives 3"],  # barycentric_clip
     ]:
         """Override this to customise the primitive choosing stage.
 
@@ -220,8 +223,15 @@ class Shader(ABC, Generic[ShaderExtraInputT, VaryingT, MixedExtraT]):
         _clip: Float[Array, "kept_primitives 3"] = _get(barycentric_clip)
         assert isinstance(_clip, Float[Array, "kept_primitives 3"])
 
-        return (_gl_FragCoord, _gl_FrontFacing, _gl_PointCoord, _keeps,
-                _values, _screen, _clip)
+        return (
+            _gl_FragCoord,
+            _gl_FrontFacing,
+            _gl_PointCoord,
+            _keeps,
+            _values,
+            _screen,
+            _clip,
+        )
 
     @staticmethod
     @jaxtyped

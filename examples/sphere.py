@@ -19,14 +19,14 @@ scene: Scene = Scene()
 
 width = 640
 height = 480
-eye: Vec3f = jnp.array([2., 4., 1.])
-target: Vec3f = jnp.array([0., 0., 0.])
+eye: Vec3f = jnp.array([2.0, 4.0, 1.0])
+target: Vec3f = jnp.array([0.0, 0.0, 0.0])
 
 light: LightParameters = LightParameters(
-    direction=jnp.array([2., 4., 1.]),
+    direction=jnp.array([2.0, 4.0, 1.0]),
     ambient=jnp.zeros(3),
-    diffuse=jnp.full(3, 1.),
-    specular=jnp.full(3, 0.),
+    diffuse=jnp.full(3, 1.0),
+    specular=jnp.full(3, 0.0),
 )
 camera: CameraParameters = CameraParameters(
     viewWidth=width,
@@ -35,24 +35,29 @@ camera: CameraParameters = CameraParameters(
     target=target,
 )
 
-texture: Texture = build_texture_from_PyTinyrenderer(
-    jnp.array((
-        255,
-        255,
-        255,  # White
-        255,
-        0,
-        0,  # Red
-        0,
-        255,
-        0,  # Green
-        0,
-        0,
-        255  # Blue
-    )),
-    2,
-    2,
-) / 255.0
+texture: Texture = (
+    build_texture_from_PyTinyrenderer(
+        jnp.array(
+            (
+                255,
+                255,
+                255,  # White
+                255,
+                0,
+                0,  # Red
+                0,
+                255,
+                0,  # Green
+                0,
+                0,
+                255,  # Blue
+            )
+        ),
+        2,
+        2,
+    )
+    / 255.0
+)
 
 scene, sphere_model_id = scene.add_capsule(
     radius=1.0,
@@ -72,7 +77,7 @@ with jax.disable_jit(False):
         shadow_param=ShadowParameters(offset=0.05),
     )
 
-rgb_array = lax.clamp(0., img * 255, 255.).astype(jnp.uint8)
+rgb_array = lax.clamp(0.0, img * 255, 255.0).astype(jnp.uint8)
 
 import matplotlib.pyplot as plt
 

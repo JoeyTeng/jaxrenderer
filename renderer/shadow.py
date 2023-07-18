@@ -24,6 +24,7 @@ from .types import (
 
 class Shadow(NamedTuple):
     """Shadow map for one light source."""
+
     shadow_map: ZBuffer
     """Depth map of the scene from the light source's point of view."""
     strength: Colour
@@ -53,7 +54,7 @@ class Shadow(NamedTuple):
         up: Vec3f,
         strength: Colour,
         offset: float = 0.001,
-        distance: float = 10.,
+        distance: float = 10.0,
         loop_unroll: int = 1,
     ) -> "Shadow":
         """Render shadow map from light source's point of view.
@@ -89,12 +90,12 @@ class Shadow(NamedTuple):
         _camera: Camera = Camera.create(
             view=view,
             projection=Camera.orthographic_projection_matrix(
-                left=-1.,
-                right=1.,
-                bottom=-1.,
-                top=1.,
-                z_near=-1.,
-                z_far=1.,
+                left=-1.0,
+                right=1.0,
+                bottom=-1.0,
+                top=1.0,
+                z_near=-1.0,
+                z_far=1.0,
             ),
             viewport=viewport_matrix,
         )

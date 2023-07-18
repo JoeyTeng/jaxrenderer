@@ -24,7 +24,7 @@ from ..types import (
     Vec4f,
 )
 
-jax.config.update('jax_array', True)
+jax.config.update("jax_array", True)
 
 
 class PhongReflectionShadowTextureExtraInput(NamedTuple):
@@ -48,6 +48,7 @@ class PhongReflectionShadowTextureExtraInput(NamedTuple):
       - diffuse: diffuse strength, shared by all vertices.
       - specular: specular strength, shared by all vertices.
     """
+
     position: Float[Array, "vertices 3"]  # in world space
     normal: Float[Array, "vertices 3"]  # in world space
     uv: Float[Array, "vertices 2"]  # in texture space
@@ -75,6 +76,7 @@ class PhongReflectionShadowTextureExtraFragmentData(NamedTuple):
       - shadow_coord: in shadow's clip space, of each fragment; From VS to FS.
       - colour: colour when passing from FS to mixer.
     """
+
     normal: Vec3f = jnp.zeros(3)
     uv: Vec2f = jnp.zeros(2)
     texture_index: Integer[Array, ""] = jnp.array(0)
@@ -84,15 +86,19 @@ class PhongReflectionShadowTextureExtraFragmentData(NamedTuple):
 
 class PhongReflectionShadowTextureExtraMixerOutput(NamedTuple):
     """When render to only one target, for simplicity."""
+
     canvas: Colour
 
 
 class PhongReflectionShadowTextureShader(
-        Shader[PhongReflectionShadowTextureExtraInput,
-               PhongReflectionShadowTextureExtraFragmentData,
-               PhongReflectionShadowTextureExtraMixerOutput]):
+    Shader[
+        PhongReflectionShadowTextureExtraInput,
+        PhongReflectionShadowTextureExtraFragmentData,
+        PhongReflectionShadowTextureExtraMixerOutput,
+    ]
+):
     """Phong Shading with simple parallel lighting, texture, Phong Reflection
-        approximation and ShadowMap.
+    approximation and ShadowMap.
     """
 
     @staticmethod
@@ -122,7 +128,8 @@ class PhongReflectionShadowTextureShader(
         # shadow. Normalise here as it is not done implicitly in the pipeline.
         # the result is in shadow's clip space, as NDC.
         shadow_coord: Vec4f = normalise_homogeneous(
-            extra.shadow.camera.to_clip(position))
+            extra.shadow.camera.to_clip(position)
+        )
         assert isinstance(shadow_coord, Vec4f)
 
         return (
@@ -151,8 +158,7 @@ class PhongReflectionShadowTextureShader(
         )
         # all three values should be the same, just pick the first.
         varying = varying._replace(texture_index=values.texture_index[0])
-        assert isinstance(varying,
-                          PhongReflectionShadowTextureExtraFragmentData)
+        assert isinstance(varying, PhongReflectionShadowTextureExtraFragmentData)
 
         return varying
 
@@ -179,7 +185,8 @@ class PhongReflectionShadowTextureShader(
         # shadow
         # from NDC to screen coordinates, in shadow's screen space.
         shadow_coord: Vec4f = normalise_homogeneous(
-            extra.shadow.camera.viewport @ varying.shadow_coord)
+            extra.shadow.camera.viewport @ varying.shadow_coord
+        )
         assert isinstance(shadow_coord, Vec4f)
         shadow_str: Colour = extra.shadow.strength
         assert isinstance(shadow_str, Colour)
@@ -189,7 +196,7 @@ class PhongReflectionShadowTextureShader(
             # when not in shadow, keeps all light.
             jnp.ones_like(shadow_str),
             # if in shadow, only keep "1 - shadow_str" amount of light.
-            1. - shadow_str,
+            1.0 - shadow_str,
         )
 
         # texture
@@ -214,20 +221,24 @@ class PhongReflectionShadowTextureShader(
         # If using standard reflection formula
         # `light_dir - 2 * diffuse * normal`, need to use
         # `-1 * light_dir` as `light_dir` instead.
-        reflected_light: Vec3f = normalise(2 * lax.dot(normal, light_dir) *
-                                           normal - light_dir)
+        reflected_light: Vec3f = normalise(
+            2 * lax.dot(normal, light_dir) * normal - light_dir
+        )
         assert isinstance(reflected_light, Vec3f)
 
         specular: float = lax.pow(
-            lax.max(reflected_light[2], 0.),
+            lax.max(reflected_light[2], 0.0),
             extra.specular_map[uv[0], uv[1]],
         )
 
         # compute colour
         colour: Colour = (
-            extra.ambient * texture_colour + shadow *
-            (extra.diffuse * diffuse + extra.specular * specular) *
-            texture_colour * extra.light.colour)
+            extra.ambient * texture_colour
+            + shadow
+            * (extra.diffuse * diffuse + extra.specular * specular)
+            * texture_colour
+            * extra.light.colour
+        )
 
         return (
             PerFragment(
@@ -254,11 +265,9 @@ class PhongReflectionShadowTextureShader(
         extra_output: PhongReflectionShadowTextureExtraFragmentData
         mixer_output, extra_output = Shader.mix(gl_FragDepth, keeps, extra)
         assert isinstance(mixer_output, MixerOutput)
-        assert isinstance(extra_output,
-                          PhongReflectionShadowTextureExtraFragmentData)
+        assert isinstance(extra_output, PhongReflectionShadowTextureExtraFragmentData)
 
         return (
             mixer_output,
-            PhongReflectionShadowTextureExtraMixerOutput(
-                canvas=extra_output.colour),
+            PhongReflectionShadowTextureExtraMixerOutput(canvas=extra_output.colour),
         )

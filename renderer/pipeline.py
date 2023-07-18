@@ -36,7 +36,7 @@ from .types import (
     ZBuffer,
 )
 
-jax.config.update('jax_array', True)
+jax.config.update("jax_array", True)
 
 RowIndices = Integer[Array, "row_batches row_batch_size"]
 """Indices of the rows in the buffers to be processed in this batch."""
@@ -47,6 +47,7 @@ class PerPrimitive(NamedTuple):
 
     gl_Position is in clip-space, not normalised.
     """
+
     gl_Position: Triangle
     # gl_PointSize is meaningful only when rendering point primitives.
     # not supported for now
@@ -70,11 +71,11 @@ class PerPrimitive(NamedTuple):
 
     @classmethod
     @jaxtyped
-    @partial(jax.jit, static_argnames=("cls", ), inline=True)
+    @partial(jax.jit, static_argnames=("cls",), inline=True)
     @add_tracing_name
     def create(cls, per_vertex: PerVertex) -> "PerPrimitive":
         """per_vertex is batched with size 3 (3 vertices per triangle)
-            in clip-space, not normalised.
+        in clip-space, not normalised.
         """
         clip: Triangle = per_vertex.gl_Position
         assert isinstance(clip, Triangle)
@@ -107,7 +108,7 @@ class PerPrimitive(NamedTuple):
 @partial(
     jax.jit,
     static_argnames=("shader", "loop_unroll"),
-    donate_argnums=(1, ),
+    donate_argnums=(1,),
     inline=True,
 )
 @add_tracing_name
@@ -130,7 +131,6 @@ def _postprocessing(
     @partial(jax.jit, inline=True)
     @add_tracing_name
     def _per_pixel(coord: Vec2i) -> tuple[MixerOutput, MixedExtraT]:
-
         assert isinstance(coord, Vec2i), f"expected Vec2i, got {coord}"
 
         ReturnT = Tuple[  #
@@ -158,9 +158,9 @@ def _postprocessing(
             def _when_keep_primitive() -> tuple[Vec3f, Float[Array, ""]]:
                 """Returns clip_coef, w_reciprocal."""
                 # x/w, y/w, with x, y, w in clip space.
-                xy: Float[Array, "2"] = (
-                    (coord - viewport[:2, 3]) /
-                    viewport[jnp.arange(2), jnp.arange(2)])
+                xy: Float[Array, "2"] = (coord - viewport[:2, 3]) / viewport[
+                    jnp.arange(2), jnp.arange(2)
+                ]
                 xy1_ndc: Float[Array, "3"] = jnp.array((xy[0], xy[1], 1))
 
                 # As the interpolation formula is `xy1_ndc @ (mat_inv @ values)`
@@ -186,10 +186,10 @@ def _postprocessing(
                 clip_coef: Vec3f,
                 w_reciprocal: Float[Array, ""],
             ) -> tuple[  #
-                    Float[Array, "kept_primitives 4"],  # gl_FragCoord
-                    Bool[Array, "kept_primitives"],  # gl_FrontFacing
-                    Float[Array, "kept_primitives 2"],  # gl_PointCoord
-                    Float[Array, "kept_primitives 3"],  # true_clip_coef
+                Float[Array, "kept_primitives 4"],  # gl_FragCoord
+                Bool[Array, "kept_primitives"],  # gl_FrontFacing
+                Float[Array, "kept_primitives 2"],  # gl_PointCoord
+                Float[Array, "kept_primitives 3"],  # true_clip_coef
             ]:
                 # Prepare inputs for fragment shader
                 z: Float[Array, ""] = interpolate(
@@ -200,12 +200,14 @@ def _postprocessing(
                 )
                 # viewport transform for z, from clip space to window space
                 z = z * viewport[2, 2] + viewport[2, 3]
-                gl_FragCoord: Vec4f = jnp.array((
-                    coord[0],
-                    coord[1],
-                    z,
-                    w_reciprocal,
-                ))
+                gl_FragCoord: Vec4f = jnp.array(
+                    (
+                        coord[0],
+                        coord[1],
+                        z,
+                        w_reciprocal,
+                    )
+                )
                 assert isinstance(gl_FragCoord, Vec4f)
 
                 # Ref: https://registry.khronos.org/OpenGL-Refpages/gl4/html/gl_FrontFacing.xhtml
@@ -216,14 +218,13 @@ def _postprocessing(
                 gl_PointCoord: Vec2f
                 with jax.ensure_compile_time_eval():
                     # TODO: implement Point primitive properly.
-                    gl_PointCoord = lax.full((2, ), 0.)
+                    gl_PointCoord = lax.full((2,), 0.0)
 
                 # this interpolates to target value u, not u/w
                 true_clip_coef: Vec3f = clip_coef / w_reciprocal
                 assert isinstance(true_clip_coef, Vec3f)
 
-                return (gl_FragCoord, gl_FrontFacing, gl_PointCoord,
-                        true_clip_coef)
+                return (gl_FragCoord, gl_FrontFacing, gl_PointCoord, true_clip_coef)
 
             # END OF `_when_in_triangle`
 
@@ -339,7 +340,9 @@ def _postprocessing(
     @jaxtyped
     @partial(jax.jit, inline=True)
     @add_tracing_name
-    def _per_row(i: Integer[Array, ""], ) -> tuple[MixerOutput, MixedExtraT]:
+    def _per_row(
+        i: Integer[Array, ""],
+    ) -> tuple[MixerOutput, MixedExtraT]:
         """Render one row.
 
         Parameters:
@@ -352,13 +355,15 @@ def _postprocessing(
         depths: Num[Array, "height"]
         extras: MixedExtraT
         # vmap over axis 1 (height) of the buffers. Axis 0 (width) is `i`.
-        (keeps, depths), extras = jax.vmap(_per_pixel)(lax.concatenate(
-            (
-                lax.full((batch_size, 1), i),
-                lax.broadcasted_iota(int, (batch_size, 1), 0),
-            ),
-            1,
-        ))
+        (keeps, depths), extras = jax.vmap(_per_pixel)(
+            lax.concatenate(
+                (
+                    lax.full((batch_size, 1), i),
+                    lax.broadcasted_iota(int, (batch_size, 1), 0),
+                ),
+                1,
+            )
+        )
         assert isinstance(keeps, Bool[Array, "height"])
         assert isinstance(depths, Num[Array, "height"])
         assert isinstance(extras, tuple)
@@ -368,7 +373,7 @@ def _postprocessing(
     # END OF `_per_row`
 
     @jaxtyped
-    @partial(jax.jit, donate_argnums=(1, ), inline=True)
+    @partial(jax.jit, donate_argnums=(1,), inline=True)
     @add_tracing_name
     def merge_buffers(
         mixer_outputs: tuple[MixerOutput, MixedExtraT],
@@ -387,10 +392,9 @@ def _postprocessing(
         depths: ZBuffer = mixer_outputs[0].zbuffer
         extras: MixedExtraT = mixer_outputs[1]
 
-        @partial(jax.jit, donate_argnums=(2, ), inline=True)
+        @partial(jax.jit, donate_argnums=(2,), inline=True)
         def _merge_first_axis(_mask, _new, _old):
-
-            @partial(jax.jit, donate_argnums=(2, ), inline=True)
+            @partial(jax.jit, donate_argnums=(2,), inline=True)
             def _merge_second_axis(__mask, __new, __old):
                 return lax.cond(__mask, lambda: __new, lambda: __old)
 
@@ -429,7 +433,7 @@ def _postprocessing(
 @partial(
     jax.jit,
     static_argnames=("shader", "loop_unroll"),
-    donate_argnums=(2, ),
+    donate_argnums=(2,),
     inline=True,
 )
 @add_tracing_name
@@ -460,7 +464,7 @@ def render(
     @partial(jax.jit, inline=True)
     @add_tracing_name
     def vertex_processing(
-            gl_VertexID: Integer[Array, ""],  #
+        gl_VertexID: Integer[Array, ""],  #
     ) -> tuple[PerVertex, VaryingT]:
         """Process one vertex into screen space, and keep varying values."""
         per_vertex: PerVertex
@@ -485,10 +489,12 @@ def render(
     buffers = _postprocessing(
         shader=shader,
         buffers=buffers,
-        per_primitive=jax.vmap(PerPrimitive.create)(tree_map(
-            lambda field: field[face_indices],
-            per_vertices,
-        )),
+        per_primitive=jax.vmap(PerPrimitive.create)(
+            tree_map(
+                lambda field: field[face_indices],
+                per_vertices,
+            )
+        ),
         varyings=tree_map(lambda field: field[face_indices], varyings),
         extra=extra,
         viewport=camera.viewport,

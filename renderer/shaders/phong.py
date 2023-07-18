@@ -13,7 +13,7 @@ from ..geometry import Camera, normalise, to_homogeneous
 from ..shader import ID, MixerOutput, PerFragment, PerVertex, Shader
 from ..types import Colour, LightSource, Texture, Vec2f, Vec3f, Vec4f
 
-jax.config.update('jax_array', True)
+jax.config.update("jax_array", True)
 
 
 class PhongTextureExtraInput(NamedTuple):
@@ -27,6 +27,7 @@ class PhongTextureExtraInput(NamedTuple):
         It is in the eye/view space.
       - texture: texture, shared by all vertices.
     """
+
     position: Float[Array, "vertices 3"]  # in world space
     normal: Float[Array, "vertices 3"]  # in world space
     uv: Float[Array, "vertices 2"]  # in texture space
@@ -42,6 +43,7 @@ class PhongTextureExtraFragmentData(NamedTuple):
       - uv: in texture space, of each fragment; From VS to FS.
       - colour: colour when passing from FS to mixer.
     """
+
     normal: Vec3f = jnp.array([0.0, 0.0, 0.0])
     uv: Vec2f = jnp.zeros(2)
     colour: Colour = jnp.array([0.0, 0.0, 0.0])
@@ -49,12 +51,17 @@ class PhongTextureExtraFragmentData(NamedTuple):
 
 class PhongTextureExtraMixerOutput(NamedTuple):
     """When render to only one target, for simplicity."""
+
     canvas: Colour
 
 
-class PhongTextureShader(Shader[PhongTextureExtraInput,
-                                PhongTextureExtraFragmentData,
-                                PhongTextureExtraMixerOutput]):
+class PhongTextureShader(
+    Shader[
+        PhongTextureExtraInput,
+        PhongTextureExtraFragmentData,
+        PhongTextureExtraMixerOutput,
+    ]
+):
     """Phong Shading with simple parallel lighting and texture."""
 
     @staticmethod
@@ -110,8 +117,7 @@ class PhongTextureShader(Shader[PhongTextureExtraInput,
         assert isinstance(built_in, PerFragment)
 
         # repeat texture
-        uv = (lax.floor(varying.uv).astype(int) %
-              jnp.asarray(extra.texture.shape[:2]))
+        uv = lax.floor(varying.uv).astype(int) % jnp.asarray(extra.texture.shape[:2])
         texture_colour: Colour = extra.texture[uv[0], uv[1]]
 
         # light colour * intensity

@@ -41,25 +41,26 @@ class CameraParameters(NamedTuple):
 
     Default values come from [erwincoumans/tinyrenderer::TinyRendererCamera](https://github.com/erwincoumans/tinyrenderer/blob/89e8adafb35ecf5134e7b17b71b0f825939dc6d9/python/pytinyrenderer.cc#L56)
     """
+
     viewWidth: int = 640
     """width of the viewport."""
     viewHeight: int = 480
     """height of the viewport."""
-    viewDepth: float = 1.
+    viewDepth: float = 1.0
     """depth of the rendered view."""
     near: float = 0.01
     """near clipping plane."""
-    far: float = 1000.
+    far: float = 1000.0
     """far clipping plane."""
-    hfov: float = 58.
+    hfov: float = 58.0
     """horizontal field of view, in degrees."""
-    vfov: float = 45.
+    vfov: float = 45.0
     """vertical field of view, in degrees."""
     position: Union[Vec3f, tuple[float, float, float]] = jnp.ones(3)
     """position of the camera in world space."""
     target: Union[Vec3f, tuple[float, float, float]] = jnp.zeros(3)
     """target of the camera."""
-    up: Union[Vec3f, tuple[float, float, float]] = jnp.array((0., 0., 1.))
+    up: Union[Vec3f, tuple[float, float, float]] = jnp.array((0.0, 0.0, 1.0))
     """up direction of the camera."""
 
 
@@ -68,6 +69,7 @@ class LightParameters(NamedTuple):
 
     Default values come from [erwincoumans/tinyrenderer::TinyRenderLight](https://github.com/erwincoumans/tinyrenderer/blob/89e8adafb35ecf5134e7b17b71b0f825939dc6d9/python/pytinyrenderer.cc#L74).
     """
+
     direction: Vec3f = normalise(jnp.array((0.57735, 0.57735, 0.57735)))
     """in world space, as it goes from that position to origin (camera).
 
@@ -95,9 +97,10 @@ class ShadowParameters(NamedTuple):
       - [erwincoumans/tinyrenderer::TinyRenderLight](https://github.com/erwincoumans/tinyrenderer/blob/89e8adafb35ecf5134e7b17b71b0f825939dc6d9/python/pytinyrenderer.cc#L74).
       - for `up`, [erwincoumans/tinyrenderer::renderObject](https://github.com/erwincoumans/tinyrenderer/blob/89e8adafb35ecf5134e7b17b71b0f825939dc6d9/tinyrenderer.cpp#L372).
     """
+
     centre: Vec3f = jnp.zeros(3)
     """centre of the scene, same as object's camera's centre."""
-    up: Vec3f = jnp.array((0., 0., 1.))
+    up: Vec3f = jnp.array((0.0, 0.0, 1.0))
     """up direction of the scene, same as object's camera's up."""
     strength: Colour = 1 - jnp.array((0.4, 0.4, 0.4))
     """Strength of shadow. Must be in [0, 1]. 0 means no shadow, 1 means fully
@@ -110,7 +113,6 @@ class ShadowParameters(NamedTuple):
 
 
 class Renderer:
-
     @staticmethod
     @jaxtyped
     @partial(jax.jit, inline=True)
@@ -130,8 +132,10 @@ class Renderer:
         assert isinstance(view_inv, View), f"{view_inv}"
         projection_mat: Projection = Camera.perspective_projection_matrix(
             fovy=camera.vfov,
-            aspect=(lax.tan(jnp.radians(camera.hfov) / 2.) /
-                    lax.tan(jnp.radians(camera.vfov) / 2.)),
+            aspect=(
+                lax.tan(jnp.radians(camera.hfov) / 2.0)
+                / lax.tan(jnp.radians(camera.vfov) / 2.0)
+            ),
             z_near=camera.near,
             z_far=camera.far,
         )
@@ -160,7 +164,7 @@ class Renderer:
         width: int,
         height: int,
         batch: Optional[int] = None,
-        colour_default: Colour = jnp.array((1., 1., 1.), dtype=jnp.single),
+        colour_default: Colour = jnp.array((1.0, 1.0, 1.0), dtype=jnp.single),
         zbuffer_default: Num[Array, ""] = jnp.array(1, dtype=jnp.single),
     ) -> Buffers:
         """Render the scene with the given camera.
@@ -178,7 +182,7 @@ class Renderer:
 
         Returns: Buffers, with zbuffer and (coloured image, ).
         """
-        _batch = (batch, ) if batch is not None else ()
+        _batch = (batch,) if batch is not None else ()
         zbuffer: ZBuffer = lax.full(
             (*_batch, width, height),
             zbuffer_default,
@@ -189,7 +193,7 @@ class Renderer:
         )
         buffers: Buffers = Buffers(
             zbuffer=zbuffer,
-            targets=(canvas, ),
+            targets=(canvas,),
         )
 
         return buffers
@@ -199,7 +203,7 @@ class Renderer:
     @partial(
         jax.jit,
         static_argnames=("cls", "loop_unroll"),
-        donate_argnums=(4, ),
+        donate_argnums=(4,),
         inline=True,
     )
     @add_tracing_name
@@ -226,12 +230,12 @@ class Renderer:
         Returns: Buffers, with zbuffer and (coloured image, ).
         """
         # flatten so each vertex has its own "extra"
-        position = model.verts[model.faces.reshape((-1, ))]
-        normal = model.norms[model.faces_norm.reshape((-1, ))]
-        uv = model.uvs[model.faces_uv.reshape((-1, ))]
+        position = model.verts[model.faces.reshape((-1,))]
+        normal = model.norms[model.faces_norm.reshape((-1,))]
+        uv = model.uvs[model.faces_uv.reshape((-1,))]
 
-        texture_index = model.texture_index[model.faces_uv.reshape((-1, ))]
-        double_sided = model.texture_index[model.faces_uv.reshape((-1, ))]
+        texture_index = model.texture_index[model.faces_uv.reshape((-1,))]
+        double_sided = model.texture_index[model.faces_uv.reshape((-1,))]
 
         face_indices: Integer[Array, "_ 3"]
         face_indices = jnp.arange(model.faces.size).reshape(model.faces.shape)
@@ -280,14 +284,12 @@ class Renderer:
             return buffers
         else:
             # with shadows
-            assert isinstance(shadow_param,
-                              ShadowParameters), f"{shadow_param}"
+            assert isinstance(shadow_param, ShadowParameters), f"{shadow_param}"
             # first pass: render shadow map
             shadow: Shadow = Shadow.render_shadow_map(
                 shadow_map=lax.full_like(
                     buffers.zbuffer,
-                    DtypeInfo.create(jax.dtypes.result_type(
-                        buffers.zbuffer)).max,
+                    DtypeInfo.create(jax.dtypes.result_type(buffers.zbuffer)).max,
                 ),
                 verts=model.verts,
                 faces=model.faces,
@@ -335,7 +337,7 @@ class Renderer:
         camera: Union[Camera, CameraParameters],
         width: int,
         height: int,
-        colour_default: Colour = jnp.array((1., 1., 1.), dtype=jnp.single),
+        colour_default: Colour = jnp.array((1.0, 1.0, 1.0), dtype=jnp.single),
         zbuffer_default: Num[Array, ""] = jnp.array(1, dtype=jnp.single),
         shadow_param: Optional[ShadowParameters] = None,
         loop_unroll: int = 1,
@@ -393,7 +395,7 @@ class Renderer:
             )
 
         canvas: Canvas
-        _, (canvas, ) = cls.render(
+        _, (canvas,) = cls.render(
             model=model,
             light=light,
             camera=_camera,

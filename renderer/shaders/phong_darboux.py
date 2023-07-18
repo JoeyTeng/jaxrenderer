@@ -32,7 +32,7 @@ from ..types import (
     Vec4f,
 )
 
-jax.config.update('jax_array', True)
+jax.config.update("jax_array", True)
 
 Triangle3f = Float[Array, "3 3"]
 Triangle2f = Float[Array, "3 2"]
@@ -53,6 +53,7 @@ class PhongTextureDarbouxExtraInput(NamedTuple):
       - id_to_face: id of the face that each vertex belongs to.
       - faces_indices: id of the vertex that each face contains.
     """
+
     position: Float[Array, "vertices 3"]  # in world space
     normal: Float[Array, "vertices 3"]  # in world space
     uv: Float[Array, "vertices 2"]  # in texture space
@@ -78,6 +79,7 @@ class PhongTextureDarbouxExtraFragmentData(NamedTuple):
         This should not be interpolated.
       - colour: colour when passing from FS to mixer.
     """
+
     normal: Vec3f = jnp.array([0.0, 0.0, 0.0])
     uv: Vec2f = jnp.zeros(2)
     triangle: Triangle3f = jnp.zeros((3, 3))
@@ -88,14 +90,19 @@ class PhongTextureDarbouxExtraFragmentData(NamedTuple):
 
 class PhongTextureDarbouxExtraMixerOutput(NamedTuple):
     """When render to only one target, for simplicity."""
+
     canvas: Colour
 
 
-class PhongTextureDarbouxShader(Shader[PhongTextureDarbouxExtraInput,
-                                       PhongTextureDarbouxExtraFragmentData,
-                                       PhongTextureDarbouxExtraMixerOutput]):
+class PhongTextureDarbouxShader(
+    Shader[
+        PhongTextureDarbouxExtraInput,
+        PhongTextureDarbouxExtraFragmentData,
+        PhongTextureDarbouxExtraMixerOutput,
+    ]
+):
     """Phong Shading with simple parallel lighting and texture, normals are
-        represented in tangent space (Darboux frame)."""
+    represented in tangent space (Darboux frame)."""
 
     @staticmethod
     @jaxtyped
@@ -117,11 +124,13 @@ class PhongTextureDarbouxShader(Shader[PhongTextureDarbouxExtraInput,
         assert isinstance(extra.id_to_face, Integer[Array, "vertices"]), (
             f"Expected Integer array with shape {extra.position.shape[:1]}, "
             f"got {type(extra.id_to_face)} with shape "
-            f"{extra.id_to_face.shape}")
+            f"{extra.id_to_face.shape}"
+        )
         assert isinstance(extra.faces_indices, Integer[Array, "faces 3"]), (
             f"Expected Integer array with shape (faces, 3), "
             f"got {type(extra.faces_indices)} with shape "
-            f"{extra.faces_indices.shape}")
+            f"{extra.faces_indices.shape}"
+        )
 
         face_indices = extra.faces_indices[extra.id_to_face[gl_VertexID]]
         triangle_model: Triangle = to_homogeneous(extra.position[face_indices])
@@ -206,25 +215,25 @@ class PhongTextureDarbouxShader(Shader[PhongTextureDarbouxExtraInput,
             extra,
         )[0]
         assert isinstance(built_in, PerFragment)
-        assert isinstance(varying, PhongTextureDarbouxExtraFragmentData), (
-            f"Expected PhongTextureDarbouxExtraFragmentData, got {varying}")
+        assert isinstance(
+            varying, PhongTextureDarbouxExtraFragmentData
+        ), f"Expected PhongTextureDarbouxExtraFragmentData, got {varying}"
 
         # repeat texture
-        uv = (lax.floor(varying.uv).astype(int) %
-              jnp.asarray(extra.texture.shape[:2]))
+        uv = lax.floor(varying.uv).astype(int) % jnp.asarray(extra.texture.shape[:2])
 
         normal: Vec3f = normalise(varying.normal)
-        A: Float[Array, "3 3"] = jnp.vstack([
-            varying.triangle[1, :] - varying.triangle[0, :],
-            varying.triangle[2, :] - varying.triangle[0, :],
-            normal,
-        ])
+        A: Float[Array, "3 3"] = jnp.vstack(
+            [
+                varying.triangle[1, :] - varying.triangle[0, :],
+                varying.triangle[2, :] - varying.triangle[0, :],
+                normal,
+            ]
+        )
         AI: Float[Array, "3 3"] = jnp.linalg.inv(A)
         _uv: Triangle2f = varying.triangle_uv
-        i: Vec3f = AI @ jnp.array(
-            [_uv[1, 0] - _uv[0, 0], _uv[2, 0] - _uv[0, 0], 0])
-        j: Vec3f = AI @ jnp.array(
-            [_uv[1, 1] - _uv[0, 1], _uv[2, 1] - _uv[0, 1], 0])
+        i: Vec3f = AI @ jnp.array([_uv[1, 0] - _uv[0, 0], _uv[2, 0] - _uv[0, 0], 0])
+        j: Vec3f = AI @ jnp.array([_uv[1, 1] - _uv[0, 1], _uv[2, 1] - _uv[0, 1], 0])
 
         B: Float[Array, "3 3"] = lax.concatenate(
             [
@@ -250,11 +259,13 @@ class PhongTextureDarbouxShader(Shader[PhongTextureDarbouxExtraInput,
                 keeps=jnp.logical_and(built_in.keeps, gl_FrontFacing),
                 use_default_depth=built_in.use_default_depth,
             ),
-            varying._replace(colour=lax.cond(
-                (light_colour >= 0).all(),
-                lambda: texture_colour * light_colour,
-                lambda: jnp.zeros(3),
-            )),
+            varying._replace(
+                colour=lax.cond(
+                    (light_colour >= 0).all(),
+                    lambda: texture_colour * light_colour,
+                    lambda: jnp.zeros(3),
+                )
+            ),
         )
 
     @staticmethod

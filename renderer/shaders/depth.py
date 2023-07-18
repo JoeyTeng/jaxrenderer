@@ -11,7 +11,7 @@ from ..geometry import Camera, to_homogeneous
 from ..shader import ID, PerVertex, Shader
 from ..types import Vec4f
 
-jax.config.update('jax_array', True)
+jax.config.update("jax_array", True)
 
 
 class DepthExtraInput(NamedTuple):
@@ -20,6 +20,7 @@ class DepthExtraInput(NamedTuple):
     Attributes:
       - position: in world space, of each vertex.
     """
+
     position: Float[Array, "vertices 3"]  # in world space
 
 
@@ -31,9 +32,9 @@ class DepthExtraMixerOutput(NamedTuple):
     pass
 
 
-class DepthShader(Shader[DepthExtraInput,
-                         DepthExtraFragmentData,
-                         DepthExtraMixerOutput]):
+class DepthShader(
+    Shader[DepthExtraInput, DepthExtraFragmentData, DepthExtraMixerOutput]
+):
     """Depth Shading."""
 
     @staticmethod

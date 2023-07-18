@@ -18,8 +18,9 @@ GUID = NewType("GUID", int)
 
 class Scene(NamedTuple):
     """Scene with models and objects. Noticed that with each update to the
-        scene, the scene instance is replaced with a new one.
+    scene, the scene instance is replaced with a new one.
     """
+
     guid: GUID = GUID(0)
     """Max unique identifier among all objects in the scene. It equals to the
         numbers of models and objects ever created in the scene.
@@ -42,9 +43,7 @@ class Scene(NamedTuple):
         guid = self.guid
         new_scene = self._replace(
             guid=GUID(guid + 1),
-            models={
-                **self.models, guid: model
-            },
+            models={**self.models, guid: model},
         )
 
         return new_scene, guid
@@ -69,14 +68,16 @@ class Scene(NamedTuple):
         specular_map: SpecularMap = lax.full(diffuse_map.shape[:2], 2.0)
 
         _half_extents = jnp.asarray(half_extents)
-        assert isinstance(_half_extents, Float[Array, "3"]), (
-            f"Expected 2 floats in half_extends, got {half_extents}")
+        assert isinstance(
+            _half_extents, Float[Array, "3"]
+        ), f"Expected 2 floats in half_extends, got {half_extents}"
 
         _texture_scaling = jnp.asarray(texture_scaling)
         if _texture_scaling.size == 1:
-            _texture_scaling = lax.full((2, ), _texture_scaling)
-        assert isinstance(_texture_scaling, Float[Array, "2"]), (
-            f"Expected 2 floats in texture_scaling, got {texture_scaling}")
+            _texture_scaling = lax.full((2,), _texture_scaling)
+        assert isinstance(
+            _texture_scaling, Float[Array, "2"]
+        ), f"Expected 2 floats in texture_scaling, got {texture_scaling}"
 
         model: Model = create_cube(
             half_extents=_half_extents,
@@ -128,9 +129,7 @@ class Scene(NamedTuple):
         guid = self.guid
         new_scene = self._replace(
             guid=GUID(guid + 1),
-            objects={
-                **self.objects, guid: ModelObject(model=self.models[model_id])
-            },
+            objects={**self.objects, guid: ModelObject(model=self.models[model_id])},
         )
 
         return new_scene, guid
@@ -154,8 +153,8 @@ class Scene(NamedTuple):
             for object_id, object in self.objects.items():
                 if object.model == model:
                     raise RuntimeError(
-                        f"model {model_id} is being used by object"
-                        f" {object_id}")
+                        f"model {model_id} is being used by object" f" {object_id}"
+                    )
 
         models = {k: v for k, v in self.models.items() if k != model_id}
         del model
@@ -190,10 +189,12 @@ class Scene(NamedTuple):
           - object_id: the unique identifier of the object to replace.
           - new_obj: the new object.
         """
-        return self._replace(objects=replace_dict(
-            self.objects,
-            {object_id: new_obj},
-        ))
+        return self._replace(
+            objects=replace_dict(
+                self.objects,
+                {object_id: new_obj},
+            )
+        )
 
     @jaxtyped
     def set_object_position(
@@ -218,8 +219,7 @@ class Scene(NamedTuple):
     def set_object_orientation(
         self,
         object_id: GUID,
-        orientation: Optional[Union[Vec4f, tuple[float, float, float,
-                                                 float]]] = None,
+        orientation: Optional[Union[Vec4f, tuple[float, float, float, float]]] = None,
         rotation_matrix: Optional[Float[Array, "3 3"]] = None,
     ) -> "Scene":
         """Set the orientation of an object in the scene.
@@ -276,6 +276,7 @@ class Scene(NamedTuple):
           - double_sided: whether the object is double-sided.
         """
         new_obj = self.objects[object_id].replace_with_double_sided(
-            jnp.asarray(double_sided))
+            jnp.asarray(double_sided)
+        )
 
         return self._replace_obj(object_id, new_obj)

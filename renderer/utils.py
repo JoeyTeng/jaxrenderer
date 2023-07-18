@@ -31,7 +31,7 @@ def merge_canvases(
     canvases: Shaped[Array, "batch width height channel"],
 ) -> tuple[ZBuffer, Canvas]:
     """Merge canvases by selecting each pixel with max z value in zbuffer,
-        then merge zbuffer as well.
+    then merge zbuffer as well.
     """
     pixel_idx: Integer[Array, "width height"] = jnp.argmax(zbuffers, axis=0)
     assert isinstance(pixel_idx, Integer[Array, "width height"])
@@ -101,4 +101,6 @@ def build_texture_from_PyTinyrenderer(
         jnp.asarray(texture),
         (width, height, -1),
         order="C",
-    ).swapaxes(0, 1)[:, ::-1, :]
+    ).swapaxes(
+        0, 1
+    )[:, ::-1, :]

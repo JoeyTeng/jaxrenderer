@@ -17,37 +17,39 @@ from renderer import (
 # PROCESS: Set up models and objects
 
 scene: Scene = Scene()
-texture: Texture = jnp.array([
-    [1., 0., 0.],
-    [0., 1., 0.],
-    [0., 0., 1.],
-    [1., 1., 0.],
-]).reshape((2, 2, 3))
+texture: Texture = jnp.array(
+    [
+        [1.0, 0.0, 0.0],
+        [0.0, 1.0, 0.0],
+        [0.0, 0.0, 1.0],
+        [1.0, 1.0, 0.0],
+    ]
+).reshape((2, 2, 3))
 
 scene, cube_model_1 = scene.add_cube(
-    half_extents=(1., 1., 0.03),
+    half_extents=(1.0, 1.0, 0.03),
     diffuse_map=texture,
-    texture_scaling=(16., 16.),
+    texture_scaling=(16.0, 16.0),
 )
 scene, cube_1 = scene.add_object_instance(cube_model_1)
-scene = scene.set_object_position(cube_1, (0., 0., 0.))
-scene = scene.set_object_orientation(cube_1, (1., 0., 0., 0.))
+scene = scene.set_object_position(cube_1, (0.0, 0.0, 0.0))
+scene = scene.set_object_orientation(cube_1, (1.0, 0.0, 0.0, 0.0))
 
 scene, cube_model_2 = scene.add_cube(
-    half_extents=(10., 10., 0.03),
+    half_extents=(10.0, 10.0, 0.03),
     diffuse_map=texture,
-    texture_scaling=(160., 160.),
+    texture_scaling=(160.0, 160.0),
 )
 scene, cube_2 = scene.add_object_instance(cube_model_2)
-scene = scene.set_object_position(cube_2, (0., 0., 0.))
-scene = scene.set_object_orientation(cube_2, (1., 0., 0., 0.))
+scene = scene.set_object_position(cube_2, (0.0, 0.0, 0.0))
+scene = scene.set_object_orientation(cube_2, (1.0, 0.0, 0.0, 0.0))
 
 # PROCESS: Set up camera and light
 
 width = 640
 height = 480
 eye = jnp.asarray([2.5894797, -2.5876467, 1.9174135])
-target = [0., 0., 0.]
+target = [0.0, 0.0, 0.0]
 
 light: LightParameters = LightParameters()
 camera: CameraParameters = CameraParameters(
@@ -72,7 +74,7 @@ img = Renderer.get_camera_image(
     height=height,
     shadow_param=shadow_param,
 )
-rgb_array = lax.clamp(0., img * 255, 255.).astype(jnp.uint8)
+rgb_array = lax.clamp(0.0, img * 255, 255.0).astype(jnp.uint8)
 images.append(rgb_array)
 
 img = Renderer.get_camera_image(
@@ -83,7 +85,7 @@ img = Renderer.get_camera_image(
     height=height,
     shadow_param=shadow_param,
 )
-rgb_array = lax.clamp(0., img * 255, 255.).astype(jnp.uint8)
+rgb_array = lax.clamp(0.0, img * 255, 255.0).astype(jnp.uint8)
 images.append(rgb_array)
 
 # PROCESS: show

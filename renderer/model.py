@@ -45,6 +45,7 @@ class Model(NamedTuple):
     implementation
     [erwincoumans/tinyrenderer](https://github.com/erwincoumans/tinyrenderer).
     """
+
     verts: Vertices
     norms: Normals
     uvs: UVCoordinates
@@ -67,8 +68,8 @@ class Model(NamedTuple):
         specular_map: Optional[SpecularMap] = None,
     ) -> "Model":
         """A convenient method to create a Model assuming faces_norm and
-            faces_uv are the same as faces. A default specular_map is used if
-            not given, with a constant value of 2.0.
+        faces_uv are the same as faces. A default specular_map is used if
+        not given, with a constant value of 2.0.
         """
         if specular_map is None:
             # reference: https://github.com/erwincoumans/tinyrenderer/blob/89e8adafb35ecf5134e7b17b71b0f825939dc6d9/model.cpp#L215
@@ -103,8 +104,7 @@ class Model(NamedTuple):
         assert isinstance(self.faces_norm, FaceIndices), f"{self.faces_norm}"
         assert isinstance(self.faces_uv, FaceIndices), f"{self.faces_uv}"
         assert isinstance(self.diffuse_map, Texture), f"{self.diffuse_map}"
-        assert isinstance(self.specular_map,
-                          SpecularMap), f"{self.specular_map}"
+        assert isinstance(self.specular_map, SpecularMap), f"{self.specular_map}"
 
     @jaxtyped
     @checkify.checkify
@@ -160,6 +160,7 @@ Shape2DT: TypeAlias = Tuple[Integer[Array, ""], Integer[Array, ""]]
 
 class MergedModel(NamedTuple):
     """Merged model with vertices, normals, uv coordinates, and faces."""
+
     verts: Vertices
     norms: Normals
     uvs: UVCoordinates
@@ -202,8 +203,7 @@ class MergedModel(NamedTuple):
             `counts`.
         """
         values: Sequence[Shaped[Array, "_"]] = tree_map(
-            lambda count, value: jnp.full(
-                (count, *jnp.asarray(value).shape), value),
+            lambda count, value: jnp.full((count, *jnp.asarray(value).shape), value),
             counts,
             values,
         )
@@ -268,8 +268,7 @@ class MergedModel(NamedTuple):
         shapes = tree_map(lambda m: m.shape, maps)
         # pick the largest shape for each dimension
         single_shape: tuple[Integer[Array, ""], ...]
-        single_shape = tuple(
-            (max((shape[i] for shape in shapes)) for i in range(dims)))
+        single_shape = tuple((max((shape[i] for shape in shapes)) for i in range(dims)))
 
         dtype = jax.dtypes.result_type(*maps)
 
@@ -333,6 +332,7 @@ class MergedModel(NamedTuple):
 
 class ModelObject(NamedTuple):
     """Model object with model and transform."""
+
     model: Model
     """Reference to the model, with mesh, attached maps, etc."""
     local_scaling: Vec3f = jnp.ones(3)
@@ -373,7 +373,7 @@ class ModelObject(NamedTuple):
         """
         if rotation_matrix is None:
             if orientation is None:
-                orientation = jnp.array((0., 0., 0., 1.))
+                orientation = jnp.array((0.0, 0.0, 0.0, 1.0))
 
             assert isinstance(orientation, Vec4f), f"{orientation}"
             rotation_matrix = transform_matrix_from_rotation(orientation)
@@ -383,8 +383,7 @@ class ModelObject(NamedTuple):
             Float[Array, "3 3"],
         ), f"{rotation_matrix}"
 
-        return self._replace(
-            transform=self.transform.at[:3, :3].set(rotation_matrix))
+        return self._replace(transform=self.transform.at[:3, :3].set(rotation_matrix))
 
     @jaxtyped
     def replace_with_local_scaling(
@@ -418,12 +417,17 @@ class ModelObject(NamedTuple):
 @add_tracing_name
 def batch_models(models: Sequence[MergedModel]) -> MergedModel:
     """Merge multiple MergedModel into one, with each field being a batch, with
-        batch axis at 0. This is intended to facilitate `jax.vmap`.
+    batch axis at 0. This is intended to facilitate `jax.vmap`.
     """
-    merged_model = MergedModel._make((lax.concatenate(
-        [jnp.asarray(model[i])[None, ...] for model in models],
-        dimension=0,
-    ) for i in range(len(models[0]))))
+    merged_model = MergedModel._make(
+        (
+            lax.concatenate(
+                [jnp.asarray(model[i])[None, ...] for model in models],
+                dimension=0,
+            )
+            for i in range(len(models[0]))
+        )
+    )
 
     return merged_model
 
@@ -451,8 +455,7 @@ def merge_objects(objects: Sequence[ModelObject]) -> MergedModel:
         )
         assert isinstance(map_indices, Integer[Array, "vertices"])
 
-        map_wh_per_object = jnp.asarray(
-            [m.diffuse_map.shape[:2] for m in models])
+        map_wh_per_object = jnp.asarray([m.diffuse_map.shape[:2] for m in models])
         assert isinstance(map_wh_per_object, Integer[Array, "objects 2"])
 
         double_sided: Bool[Array, "vertices"]
@@ -464,7 +467,8 @@ def merge_objects(objects: Sequence[ModelObject]) -> MergedModel:
 
     # merge maps
     diffuse_map, single_map_shape = MergedModel.merge_maps(
-        [m.diffuse_map for m in models])
+        [m.diffuse_map for m in models]
+    )
     specular_map, _ = MergedModel.merge_maps([m.specular_map for m in models])
 
     @jaxtyped
@@ -491,7 +495,8 @@ def merge_objects(objects: Sequence[ModelObject]) -> MergedModel:
                 verts=obj.model.verts,
                 local_scaling=obj.local_scaling,
                 transform=obj.transform,
-            ) for obj in objects
+            )
+            for obj in objects
         ],
         [m.faces for m in models],
     )

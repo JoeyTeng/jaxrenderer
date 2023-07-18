@@ -14,25 +14,25 @@ from renderer.utils import transpose_for_display
 
 
 def test_render_batched_triangles():
-    eye = jnp.array((0., 0, 2))
-    center = jnp.array((0., 0, 0))
-    up = jnp.array((0., 1, 0))
+    eye = jnp.array((0.0, 0, 2))
+    center = jnp.array((0.0, 0, 0))
+    up = jnp.array((0.0, 1, 0))
 
     width: int = 1920
     height: int = 1080
     lowerbound = jnp.zeros(2, dtype=int)
     dimension = jnp.array((width, height))
     depth: int = 255
-    default_z: float = 1.
-    default_ch: float = 0.
+    default_z: float = 1.0
+    default_ch: float = 0.0
 
     camera: Camera = Camera.create(
         view=Camera.view_matrix(eye=eye, centre=center, up=up),
         projection=Camera.perspective_projection_matrix(
-            fovy=90.,
-            aspect=1.,
-            z_near=-1.,
-            z_far=1.,
+            fovy=90.0,
+            aspect=1.0,
+            z_near=-1.0,
+            z_far=1.0,
         ),
         viewport=Camera.viewport_matrix(
             lowerbound=lowerbound,
@@ -43,44 +43,49 @@ def test_render_batched_triangles():
 
     buffers = Buffers(
         zbuffer=lax.full((width, height), default_z),
-        targets=(lax.full((width, height, 3), default_ch), ),
+        targets=(lax.full((width, height, 3), default_ch),),
     )
-    face_indices = jnp.array((
-        (0, 1, 2),
-        (1, 3, 2),
-        (0, 2, 4),
-        (0, 4, 3),
-        (2, 5, 1),
-    ))
-    position = jnp.array((
-        (0., 0., 0.),
-        (2., 0., 0.),
-        (0., 1., 0.),
-        (1., 1., 0.),
-        (-1, -1, 1.),
-        (-2, 0., 0.),
-    ))
+    face_indices = jnp.array(
+        (
+            (0, 1, 2),
+            (1, 3, 2),
+            (0, 2, 4),
+            (0, 4, 3),
+            (2, 5, 1),
+        )
+    )
+    position = jnp.array(
+        (
+            (0.0, 0.0, 0.0),
+            (2.0, 0.0, 0.0),
+            (0.0, 1.0, 0.0),
+            (1.0, 1.0, 0.0),
+            (-1, -1, 1.0),
+            (-2, 0.0, 0.0),
+        )
+    )
     extra = GouraudExtraInput(
         position=position,
-        colour=jnp.array((
-            (1., 0., 0.),
-            (0., 1., 0.),
-            (0., 0., 1.),
-            (0., 0., 0.),
-            (1., 1., 1.),
-            (1., 1., 0.),
-        )),
+        colour=jnp.array(
+            (
+                (1.0, 0.0, 0.0),
+                (0.0, 1.0, 0.0),
+                (0.0, 0.0, 1.0),
+                (0.0, 0.0, 0.0),
+                (1.0, 1.0, 1.0),
+                (1.0, 1.0, 0.0),
+            )
+        ),
         normal=jax.vmap(lambda _: LightSource().direction)(position),
         light=LightSource(),
     )
 
     result = render(camera, GouraudShader, buffers, face_indices, extra)
 
-    assert len(result) == 2, ("The result should be a tuple of two elements")
-    assert len(result[1]) == 1, (
-        "The resultant attachment should has only one canvas")
+    assert len(result) == 2, "The result should be a tuple of two elements"
+    assert len(result[1]) == 1, "The resultant attachment should has only one canvas"
 
-    zbuffer, (canvas, ) = result
+    zbuffer, (canvas,) = result
     zbuffer = transpose_for_display(zbuffer)
     canvas = transpose_for_display(canvas)
 
@@ -89,21 +94,21 @@ def test_render_batched_triangles():
     assert canvas.shape == (height, width, 3)
 
     # test zbuffer
+    assert jnp.unique(zbuffer[293:528, 964:1423].astype(jnp.uint8)).shape == (
+        1,
+    ), "The depths of the triangle parallel to the camera should be uniform"
     assert (
-        jnp.unique(zbuffer[293:528, 964:1423].astype(jnp.uint8)).shape == (1, )
-    ), ("The depths of the triangle parallel to the camera should be uniform")
-    assert ((zbuffer[590:1049, 964:1423] == default_z).all()), (
-        "The depths of unrendered places should remain default")
-    assert (zbuffer[551, 914] < zbuffer[1026, 92]), (
-        "The depths of a triangle facing towards camera should be closer")
+        zbuffer[590:1049, 964:1423] == default_z
+    ).all(), "The depths of unrendered places should remain default"
+    assert (
+        zbuffer[551, 914] < zbuffer[1026, 92]
+    ), "The depths of a triangle facing towards camera should be closer"
 
     # test canvas
     default_pixel = jnp.array([default_ch] * 3)
     empty_pixels = (canvas == default_pixel).all(axis=2).sum()
-    assert empty_pixels > (width * height // 2), (
-        "The canvas should be mostly empty")
-    assert empty_pixels < (width * height), (
-        "The canvas should not be all empty")
+    assert empty_pixels > (width * height // 2), "The canvas should be mostly empty"
+    assert empty_pixels < (width * height), "The canvas should not be all empty"
 
 
 # Test perspective interpolation
@@ -125,7 +130,6 @@ class ExtraMixerOutput(NamedTuple):
 
 
 class _Shader(Shader[ExtraInput, ExtraFragmentData, ExtraMixerOutput]):
-
     @staticmethod
     @jaxtyped
     @jax.jit
@@ -205,25 +209,25 @@ class _Shader(Shader[ExtraInput, ExtraFragmentData, ExtraMixerOutput]):
 
 
 def test_perspective_interpolation():
-    eye = jnp.array((0., 0, 1))
-    center = jnp.array((0., 0, 0))
-    up = jnp.array((0., 1, 0))
+    eye = jnp.array((0.0, 0, 1))
+    center = jnp.array((0.0, 0, 0))
+    up = jnp.array((0.0, 1, 0))
 
     width: int = 1920
     height: int = 1080
     lowerbound = jnp.zeros(2, dtype=int)
     dimension = jnp.array((width, height))
     depth: int = 255
-    default_z: float = 1.
-    default_ch: float = 0.
+    default_z: float = 1.0
+    default_ch: float = 0.0
 
     camera: Camera = Camera.create(
         view=Camera.view_matrix(eye=eye, centre=center, up=up),
         projection=Camera.perspective_projection_matrix(
-            fovy=90.,
-            aspect=1.,
-            z_near=-1.,
-            z_far=1.,
+            fovy=90.0,
+            aspect=1.0,
+            z_near=-1.0,
+            z_far=1.0,
         ),
         viewport=Camera.viewport_matrix(
             lowerbound=lowerbound,
@@ -233,38 +237,43 @@ def test_perspective_interpolation():
     )
 
     buffers = Buffers(
-        zbuffer=lax.full((width, height), 1.),
-        targets=(lax.full((width, height, 3), 0.), ),
+        zbuffer=lax.full((width, height), 1.0),
+        targets=(lax.full((width, height, 3), 0.0),),
     )
-    face_indices = jnp.array(((0, 1, 2), ))
-    position = jnp.array((
-        (-1., -1., -2.),
-        (1., -1., -1.),
-        (0., 1., -1.),
-    ))
+    face_indices = jnp.array(((0, 1, 2),))
+    position = jnp.array(
+        (
+            (-1.0, -1.0, -2.0),
+            (1.0, -1.0, -1.0),
+            (0.0, 1.0, -1.0),
+        )
+    )
     extra = ExtraInput(
         position=position,
-        colour=jnp.array((
-            (1., 0., 0.),
-            (0., 1., 0.),
-            (0., 0., 1.),
-        )),
-        uv=jnp.array((
-            (0., 0.),
-            (10., 0.),
-            (0., 10.),
-        )),
+        colour=jnp.array(
+            (
+                (1.0, 0.0, 0.0),
+                (0.0, 1.0, 0.0),
+                (0.0, 0.0, 1.0),
+            )
+        ),
+        uv=jnp.array(
+            (
+                (0.0, 0.0),
+                (10.0, 0.0),
+                (0.0, 10.0),
+            )
+        ),
         normal=jax.vmap(lambda _: LightSource().direction)(position),
         light=LightSource(),
     )
 
     result = render(camera, _Shader, buffers, face_indices, extra)
 
-    assert len(result) == 2, ("The result should be a tuple of two elements")
-    assert len(result[1]) == 1, (
-        "The resultant attachment should has only one canvas")
+    assert len(result) == 2, "The result should be a tuple of two elements"
+    assert len(result[1]) == 1, "The resultant attachment should has only one canvas"
 
-    zbuffer, (canvas, ) = result
+    zbuffer, (canvas,) = result
     zbuffer = transpose_for_display(zbuffer)
     canvas = transpose_for_display(canvas)
 
@@ -273,18 +282,18 @@ def test_perspective_interpolation():
     assert canvas.shape == (height, width, 3)
 
     # test zbuffer
-    assert ((zbuffer == default_z).sum() > (width * height // 2)), (
+    assert (zbuffer == default_z).sum() > (width * height // 2), (
         "The depths of unrendered places should remain default, "
-        "which is the majority of the screen space")
-    assert (zbuffer[679, 701] < zbuffer[779, 1388]), (
-        "The depths of a triangle facing towards camera should be closer")
+        "which is the majority of the screen space"
+    )
+    assert (
+        zbuffer[679, 701] < zbuffer[779, 1388]
+    ), "The depths of a triangle facing towards camera should be closer"
 
     # test canvas
     default_pixel = jnp.array([default_ch] * 3)
     empty_pixels = (canvas == default_pixel).all(axis=2).sum()
-    assert empty_pixels > (width * height // 2), (
-        "The canvas should be mostly empty")
-    assert empty_pixels < (width * height), (
-        "The canvas should not be all empty")
+    assert empty_pixels > (width * height // 2), "The canvas should be mostly empty"
+    assert empty_pixels < (width * height), "The canvas should not be all empty"
 
     # TODO: find a way to specify the effect of "perspective transform"

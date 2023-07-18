@@ -21,12 +21,17 @@ from renderer import (
 # PROCESS: Set up models and objects
 
 scene: Scene = Scene()
-texture: Texture = jnp.array((
-    (255, 255, 255),  # White
-    (255, 0, 0),  # Red
-    (0, 255, 0),  # Green
-    (0, 0, 255),  # Blue
-)).reshape((2, 2, 3))[:, ::-1, :] / 255.0
+texture: Texture = (
+    jnp.array(
+        (
+            (255, 255, 255),  # White
+            (255, 0, 0),  # Red
+            (0, 255, 0),  # Green
+            (0, 0, 255),  # Blue
+        )
+    ).reshape((2, 2, 3))[:, ::-1, :]
+    / 255.0
+)
 
 scene, capsule_id = scene.add_capsule(
     radius=0.1,
@@ -45,12 +50,12 @@ for i in range(12):
         scene = scene.set_object_orientation(
             capsule_obj_id,
             # rotation_matrix=rotation_matrix((0., 1., 0.), 30 * (i - 6)),
-            orientation=quaternion((0., 1., 0.), 30 * (i - 6)),
+            orientation=quaternion((0.0, 1.0, 0.0), 30 * (i - 6)),
         )
     else:
         scene = scene.set_object_orientation(
             capsule_obj_id,
-            rotation_matrix=rotation_matrix((0., 1., 0.), 30 * (i - 6)),
+            rotation_matrix=rotation_matrix((0.0, 1.0, 0.0), 30 * (i - 6)),
         )
 
 # PROCESS: Set up camera and light
@@ -58,8 +63,8 @@ for i in range(12):
 width = 640
 height = 480
 
-eye = [0., 4., 0.]
-target = [0., 0., 0.]
+eye = [0.0, 4.0, 0.0]
+target = [0.0, 0.0, 0.0]
 
 light: LightParameters = LightParameters()
 camera_params: CameraParameters = CameraParameters(
@@ -72,19 +77,19 @@ shadow_param = ShadowParameters()
 
 # PROCESS: Render
 
-merged_models = [
-    merge_objects([scene.objects[obj_id]]) for obj_id in capsule_obj_ids
-]
+merged_models = [merge_objects([scene.objects[obj_id]]) for obj_id in capsule_obj_ids]
 buffers = Renderer.create_buffers(width, height, len(capsule_obj_ids))
 camera = Renderer.create_camera_from_parameters(camera_params)
 
-_, (images, ) = jax.vmap(lambda model, buffer: Renderer.render(
-    model=model,
-    light=light,
-    camera=camera,
-    buffers=buffer,
-    shadow_param=shadow_param,
-))(batch_models(merged_models), buffers)
+_, (images,) = jax.vmap(
+    lambda model, buffer: Renderer.render(
+        model=model,
+        light=light,
+        camera=camera,
+        buffers=buffer,
+        shadow_param=shadow_param,
+    )
+)(batch_models(merged_models), buffers)
 
 # PROCESS: show
 

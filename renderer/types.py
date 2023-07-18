@@ -7,7 +7,7 @@ from jaxtyping import Array, Bool, Float, Integer, jaxtyped
 
 from ._backport import JaxFloating, JaxInteger, NamedTuple, TypeAlias
 
-jax.config.update('jax_array', True)
+jax.config.update("jax_array", True)
 
 TRUE_ARRAY: Bool[Array, ""] = lax.full((), True, dtype=jnp.bool_)
 FALSE_ARRAY: Bool[Array, ""] = lax.full((), False, dtype=jnp.bool_)
@@ -83,7 +83,7 @@ class DtypeInfo(NamedTuple, Generic[_DtypeT]):
 
 
 class LightSource(NamedTuple):
-    direction: Vec3f = jax.numpy.array((0., 0., -1.))
+    direction: Vec3f = jax.numpy.array((0.0, 0.0, -1.0))
     """in world space, as it goes from that position to origin (camera).
 
     For example, if direction = camera's eye, full specular will be applied to
@@ -101,5 +101,6 @@ class Buffers(NamedTuple, Generic[_TargetsT]):
 
     targets must be a tuple of arrays with shape of (width, height, ...).
     """
+
     zbuffer: ZBuffer
     targets: _TargetsT
