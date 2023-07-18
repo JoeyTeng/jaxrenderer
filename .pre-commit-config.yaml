@@ -58,6 +58,20 @@ repos:
         files: (renderer/|examples/|test_resources/tests/).*.py$
         language_version: python3.11
 
+  - repo: https://github.com/RobertCraigie/pyright-python
+    rev: v1.1.317
+    hooks:
+      - id: pyright
+        files: (renderer/|examples/|test_resources/tests/).*.py$
+        additional_dependencies:
+          [
+            jax==0.4.13,
+            jaxlib==0.4.13,
+            jaxtyping==0.2.19,
+            numpy==1.24.3,
+            typing_extensions==4.3.0,
+          ]
+
   - repo: https://github.com/tox-dev/tox-ini-fmt
     rev: "1.3.1"
     hooks:
