@@ -4,7 +4,7 @@
 name: Checks
 
 on:
-  push
+  push:
   pull_request:
     types: [opened, reopened]
 
