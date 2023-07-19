@@ -92,3 +92,26 @@ skip_gitignore = true
 [tool.black]
 target-versions = ["py38", "py39", "py310", "py311"]
 required-version = 23
+
+[tool.pyright]
+include = ["renderer", "examples", "test_resources", "tests"]
+exclude = ["typings/**", ".*/**", "**/node_modules", "**/__pycache__"]
+typeCheckingMode = "strict"
+
+pythonVersion = "3.11"
+pythonPlatform = "All"
+
+executionEnvironments = [
+  { root = ".", pythonVersion = "3.11", pythonPlatform = "All" },
+]
+
+reportCallInDefaultInitializer = "information"
+reportImplicitOverride = "information"
+reportImplicitStringConcatenation = "none"
+reportImportCycles = "error"
+reportMissingSuperCall = "information"
+reportPropertyTypeMismatch = "information"
+reportShadowedImports = "warning"
+reportUninitializedInstanceVariable = "warning"
+reportUnnecessaryTypeIgnoreComment = "warning"
+reportUnusedCallResult = "information"
