@@ -4,8 +4,9 @@
 name: Checks
 
 on:
-  push:
-    branches: ["master"]
+  push
+  pull_request:
+    types: [opened, reopened]
 
 jobs:
   check:
@@ -33,7 +34,7 @@ jobs:
 
       - name: Lint with isort
         run: |
-          isort --check-only -jobs -1 .
+          isort --check-only --jobs -1 .
 
       - name: Lint with black
         run: |
