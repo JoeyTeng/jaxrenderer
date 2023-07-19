@@ -2,40 +2,49 @@ from __future__ import annotations  # tolerate "subscriptable 'type' for < 3.9
 
 import enum
 from functools import partial
-from typing import NamedTuple, Optional, Union
+from typing import NamedTuple, Optional, Union, cast
 
 import jax
 import jax.lax as lax
 import jax.numpy as jnp
-from jaxtyping import Array, Float, Integer, Num, jaxtyped
+from jaxtyping import Array, Float, Integer, Num
+from jaxtyping import jaxtyped  # pyright: ignore[reportUnknownVariableType]
 
+from ._backport import Tuple, TypeAlias
 from ._meta_utils import add_tracing_name
-from .types import JaxFloating, Triangle2Df, Vec2f, Vec3f, Vec4f
+from ._meta_utils import typed_jit as jit
+from .types import FloatV, JaxFloating, NumV, Triangle2Df, Vec2f, Vec2i, Vec3f, Vec4f
 
 # Transform matrix that takes a batch of homogeneous 3D vertices and transform
 # them into 2D cartesian vertices in screen space + Z value (making it 3D)
 #
 # The result of x-y values in screen space may be float, and thus further
 # conversion to integers are needed.
-World2Screen = Float[Array, "4 4"]
+World2Screen: TypeAlias = Float[Array, "4 4"]
 # Transform all coordinates from world space to view space, with camera at
 # origin. (Object Coordinates -> Eye Coordinates)
-View = Float[Array, "4 4"]
+View: TypeAlias = Float[Array, "4 4"]
 # Transform all coordinates from view space to viewing volume.
 # (Eye Coordinates -> Clip Coordinates)
-Projection = Float[Array, "4 4"]
+Projection: TypeAlias = Float[Array, "4 4"]
 # Transform all coordinates from clip space in a bi-unit cube ([-1...1]^3) to
 # a screen cube ([x, x+width] * [y, y+height] * [0, depth]) in view space.
 # (Normalised Device Coordinates -> Window Coordinates)
-Viewport = Float[Array, "4 4"]
+Viewport: TypeAlias = Float[Array, "4 4"]
 
 
 @jaxtyped
-@partial(jax.jit, donate_argnums=(0,), inline=True)
+@partial(jit, donate_argnums=(0,), inline=True)
 @add_tracing_name
 def normalise(vector: Float[Array, "dim"]) -> Float[Array, "dim"]:
     """normalise vector in-place."""
-    return vector / jnp.linalg.norm(vector)
+    result: Float[Array, "dim"] = cast(
+        Float[Array, "dim"],
+        vector / jnp.linalg.norm(vector),
+    )
+    assert isinstance(result, Float[Array, "dim"])
+
+    return result
 
 
 class Interpolation(enum.Enum):
@@ -46,14 +55,18 @@ class Interpolation(enum.Enum):
     """
 
     FLAT = 0
-    """Flat shading: use the value of the first vertex of the primitive""" ""
+    """Flat shading: use the value of the first vertex of the primitive"""
     NOPERSPECTIVE = 1
     """No perspective correction: linear interpolation in screen space"""
     SMOOTH = 2
     """Perspective correction: linear interpolation in clip space"""
 
     @jaxtyped
-    @partial(jax.jit, static_argnames=("self",), inline=True)
+    @partial(
+        jit,
+        static_argnames=("self",),
+        inline=True,
+    )
     @add_tracing_name
     def __call__(
         self,
@@ -71,7 +84,7 @@ class Interpolation(enum.Enum):
           - barycentric_clip: barycentric coordinates in clip space of the
             point to interpolate
         """
-        dtype = jax.dtypes.result_type(
+        dtype = jax.dtypes.result_type(  # pyright: ignore
             barycentric_screen,
             barycentric_clip,
             values,
@@ -80,7 +93,7 @@ class Interpolation(enum.Enum):
         # branches are ok because `self` is static: decided at compile time
         if self == Interpolation.FLAT:
             with jax.ensure_compile_time_eval():
-                coef = jnp.array([1, 0, 0], dtype=dtype)
+                coef = jnp.array([1, 0, 0], dtype=dtype)  # pyright: ignore
         elif self == Interpolation.NOPERSPECTIVE:
             coef = barycentric_screen
         elif self == Interpolation.SMOOTH:
@@ -88,9 +101,9 @@ class Interpolation(enum.Enum):
         else:
             raise ValueError(f"Unknown interpolation method {self}")
 
-        interpolated = lax.dot_general(
-            coef.astype(dtype),
-            values.astype(dtype),
+        interpolated = lax.dot_general(  # pyright: ignore[reportUnknownMemberType]
+            coef.astype(dtype),  # pyright: ignore[reportUnknownMemberType]
+            values.astype(dtype),  # pyright: ignore[reportUnknownMemberType]
             (((0,), (0,)), ([], [])),
         )
 
@@ -98,7 +111,11 @@ class Interpolation(enum.Enum):
 
 
 @jaxtyped
-@partial(jax.jit, static_argnames=("mode",), inline=True)
+@partial(
+    jit,
+    static_argnames=("mode",),
+    inline=True,
+)
 @add_tracing_name
 def interpolate(
     values: Num[Array, "3 *valueDimensions"],
@@ -122,22 +139,23 @@ def interpolate(
 
 
 @jaxtyped
-@partial(jax.jit, inline=True)
+@partial(jit, inline=True)
 @add_tracing_name
 def to_homogeneous(
     coordinates: Float[Array, "*batch dim"],
-    value: Float[Array, "*batch"] = jnp.array(1.0),
+    value: Union[float, Float[Array, "*batch"]] = 1.0,
 ) -> Float[Array, "*batch dim+1"]:
     """Transform the coordinates to homogeneous coordinates by append a batch
     of `value`s (default 1.) in the last axis."""
     if not isinstance(value, Float[Array, "*batch"]):
-        value = jnp.array(value)
+        value = jnp.array(value)  # pyright: ignore[reportUnknownMemberType]
 
-    paddings: Float[Array, "*batch 1"] = jnp.broadcast_to(
-        value.astype(jax.dtypes.result_type(coordinates)),
+    target_dtype = jax.dtypes.result_type(coordinates)  # pyright: ignore
+    paddings: Float[Array, "*batch 1"] = jnp.broadcast_to(  # pyright: ignore
+        value.astype(target_dtype),  # pyright: ignore
         (*coordinates.shape[:-1], 1),
     )
-    homo_coords: Float[Array, "*batch dim+1"] = lax.concatenate(
+    homo_coords: Float[Array, "*batch dim+1"] = lax.concatenate(  # pyright: ignore
         (coordinates, paddings),
         jnp.ndim(coordinates) - 1,
     )
@@ -146,7 +164,7 @@ def to_homogeneous(
 
 
 @jaxtyped
-@partial(jax.jit, inline=True)
+@partial(jit, inline=True)
 @add_tracing_name
 def normalise_homogeneous(
     coordinates: Float[Array, "*batch dim"],
@@ -162,7 +180,7 @@ def normalise_homogeneous(
 
 
 @jaxtyped
-@partial(jax.jit, inline=True)
+@partial(jit, inline=True)
 @add_tracing_name
 def to_cartesian(
     coordinates: Float[Array, "*batch dim"],
@@ -173,12 +191,15 @@ def to_cartesian(
     When last component is 0, this function just discard the w-component
     without division.
     """
-    return jnp.where(
+    result: Float[Array, "*batch dim-1"] = jnp.where(  # pyright: ignore
         # if w component is 0, just discard it and return.
         coordinates[..., -1:] == 0.0,
         coordinates[..., :-1],
         normalise_homogeneous(coordinates)[..., :-1],
     )
+    assert isinstance(result, Float[Array, "*batch dim-1"])
+
+    return result
 
 
 class Camera(NamedTuple):
@@ -205,7 +226,11 @@ class Camera(NamedTuple):
 
     @classmethod
     @jaxtyped
-    @partial(jax.jit, static_argnames=("cls",), inline=True)
+    @partial(
+        jit,
+        static_argnames=("cls",),
+        inline=True,
+    )
     @add_tracing_name
     def create(
         cls,
@@ -223,11 +248,11 @@ class Camera(NamedTuple):
           - view_inv: inverse of view. If not given, it will be computed.
         """
         if view_inv is None:
-            view_inv = jnp.linalg.inv(view)
+            view_inv = cast(View, jnp.linalg.inv(view))
         assert isinstance(view_inv, View)
 
-        projection_inv: Projection = lax.cond(
-            jnp.isclose(projection[3, 3], 0),
+        projection_inv: Projection = lax.cond(  # pyright: ignore
+            jnp.isclose(projection[3, 3], 0),  # pyright: ignore
             # is perspective projection matrix
             cls.perspective_projection_matrix_inv,
             # is orthographic projection matrix
@@ -254,7 +279,7 @@ class Camera(NamedTuple):
 
     @staticmethod
     @jaxtyped
-    @partial(jax.jit, inline=True)
+    @partial(jit, inline=True)
     @add_tracing_name
     def apply(
         points: Num[Array, "*N 4"],
@@ -277,12 +302,12 @@ class Camera(NamedTuple):
 
         with jax.ensure_compile_time_eval():
             lhs_contract_axis = 1 if jnp.ndim(points) == 2 else 0
-            dtype = jax.dtypes.result_type(points, matrix)
+            dtype = jax.dtypes.result_type(points, matrix)  # pyright: ignore
 
         # put `points` at lhs to keep batch axis at axis 0 in the result.
-        transformed: Num[Array, "*N 4"] = lax.dot_general(
-            points.astype(dtype),
-            matrix.astype(dtype),
+        transformed: Num[Array, "*N 4"] = lax.dot_general(  # pyright: ignore
+            points.astype(dtype),  # pyright: ignore[reportUnknownMemberType]
+            matrix.astype(dtype),  # pyright: ignore[reportUnknownMemberType]
             (((lhs_contract_axis,), (1,)), ([], [])),
         )
         assert isinstance(transformed, Num[Array, "*N 4"])
@@ -291,7 +316,7 @@ class Camera(NamedTuple):
 
     @classmethod
     @jaxtyped
-    @partial(jax.jit, static_argnames=("cls",), inline=True)
+    @partial(jit, static_argnames=("cls",), inline=True)
     @add_tracing_name
     def apply_pos(
         cls,
@@ -322,7 +347,7 @@ class Camera(NamedTuple):
 
     @classmethod
     @jaxtyped
-    @partial(jax.jit, static_argnames=("cls",), inline=True)
+    @partial(jit, static_argnames=("cls",), inline=True)
     @add_tracing_name
     def apply_vec(
         cls,
@@ -343,9 +368,12 @@ class Camera(NamedTuple):
         normalised_vectors = normalise(vectors)
         assert isinstance(normalised_vectors, Num[Array, "*N 3"])
 
-        points_homo = to_homogeneous(
-            normalised_vectors,
-            jnp.zeros((), dtype=vectors.dtype),
+        points_homo = cast(
+            Num[Array, "*N 4"],
+            to_homogeneous(
+                normalised_vectors,
+                jnp.zeros((), dtype=vectors.dtype),  # pyright: ignore
+            ),
         )
         assert isinstance(points_homo, Num[Array, "*N 4"])
 
@@ -361,7 +389,7 @@ class Camera(NamedTuple):
         return transformed_normalised
 
     @jaxtyped
-    @partial(jax.jit, inline=True)
+    @partial(jit, inline=True)
     @add_tracing_name
     def to_screen(
         self,
@@ -387,7 +415,7 @@ class Camera(NamedTuple):
         return normalised
 
     @jaxtyped
-    @partial(jax.jit, inline=True)
+    @partial(jit, inline=True)
     @add_tracing_name
     def to_clip(
         self,
@@ -410,7 +438,7 @@ class Camera(NamedTuple):
         return clip_space
 
     @jaxtyped
-    @partial(jax.jit, inline=True)
+    @partial(jit, inline=True)
     @add_tracing_name
     def to_screen_inv(
         self,
@@ -431,16 +459,19 @@ class Camera(NamedTuple):
         else:
             _screen = screen
 
-        clip = lax.linalg.triangular_solve(self.viewport, _screen)
+        clip: Float[Array, "*N 4"] = lax.linalg.triangular_solve(  # pyright: ignore
+            self.viewport,
+            _screen,
+        )
         assert isinstance(clip, Float[Array, "*N 4"])
-        shuffle = lax.cond(
+        shuffle = lax.cond(  # pyright: ignore
             self.projection[3, 3] == 0,
             # perspective projection
-            lambda: jnp.array([0, 1, 3, 2]),
+            lambda: jnp.array([0, 1, 3, 2]),  # pyright: ignore[reportUnknownMemberType]
             # orthographic projection
-            lambda: jnp.array([0, 1, 2, 3]),
+            lambda: jnp.array([0, 1, 2, 3]),  # pyright: ignore[reportUnknownMemberType]
         )
-        eye = lax.linalg.triangular_solve(
+        eye: Float[Array, "*N 4"] = lax.linalg.triangular_solve(  # pyright: ignore
             self.projection[..., shuffle],
             clip[..., shuffle],
         )[..., shuffle]
@@ -451,19 +482,11 @@ class Camera(NamedTuple):
         if screen.ndim == 1:
             world = world[0]
 
-        jax.debug.print(
-            "s {} c {} e {} w {}",
-            normalise_homogeneous(screen),
-            normalise_homogeneous(clip),
-            normalise_homogeneous(eye),
-            normalise_homogeneous(world),
-        )
-
         return world
 
     @staticmethod
     @jaxtyped
-    @partial(jax.jit, inline=True)
+    @partial(jit, inline=True)
     @add_tracing_name
     def inv_scale_translation_matrix(
         scale_translation_mat: Float[Array, "4 4"]
@@ -486,7 +509,7 @@ class Camera(NamedTuple):
         them back (in reverse order).
         """
 
-        scale_inv = jnp.diag(1.0 / jnp.diag(scale_translation_mat))
+        scale_inv = jnp.diag(1.0 / jnp.diag(scale_translation_mat))  # pyright: ignore
         assert isinstance(scale_inv, Float[Array, "4 4"])
 
         # scale_translation = scale @ translation;
@@ -496,7 +519,9 @@ class Camera(NamedTuple):
         assert isinstance(translation, Float[Array, "4 4"])
 
         # inverse of translation: negative of translation
-        translation_inv = jnp.identity(4).at[:3, 3].set(-translation[:3, 3])
+        translation_inv = (
+            jnp.identity(4).at[:3, 3].set(-translation[:3, 3])  # pyright: ignore
+        )
         assert isinstance(translation_inv, Float[Array, "4 4"])
 
         scale_translation_inv = translation_inv @ scale_inv
@@ -506,7 +531,7 @@ class Camera(NamedTuple):
 
     @staticmethod
     @jaxtyped
-    @partial(jax.jit, inline=True)
+    @partial(jit, inline=True)
     @add_tracing_name
     def view_matrix(
         eye: Vec3f,
@@ -531,19 +556,19 @@ class Camera(NamedTuple):
         """
         forward: Vec3f = normalise(centre - eye)
         up = normalise(up)
-        side: Vec3f = normalise(jnp.cross(forward, up))
-        up = jnp.cross(side, forward)
+        side: Vec3f = normalise(jnp.cross(forward, up))  # pyright: ignore
+        up = cast(Vec3f, jnp.cross(side, forward))
 
         m: View = (
-            jnp.identity(4)  #
+            jnp.identity(4)  # pyright: ignore[reportUnknownMemberType]
             .at[0, :3]
-            .set(side)  #
+            .set(side)
             .at[1, :3]
-            .set(up)  #
+            .set(up)
             .at[2, :3]
-            .set(-forward)  #
+            .set(-forward)
         )
-        translation: View = jnp.identity(4).at[:3, 3].set(-eye)
+        translation: View = jnp.identity(4).at[:3, 3].set(-eye)  # pyright: ignore
 
         view: View = m @ translation
 
@@ -551,7 +576,7 @@ class Camera(NamedTuple):
 
     @staticmethod
     @jaxtyped
-    @partial(jax.jit, inline=True)
+    @partial(jit, inline=True)
     @add_tracing_name
     def view_matrix_inv(
         eye: Vec3f,
@@ -581,24 +606,24 @@ class Camera(NamedTuple):
         """
         forward: Vec3f = normalise(centre - eye)
         up = normalise(up)
-        side: Vec3f = normalise(jnp.cross(forward, up))
-        up = jnp.cross(side, forward)
+        side: Vec3f = normalise(jnp.cross(forward, up))  # pyright: ignore
+        up = cast(Vec3f, jnp.cross(side, forward))
 
         # inverse of rotation is just the transpose
         m: View = (
-            jnp.identity(4)  #
+            jnp.identity(4)  # pyright: ignore[reportUnknownMemberType]
             .at[0, :3]
-            .set(side)  #
+            .set(side)
             .at[1, :3]
-            .set(up)  #
+            .set(up)
             .at[2, :3]
-            .set(-forward)  #
+            .set(-forward)
         )
         m_inv: View = m.T
         assert isinstance(m_inv, View)
 
         # inverse of translation is just the negative of translation
-        translation_inv: View = jnp.identity(4).at[:3, 3].set(eye)
+        translation_inv: View = jnp.identity(4).at[:3, 3].set(eye)  # pyright: ignore
         assert isinstance(translation_inv, View)
 
         view_matrix_inv: View = translation_inv @ m_inv
@@ -608,13 +633,13 @@ class Camera(NamedTuple):
 
     @staticmethod
     @jaxtyped
-    @partial(jax.jit, inline=True)
+    @partial(jit, inline=True)
     @add_tracing_name
     def perspective_projection_matrix(
-        fovy: JaxFloating,
-        aspect: JaxFloating,
-        z_near: JaxFloating,
-        z_far: JaxFloating,
+        fovy: Union[float, JaxFloating, FloatV],
+        aspect: Union[float, JaxFloating, FloatV],
+        z_near: Union[float, JaxFloating, FloatV],
+        z_far: Union[float, JaxFloating, FloatV],
     ) -> Projection:
         """Create a projection matrix to map the model in the camera frame (eye
             coordinates) onto the viewing volume (clip coordinates), using
@@ -637,20 +662,21 @@ class Camera(NamedTuple):
         Reference:
           - [gluPerspective](https://registry.khronos.org/OpenGL-Refpages/gl2.1/xhtml/gluPerspective.xml)
         """
-        f: jnp.single = 1.0 / lax.tan(
-            jnp.radians(jnp.asarray(fovy).astype(jnp.single)) / 2.0
+        deg: FloatV = jnp.asarray(fovy, dtype=jnp.single)  # pyright: ignore
+        f: FloatV = 1.0 / lax.tan(  # pyright: ignore[reportUnknownMemberType]
+            cast(FloatV, jnp.radians(deg) / 2.0)
         )
         projection: Projection = (
-            jnp.zeros((4, 4), dtype=jnp.single)  #
+            jnp.zeros((4, 4), dtype=jnp.single)  # pyright: ignore
             .at[0, 0]
-            .set(f / aspect)  #
+            .set(f / aspect)
             .at[1, 1]
-            .set(f)  #
+            .set(f)
             .at[2, 2]
-            .set((z_far + z_near) / (z_near - z_far))  #
+            .set((z_far + z_near) / (z_near - z_far))
             # translate z
             .at[2, 3]
-            .set((2.0 * z_far * z_near) / (z_near - z_far))  #
+            .set((2.0 * z_far * z_near) / (z_near - z_far))
             .at[3, 2]
             .set(-1.0)  # let \omega be -z
         )
@@ -659,7 +685,7 @@ class Camera(NamedTuple):
 
     @classmethod
     @jaxtyped
-    @partial(jax.jit, static_argnames=("cls",), inline=True)
+    @partial(jit, static_argnames=("cls",), inline=True)
     @add_tracing_name
     def perspective_projection_matrix_inv(cls, mat: Projection) -> Projection:
         """Create the inverse of a perspective projection matrix as defined in
@@ -679,7 +705,7 @@ class Camera(NamedTuple):
         rows, instead).
         """
         with jax.ensure_compile_time_eval():
-            shuffle: Integer[Array, "4"] = jnp.array((0, 1, 3, 2))
+            shuffle: Integer[Array, "4"] = jnp.array((0, 1, 3, 2))  # pyright: ignore
             assert isinstance(shuffle, Integer[Array, "4"])
 
         inv = cls.inv_scale_translation_matrix(mat[:, shuffle])[shuffle, :]
@@ -689,15 +715,15 @@ class Camera(NamedTuple):
 
     @staticmethod
     @jaxtyped
-    @partial(jax.jit, inline=True)
+    @partial(jit, inline=True)
     @add_tracing_name
     def orthographic_projection_matrix(
-        left: JaxFloating,
-        right: JaxFloating,
-        bottom: JaxFloating,
-        top: JaxFloating,
-        z_near: JaxFloating,
-        z_far: JaxFloating,
+        left: Union[float, JaxFloating],
+        right: Union[float, JaxFloating],
+        bottom: Union[float, JaxFloating],
+        top: Union[float, JaxFloating],
+        z_near: Union[float, JaxFloating],
+        z_far: Union[float, JaxFloating],
     ) -> Projection:
         """Create a projection matrix to map the model in the camera frame (eye
             coordinates) onto the viewing volume (clip coordinates), using
@@ -718,27 +744,27 @@ class Camera(NamedTuple):
         Reference:
           - [glOrtho](https://registry.khronos.org/OpenGL-Refpages/gl2.1/xhtml/glOrtho.xml)
         """
-        l_op: Float[Array, "3"] = jnp.array([right, top, z_far])
-        r_op: Float[Array, "3"] = jnp.array([left, bottom, z_near])
+        l_op: Float[Array, "3"] = jnp.array([right, top, z_far])  # pyright: ignore
+        r_op: Float[Array, "3"] = jnp.array([left, bottom, z_near])  # pyright: ignore
         projection: Projection = (
-            jnp.zeros((4, 4), dtype=jnp.single)  #
+            jnp.zeros((4, 4), dtype=jnp.single)  # pyright: ignore
             .at[0, 0]
-            .set(2 / (right - left))  #
+            .set(2 / (right - left))
             .at[1, 1]
-            .set(2 / (top - bottom))  #
+            .set(2 / (top - bottom))
             .at[2, 2]
-            .set(-2 / (z_far - z_near))  #
+            .set(-2 / (z_far - z_near))
             .at[3, 3]
             .set(1)  #
             .at[:3, 3]
-            .set(-(l_op + r_op) / (l_op - r_op))  #
+            .set(-(l_op + r_op) / (l_op - r_op))
         )
 
         return projection
 
     @classmethod
     @jaxtyped
-    @partial(jax.jit, static_argnames=("cls",))
+    @partial(jit, static_argnames=("cls",))
     @add_tracing_name
     def orthographic_projection_matrix_inv(cls, mat: Projection) -> Projection:
         """Create the inverse of a orthographic projection matrix as defined in
@@ -753,12 +779,12 @@ class Camera(NamedTuple):
 
     @staticmethod
     @jaxtyped
-    @partial(jax.jit, inline=True)
+    @partial(jit, inline=True)
     @add_tracing_name
     def perspective_projection_matrix_tinyrenderer(
         eye: Vec3f,
         centre: Vec3f,
-        dtype: jnp.dtype = jnp.single,
+        dtype: type = jnp.single,
     ) -> Projection:
         """Create a projection matrix to map the model in the camera frame (eye
             coordinates) onto the viewing volume (clip coordinates), using
@@ -773,21 +799,21 @@ class Camera(NamedTuple):
         Return: Projection, (4, 4) matrix.
         """
         projection: Projection = (
-            jnp.identity(4, dtype=dtype)  #
+            jnp.identity(4, dtype=dtype)  # pyright: ignore[reportUnknownMemberType]
             .at[3, 2]
-            .set(-1 / jnp.linalg.norm(eye - centre))  #
+            .set(-1 / jnp.linalg.norm(eye - centre))
         )
 
         return projection
 
     @staticmethod
     @jaxtyped
-    @partial(jax.jit, inline=True)
+    @partial(jit, inline=True)
     @add_tracing_name
     def viewport_matrix(
         lowerbound: Num[Array, "2"],
-        dimension: Integer[Array, "2"],
-        depth: Num[Array, ""],
+        dimension: Vec2i,
+        depth: Union[int, float, NumV],
     ) -> Viewport:
         """Create a viewport matrix to map the model in bi-unit cube
             ([-1...1]^3) onto the screen cube ([x, x+w]*[y, y+h]*[0, d]). The
@@ -805,22 +831,22 @@ class Camera(NamedTuple):
         """
         width, height = dimension
         viewport: Viewport = (
-            jnp.identity(4)  #
+            jnp.identity(4)  # pyright: ignore[reportUnknownMemberType]
             .at[:2, 3]
-            .set(lowerbound + dimension / 2)  #
+            .set(lowerbound + dimension / 2)
             .at[0, 0]
             .set(width / 2)
             .at[1, 1]
-            .set(height / 2)  #
+            .set(height / 2)
             .at[2, 2:]
-            .set(depth / 2)  #
+            .set(depth / 2)
         )
 
         return viewport
 
     @classmethod
     @jaxtyped
-    @partial(jax.jit, static_argnames=("cls",), inline=True)
+    @partial(jit, static_argnames=("cls",), inline=True)
     @add_tracing_name
     def viewport_matrix_inv(cls, viewport: Viewport) -> Viewport:
         """Create the inverse of a viewport matrix as defined in `viewport_matrix`.
@@ -837,7 +863,7 @@ class Camera(NamedTuple):
 
     @staticmethod
     @jaxtyped
-    @partial(jax.jit, inline=True)
+    @partial(jit, inline=True)
     @add_tracing_name
     def world_to_screen_matrix(width: int, height: int) -> World2Screen:
         """Generate the projection matrix to convert model coordinates to
@@ -850,43 +876,39 @@ class Camera(NamedTuple):
         """
         world2screen: World2Screen = (
             # 3. div by half to centering
-            jnp.identity(4).at[0, 0].set(0.5).at[1, 1].set(0.5)
+            jnp.identity(4).at[0, 0].set(0.5).at[1, 1].set(0.5)  # pyright: ignore
             # 2. mul by width, height
-            @ jnp.identity(4).at[0, 0].set(width).at[1, 1].set(height)
+            @ jnp.eye(4).at[0, 0].set(width).at[1, 1].set(height)  # pyright: ignore
             # 1. Add by 1 to make values positive
-            @ jnp.identity(4).at[:2, -1].set(1)
+            @ jnp.identity(4).at[:2, -1].set(1)  # pyright: ignore
         )
 
         return world2screen
 
 
 @jaxtyped
-@partial(jax.jit, inline=True)
+@partial(jit, inline=True)
 @add_tracing_name
 def compute_normal(triangle_verts: Float[Array, "3 3"]) -> Float[Array, "3"]:
-    normal: Float[Array, "3"] = jnp.cross(
-        triangle_verts[2, :] - triangle_verts[0, :],
-        triangle_verts[1, :] - triangle_verts[0, :],
+    normal: Float[Array, "3"] = cast(
+        Float[Array, "3"],
+        jnp.cross(
+            triangle_verts[2, :] - triangle_verts[0, :],
+            triangle_verts[1, :] - triangle_verts[0, :],
+        ),
     )
-    normal = normal / jnp.linalg.norm(normal, keepdims=True)
+    normal = cast(Float[Array, "3"], normal / jnp.linalg.norm(normal, keepdims=True))
     assert isinstance(normal, Float[Array, "3"])
 
     return normal
 
 
 @jaxtyped
-@partial(jax.jit, inline=True)
-@add_tracing_name
-def compute_normals(batch_verts: Float[Array, "b 3 3"]) -> Float[Array, "b 3"]:
-    return jax.vmap(compute_normal)(batch_verts)
-
-
-@jaxtyped
-@partial(jax.jit, inline=True)
+@partial(jit, inline=True)
 @add_tracing_name
 def quaternion(
-    rotation_axis: Union[Vec3f, tuple[float, float, float]],
-    rotation_angle: Union[Float[Array, ""], float],
+    rotation_axis: Union[Vec3f, Tuple[float, float, float]],
+    rotation_angle: Union[FloatV, float],
 ) -> Vec4f:
     """Generate a quaternion rotation from a rotation axis and angle.
 
@@ -895,24 +917,24 @@ def quaternion(
 
     The resultant quaternion is in order of (w, x, y, z).
     """
-    axis = normalise(jnp.asarray(rotation_axis))
-    angle = jnp.radians(jnp.asarray(rotation_angle))
+    axis = normalise(jnp.asarray(rotation_axis))  # pyright: ignore
+    angle = jnp.radians(jnp.asarray(rotation_angle))  # pyright: ignore
     assert isinstance(axis, Vec3f), f"{rotation_axis}"
-    assert isinstance(angle, Float[Array, ""]), f"{rotation_angle}"
+    assert isinstance(angle, FloatV), f"{rotation_angle}"
 
     quaternion: Vec4f = (
-        jnp.zeros(4)  #
+        jnp.zeros(4)  # pyright: ignore[reportUnknownMemberType]
         .at[0]
-        .set(jnp.cos(angle / 2))  #
+        .set(jnp.cos(angle / 2))  # pyright: ignore[reportUnknownMemberType]
         .at[1:]
-        .set(axis * jnp.sin(angle / 2))  #
+        .set(axis * jnp.sin(angle / 2))  # pyright: ignore[reportUnknownMemberType]
     )
 
     return quaternion
 
 
 @jaxtyped
-@partial(jax.jit, inline=True)
+@partial(jit, inline=True)
 @add_tracing_name
 def quaternion_mul(quatA: Vec4f, quatB: Vec4f) -> Vec4f:
     """Multiply two quaternion rotations, as to composite them.
@@ -926,12 +948,12 @@ def quaternion_mul(quatA: Vec4f, quatB: Vec4f) -> Vec4f:
     assert isinstance(quatB, Vec4f)
 
     with jax.ensure_compile_time_eval():
-        idx103 = jnp.array((1, 0, 3))
-        idx230 = jnp.array((2, 3, 0))
-        idx013 = jnp.array((0, 1, 3))
-        idx320 = jnp.array((3, 2, 0))
+        idx103 = jnp.array((1, 0, 3))  # pyright: ignore[reportUnknownMemberType]
+        idx230 = jnp.array((2, 3, 0))  # pyright: ignore[reportUnknownMemberType]
+        idx013 = jnp.array((0, 1, 3))  # pyright: ignore[reportUnknownMemberType]
+        idx320 = jnp.array((3, 2, 0))  # pyright: ignore[reportUnknownMemberType]
 
-    return jnp.array(
+    return jnp.array(  # pyright: ignore[reportUnknownMemberType]
         (
             quatA[0] * quatB[0] - quatA[1:] @ quatB[1:],
             quatA[:3] @ quatB[idx103] - quatA[3] * quatB[2],
@@ -942,11 +964,11 @@ def quaternion_mul(quatA: Vec4f, quatB: Vec4f) -> Vec4f:
 
 
 @jaxtyped
-@partial(jax.jit, inline=True)
+@partial(jit, inline=True)
 @add_tracing_name
 def rotation_matrix(
-    rotation_axis: Union[Vec3f, tuple[float, float, float]],
-    rotation_angle: Union[Float[Array, ""], float],
+    rotation_axis: Union[Vec3f, Tuple[float, float, float]],
+    rotation_angle: Union[FloatV, float],
 ) -> Float[Array, "3 3"]:
     """Generate a rotation matrix from a rotation axis and angle.
 
@@ -956,25 +978,27 @@ def rotation_matrix(
     References:
       - [glRotated](https://registry.khronos.org/OpenGL-Refpages/gl2.1/xhtml/glRotate.xml)
     """
-    axis = normalise(jnp.asarray(rotation_axis))
-    angle = jnp.radians(jnp.asarray(rotation_angle))
+    axis = normalise(jnp.asarray(rotation_axis))  # pyright: ignore
+    angle = jnp.radians(jnp.asarray(rotation_angle))  # pyright: ignore
     assert isinstance(axis, Vec3f), f"{rotation_axis}"
-    assert isinstance(angle, Float[Array, ""]), f"{rotation_angle}"
+    assert isinstance(angle, FloatV), f"{rotation_angle}"
 
-    s = jnp.sin(angle)
-    c = jnp.cos(angle)
+    c = jnp.cos(angle)  # pyright: ignore[reportUnknownMemberType]
 
-    rotation_matrix: Float[Array, "3 3"] = (
-        jnp.identity(3) * c  # +c at main diagonal
-        - jnp.sin(angle) * jnp.cross(axis, jnp.identity(3))  # second term
-        + (1 - c) * jnp.outer(axis, axis)  # first term
+    rotation_matrix: Float[Array, "3 3"] = cast(
+        Float[Array, "3 3"],
+        jnp.identity(3) * c  # +c at main diagonal # pyright: ignore
+        # second term
+        - jnp.sin(angle) * jnp.cross(axis, jnp.identity(3))  # pyright: ignore
+        + (1 - c) * jnp.outer(axis, axis),  # first term
     )
+    assert isinstance(rotation_matrix, Float[Array, "3 3"])
 
     return rotation_matrix
 
 
 @jaxtyped
-@partial(jax.jit, inline=True)
+@partial(jit, inline=True)
 @add_tracing_name
 def transform_matrix_from_rotation(rotation: Vec4f) -> Float[Array, "3 3"]:
     """Generate a transform matrix from a quaternion rotation.
@@ -989,10 +1013,13 @@ def transform_matrix_from_rotation(rotation: Vec4f) -> Float[Array, "3 3"]:
     s = 2.0 / d  # here s is $2\times s$ in Wikipedia.
 
     rs: Vec3f = rotation[1:] * s  # x y z
-    ((wx, wy, wz), (xx, xy, xz), (_, yy, yz)) = jnp.outer(rotation[:3], rs)
+    ((wx, wy, wz), (xx, xy, xz), (_, yy, yz)) = jnp.outer(  # pyright: ignore
+        rotation[:3],
+        rs,
+    )
     zz = rotation[3] * rs[2]
 
-    mat: Float[Array, "3 3"] = jnp.array(
+    mat: Float[Array, "3 3"] = jnp.array(  # pyright: ignore[reportUnknownMemberType]
         (
             (1.0 - (yy + zz), xy - wz, xz + wy),
             (xy + wz, 1.0 - (xx + zz), yz - wx),
@@ -1005,31 +1032,34 @@ def transform_matrix_from_rotation(rotation: Vec4f) -> Float[Array, "3 3"]:
 
 
 @jaxtyped
-@partial(jax.jit, inline=True)
+@partial(jit, inline=True)
 @add_tracing_name
 def barycentric(pts: Triangle2Df, p: Vec2f) -> Vec3f:
     """Compute the barycentric coordinate of `p`.
     Returns u[-1] < 0 if `p` is outside of the triangle.
     """
-    mat: Float[Array, "3 2"] = jnp.vstack(
+    mat: Float[Array, "3 2"] = jnp.vstack(  # pyright: ignore[reportUnknownMemberType]
         (
             pts[2] - pts[0],
             pts[1] - pts[0],
             pts[0] - p,
         )
     )
-    v: Vec3f = jnp.cross(mat[:, 0], mat[:, 1])
+    v: Vec3f = cast(Vec3f, jnp.cross(mat[:, 0], mat[:, 1]))
     # `u[2]` is 0, that means triangle is degenerate, in this case
     # return something with negative coordinates
-    v = lax.cond(
-        jnp.abs(v[-1]) < 1e-10,
-        lambda: jnp.array((-1.0, 1.0, 1.0)),
-        lambda: jnp.array(
-            (
-                1 - (v[0] + v[1]) / v[2],
-                v[1] / v[2],
-                v[0] / v[2],
-            )
+    v = cast(
+        Vec3f,
+        lax.cond(  # pyright: ignore[reportUnknownMemberType]
+            jnp.abs(v[-1]) < 1e-10,  # pyright: ignore[reportUnknownArgumentType]
+            lambda: jnp.array((-1.0, 1.0, 1.0)),  # pyright: ignore
+            lambda: jnp.array(  # pyright: ignore[reportUnknownMemberType]
+                (
+                    1 - (v[0] + v[1]) / v[2],
+                    v[1] / v[2],
+                    v[0] / v[2],
+                )
+            ),
         ),
     )
     assert isinstance(v, Vec3f)

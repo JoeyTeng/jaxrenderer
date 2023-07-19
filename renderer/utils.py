@@ -1,50 +1,67 @@
 from __future__ import annotations  # tolerate "subscriptable 'type' for < 3.9
 
 from functools import partial
-from typing import Sequence, Union
+from typing import Sequence, Union, cast
 
 import jax
 from jax import lax
 import jax.numpy as jnp
-from jaxtyping import Array, Integer, Num, Shaped, jaxtyped
+from jaxtyping import Array, Integer, Num, Shaped
+from jaxtyping import jaxtyped  # pyright: ignore[reportUnknownVariableType]
 
+from ._backport import Tuple
 from ._meta_utils import add_tracing_name
-from .types import Canvas, Texture, ZBuffer
+from ._meta_utils import typed_jit as jit
+from .types import Canvas, IntV, Texture, ZBuffer
 
 
 @jaxtyped
-@partial(jax.jit, inline=True)
+@partial(jit, inline=True)
 @add_tracing_name
 def get_value_from_index(
     matrix: Shaped[Array, "width height batch *valueDimensions"],
     index: Integer[Array, "width height"],
 ) -> Shaped[Array, "width height *valueDimensions"]:
     """Retrieve value along 3rd axis using index value from index matrix."""
-    return jax.vmap(jax.vmap(lambda mt, ix: mt[ix]))(matrix, index)
+
+    def _get(
+        mt: Shaped[Array, "batch *valueDimensions"],
+        ix: IntV,
+    ) -> Shaped[Array, "*valueDimensions"]:
+        return mt[ix]
+
+    return jax.vmap(jax.vmap(_get))(matrix, index)
 
 
 @jaxtyped
-@partial(jax.jit, inline=True)
+@partial(jit, inline=True)
 @add_tracing_name
 def merge_canvases(
     zbuffers: Num[Array, "batch width height"],
     canvases: Shaped[Array, "batch width height channel"],
-) -> tuple[ZBuffer, Canvas]:
+) -> Tuple[ZBuffer, Canvas]:
     """Merge canvases by selecting each pixel with max z value in zbuffer,
     then merge zbuffer as well.
     """
-    pixel_idx: Integer[Array, "width height"] = jnp.argmax(zbuffers, axis=0)
+    pixel_idx: Integer[Array, "width height"]
+    pixel_idx = jnp.argmax(zbuffers, axis=0)  # pyright: ignore[reportUnknownMemberType]
     assert isinstance(pixel_idx, Integer[Array, "width height"])
 
     zbuffer: ZBuffer = get_value_from_index(
-        lax.transpose(zbuffers, (1, 2, 0)),
+        lax.transpose(  # pyright: ignore[reportUnknownMemberType]
+            zbuffers,
+            (1, 2, 0),
+        ),
         pixel_idx,
     )
     assert isinstance(zbuffer, ZBuffer)
 
     canvas: Canvas = get_value_from_index(
         # first vmap along width, then height, then choose among "faces"
-        lax.transpose(canvases, (1, 2, 0, 3)),
+        lax.transpose(  # pyright: ignore[reportUnknownMemberType]
+            canvases,
+            (1, 2, 0, 3),
+        ),
         pixel_idx,
     )
     assert isinstance(canvas, Canvas)
@@ -53,7 +70,11 @@ def merge_canvases(
 
 
 @jaxtyped
-@partial(jax.jit, inline=True, static_argnames=("flip_vertical",))
+@partial(
+    jit,
+    inline=True,
+    static_argnames=("flip_vertical",),
+)
 @add_tracing_name
 def transpose_for_display(
     matrix: Num[Array, "fst snd *channel"],
@@ -67,7 +88,7 @@ def transpose_for_display(
     To be compatible with PyTinyrenderer and most image processing programs,
     the default behaviour is to flip vertically.
     """
-    mat = jnp.swapaxes(matrix, 0, 1)
+    mat = cast(Num[Array, "snd fst *channel"], jnp.swapaxes(matrix, 0, 1))
     assert isinstance(mat, Num[Array, "snd fst *channel"])
     if flip_vertical:
         mat = mat[::-1, ...]
@@ -97,10 +118,8 @@ def build_texture_from_PyTinyrenderer(
 
     Returns: A texture with shape `(width, height, channels)`.
     """
-    return jnp.reshape(
-        jnp.asarray(texture),
+    return jnp.reshape(  # pyright: ignore[reportUnknownMemberType]
+        jnp.asarray(texture),  # pyright: ignore[reportUnknownMemberType]
         (width, height, -1),
         order="C",
-    ).swapaxes(
-        0, 1
-    )[:, ::-1, :]
+    ).swapaxes(0, 1)[:, ::-1, :]

@@ -1,6 +1,7 @@
 import jax
 import jax.numpy as jnp
-from jaxtyping import Array, Float, jaxtyped
+from jaxtyping import Array, Float
+from jaxtyping import jaxtyped  # pyright: ignore[reportUnknownVariableType]
 
 from ..model import Model
 from ..types import (
@@ -13,7 +14,7 @@ from ..types import (
 )
 
 with jax.ensure_compile_time_eval():
-    _verts: Vertices = jnp.array(
+    _verts: Vertices = jnp.array(  # pyright: ignore[reportUnknownMemberType]
         (
             # back
             (-1.0, -1.0, 1.0),  # 0
@@ -47,7 +48,7 @@ with jax.ensure_compile_time_eval():
             (1.0, 1.0, -1.0),  # 23
         )
     )
-    _normals: Normals = jnp.array(
+    _normals: Normals = jnp.array(  # pyright: ignore[reportUnknownMemberType]
         (
             # back
             (0.0, 0.0, 1.0),  # 0
@@ -81,7 +82,7 @@ with jax.ensure_compile_time_eval():
             (0.0, 1.0, 0.0),  # 23
         )
     )
-    _uvs: UVCoordinates = jnp.array(
+    _uvs: UVCoordinates = jnp.array(  # pyright: ignore[reportUnknownMemberType]
         (
             # back
             (0.75, 0.25),  # 0
@@ -115,7 +116,7 @@ with jax.ensure_compile_time_eval():
             (0.25, 0),  # 23
         )
     )
-    _faces: FaceIndices = jnp.array(
+    _faces: FaceIndices = jnp.array(  # pyright: ignore[reportUnknownMemberType]
         (
             # back face
             (0, 1, 2),

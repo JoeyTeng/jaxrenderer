@@ -2,8 +2,8 @@ import argparse
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("-i", "--input", type=str, required=True)
-    parser.add_argument("-o", "--output", type=str, required=True)
+    _ = parser.add_argument("-i", "--input", type=str, required=True)
+    _ = parser.add_argument("-o", "--output", type=str, required=True)
 
     args = parser.parse_args()
 
@@ -22,17 +22,17 @@ if __name__ == "__main__":
             uv.append(tuple(strs[7:9]))
 
     with open(args.output, "w") as file:
-        file.write("vertices = (\n")
+        _ = file.write("vertices = (\n")
         for v in vertices:
-            file.write(f"    {v},\n".replace("'", "".replace('"', "")))
-        file.write(")\n")
+            _ = file.write(f"    {v},\n".replace("'", "".replace('"', "")))
+        _ = file.write(")\n")
 
-        file.write("normal = (\n")
+        _ = file.write("normal = (\n")
         for n in normal:
-            file.write(f"    {n},\n".replace("'", "".replace('"', "")))
-        file.write(")\n")
+            _ = file.write(f"    {n},\n".replace("'", "".replace('"', "")))
+        _ = file.write(")\n")
 
-        file.write("uv = (\n")
+        _ = file.write("uv = (\n")
         for u in uv:
-            file.write(f"    {u},\n".replace("'", "".replace('"', "")))
-        file.write(")\n")
+            _ = file.write(f"    {u},\n".replace("'", "".replace('"', "")))
+        _ = file.write(")\n")

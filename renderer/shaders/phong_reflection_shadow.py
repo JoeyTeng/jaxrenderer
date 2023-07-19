@@ -1,20 +1,26 @@
 from __future__ import annotations  # tolerate "subscriptable 'type' for < 3.9
 
 from functools import partial
-from typing import NamedTuple
+from typing import NamedTuple, cast
 
 import jax
 import jax.lax as lax
 import jax.numpy as jnp
-from jaxtyping import Array, Bool, Float, Integer, jaxtyped
+from jaxtyping import Array, Bool, Float, Integer
+from jaxtyping import jaxtyped  # pyright: ignore[reportUnknownVariableType]
+from typing_extensions import override
 
+from .._backport import Tuple
 from .._meta_utils import add_tracing_name
+from .._meta_utils import typed_jit as jit
 from ..geometry import Camera, normalise, normalise_homogeneous, to_homogeneous
 from ..model import MergedModel
 from ..shader import ID, MixerOutput, PerFragment, PerVertex, Shader
 from ..shadow import Shadow
 from ..types import (
+    BoolV,
     Colour,
+    IntV,
     LightSource,
     SpecularMap,
     Texture,
@@ -24,7 +30,7 @@ from ..types import (
     Vec4f,
 )
 
-jax.config.update("jax_array", True)
+jax.config.update("jax_array", True)  # pyright: ignore[reportUnknownMemberType]
 
 
 class PhongReflectionShadowTextureExtraInput(NamedTuple):
@@ -56,7 +62,7 @@ class PhongReflectionShadowTextureExtraInput(NamedTuple):
     light_dir_eye: Vec3f  # in eye/view space.
     texture_shape: Integer[Array, "objects 2"]
     texture_index: Integer[Array, "vertices"]
-    texture_offset: Integer[Array, ""]
+    texture_offset: IntV
     texture: Texture
     specular_map: SpecularMap
     shadow: Shadow
@@ -77,11 +83,11 @@ class PhongReflectionShadowTextureExtraFragmentData(NamedTuple):
       - colour: colour when passing from FS to mixer.
     """
 
-    normal: Vec3f = jnp.zeros(3)
-    uv: Vec2f = jnp.zeros(2)
-    texture_index: Integer[Array, ""] = jnp.array(0)
-    shadow_coord: Vec4f = jnp.zeros(4)
-    colour: Colour = jnp.zeros(3)
+    normal: Vec3f = jnp.zeros(3)  # pyright: ignore[reportUnknownMemberType]
+    uv: Vec2f = jnp.zeros(2)  # pyright: ignore[reportUnknownMemberType]
+    texture_index: IntV = jnp.array(0)  # pyright: ignore
+    shadow_coord: Vec4f = jnp.zeros(4)  # pyright: ignore[reportUnknownMemberType]
+    colour: Colour = jnp.zeros(3)  # pyright: ignore[reportUnknownMemberType]
 
 
 class PhongReflectionShadowTextureExtraMixerOutput(NamedTuple):
@@ -103,14 +109,15 @@ class PhongReflectionShadowTextureShader(
 
     @staticmethod
     @jaxtyped
-    @partial(jax.jit, inline=True)
+    @partial(jit, inline=True)
     @add_tracing_name
+    @override
     def vertex(
         gl_VertexID: ID,
         gl_InstanceID: ID,
         camera: Camera,
         extra: PhongReflectionShadowTextureExtraInput,
-    ) -> tuple[PerVertex, PhongReflectionShadowTextureExtraFragmentData]:
+    ) -> Tuple[PerVertex, PhongReflectionShadowTextureExtraFragmentData]:
         # Use gl_VertexID to index in `extra` buffer.
         position: Vec4f = to_homogeneous(extra.position[gl_VertexID])
         gl_Position: Vec4f = camera.to_clip(position)
@@ -144,8 +151,9 @@ class PhongReflectionShadowTextureShader(
 
     @staticmethod
     @jaxtyped
-    @partial(jax.jit, inline=True)
+    @partial(jit, inline=True)
     @add_tracing_name
+    @override
     def interpolate(
         values: PhongReflectionShadowTextureExtraFragmentData,
         barycentric_screen: Vec3f,
@@ -164,15 +172,16 @@ class PhongReflectionShadowTextureShader(
 
     @staticmethod
     @jaxtyped
-    @partial(jax.jit, inline=True)
+    @partial(jit, inline=True)
     @add_tracing_name
+    @override
     def fragment(
         gl_FragCoord: Vec4f,
-        gl_FrontFacing: Bool[Array, ""],
+        gl_FrontFacing: BoolV,
         gl_PointCoord: Vec2f,
         varying: PhongReflectionShadowTextureExtraFragmentData,
         extra: PhongReflectionShadowTextureExtraInput,
-    ) -> tuple[PerFragment, PhongReflectionShadowTextureExtraFragmentData]:
+    ) -> Tuple[PerFragment, PhongReflectionShadowTextureExtraFragmentData]:
         built_in: PerFragment = Shader.fragment(
             gl_FragCoord,
             gl_FrontFacing,
@@ -190,17 +199,17 @@ class PhongReflectionShadowTextureShader(
         assert isinstance(shadow_coord, Vec4f)
         shadow_str: Colour = extra.shadow.strength
         assert isinstance(shadow_str, Colour)
-        shadow: Colour = jnp.where(
+        shadow: Colour = jnp.where(  # pyright: ignore[reportUnknownMemberType]
             # if before/at shadow
             shadow_coord[2] <= extra.shadow.get(shadow_coord[:2]),
             # when not in shadow, keeps all light.
-            jnp.ones_like(shadow_str),
+            jnp.ones_like(shadow_str),  # pyright: ignore[reportUnknownMemberType]
             # if in shadow, only keep "1 - shadow_str" amount of light.
             1.0 - shadow_str,
         )
 
         # texture
-        texture_index = varying.texture_index.astype(int)
+        texture_index = varying.texture_index.astype(int)  # pyright: ignore
         texture_shape = extra.texture_shape[texture_index]
         uv = MergedModel.uv_repeat(
             uv=varying.uv,
@@ -208,7 +217,7 @@ class PhongReflectionShadowTextureShader(
             map_index=texture_index,
             offset=extra.texture_offset,
         )
-        uv = lax.floor(uv).astype(int)
+        uv = lax.floor(uv).astype(int)  # pyright: ignore[reportUnknownMemberType]
         assert isinstance(uv, Vec2i)
         texture_colour: Colour = extra.texture[uv[0], uv[1]]
 
@@ -217,17 +226,24 @@ class PhongReflectionShadowTextureShader(
         light_dir: Vec3f = normalise(extra.light_dir_eye)
 
         # Phong Reflection Model
-        diffuse: float = jnp.maximum(lax.dot(normal, light_dir), 0)
+        diffuse: Float[
+            Array, ""
+        ] = jnp.maximum(  # pyright: ignore[reportUnknownMemberType]
+            lax.dot(normal, light_dir),  # pyright: ignore[reportUnknownMemberType]
+            0,
+        )
         # If using standard reflection formula
         # `light_dir - 2 * diffuse * normal`, need to use
         # `-1 * light_dir` as `light_dir` instead.
         reflected_light: Vec3f = normalise(
-            2 * lax.dot(normal, light_dir) * normal - light_dir
+            2 * lax.dot(normal, light_dir) * normal - light_dir  # pyright: ignore
         )
         assert isinstance(reflected_light, Vec3f)
 
-        specular: float = lax.pow(
-            lax.max(reflected_light[2], 0.0),
+        specular: Float[
+            Array, ""
+        ] = lax.pow(  # pyright: ignore[reportUnknownMemberType]
+            lax.max(reflected_light[2], 0.0),  # pyright: ignore
             extra.specular_map[uv[0], uv[1]],
         )
 
@@ -242,7 +258,9 @@ class PhongReflectionShadowTextureShader(
 
         return (
             PerFragment(
-                keeps=jnp.logical_and(built_in.keeps, gl_FrontFacing),
+                keeps=jnp.logical_and(  # pyright: ignore[reportUnknownMemberType]
+                    built_in.keeps, gl_FrontFacing
+                ),
                 use_default_depth=built_in.use_default_depth,
             ),
             PhongReflectionShadowTextureExtraFragmentData(
@@ -254,16 +272,20 @@ class PhongReflectionShadowTextureShader(
 
     @staticmethod
     @jaxtyped
-    @partial(jax.jit, inline=True)
+    @partial(jit, inline=True)
     @add_tracing_name
+    @override
     def mix(
         gl_FragDepth: Float[Array, "primitives"],
         keeps: Bool[Array, "primitives"],
         extra: PhongReflectionShadowTextureExtraFragmentData,
-    ) -> tuple[MixerOutput, PhongReflectionShadowTextureExtraMixerOutput]:
+    ) -> Tuple[MixerOutput, PhongReflectionShadowTextureExtraMixerOutput]:
         mixer_output: MixerOutput
         extra_output: PhongReflectionShadowTextureExtraFragmentData
-        mixer_output, extra_output = Shader.mix(gl_FragDepth, keeps, extra)
+        mixer_output, extra_output = cast(
+            Tuple[MixerOutput, PhongReflectionShadowTextureExtraFragmentData],
+            Shader.mix(gl_FragDepth, keeps, extra),
+        )
         assert isinstance(mixer_output, MixerOutput)
         assert isinstance(extra_output, PhongReflectionShadowTextureExtraFragmentData)
 

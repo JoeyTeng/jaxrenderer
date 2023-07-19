@@ -1,15 +1,18 @@
 from __future__ import annotations  # tolerate "subscriptable 'type' for < 3.9
 
 from functools import partial
-from typing import NamedTuple
+from typing import NamedTuple, cast
 
 import jax
 import jax.lax as lax
 import jax.numpy as jnp
 from jax.tree_util import Partial
-from jaxtyping import Array, Bool, Float, Integer, jaxtyped
+from jaxtyping import Array, Bool, Float, Integer
+from jaxtyping import jaxtyped  # pyright: ignore[reportUnknownVariableType]
 
+from .._backport import Tuple, TypeAlias
 from .._meta_utils import add_tracing_name
+from .._meta_utils import typed_jit as jit
 from ..geometry import (
     Camera,
     Interpolation,
@@ -20,6 +23,7 @@ from ..geometry import (
 )
 from ..shader import ID, MixerOutput, PerFragment, PerVertex, Shader
 from ..types import (
+    BoolV,
     Colour,
     FaceIndices,
     LightSource,
@@ -27,15 +31,14 @@ from ..types import (
     Texture,
     Triangle,
     Vec2f,
-    Vec2i,
     Vec3f,
     Vec4f,
 )
 
-jax.config.update("jax_array", True)
+jax.config.update("jax_array", True)  # pyright: ignore[reportUnknownMemberType]
 
-Triangle3f = Float[Array, "3 3"]
-Triangle2f = Float[Array, "3 2"]
+Triangle3f: TypeAlias = Float[Array, "3 3"]
+Triangle2f: TypeAlias = Float[Array, "3 2"]
 
 
 class PhongTextureDarbouxExtraInput(NamedTuple):
@@ -80,12 +83,18 @@ class PhongTextureDarbouxExtraFragmentData(NamedTuple):
       - colour: colour when passing from FS to mixer.
     """
 
-    normal: Vec3f = jnp.array([0.0, 0.0, 0.0])
-    uv: Vec2f = jnp.zeros(2)
-    triangle: Triangle3f = jnp.zeros((3, 3))
-    triangle_uv: Triangle2f = jnp.zeros((3, 2))
+    normal: Vec3f = jnp.array(  # pyright: ignore[reportUnknownMemberType]
+        [0.0, 0.0, 0.0]
+    )
+    uv: Vec2f = jnp.zeros(2)  # pyright: ignore[reportUnknownMemberType]
+    triangle: Triangle3f = jnp.zeros((3, 3))  # pyright: ignore[reportUnknownMemberType]
+    triangle_uv: Triangle2f = jnp.zeros(  # pyright: ignore[reportUnknownMemberType]
+        (3, 2)
+    )
     """triangle in NDC, not interpolated."""
-    colour: Colour = jnp.array([0.0, 0.0, 0.0])
+    colour: Colour = jnp.array(  # pyright: ignore[reportUnknownMemberType]
+        [0.0, 0.0, 0.0]
+    )
 
 
 class PhongTextureDarbouxExtraMixerOutput(NamedTuple):
@@ -106,14 +115,14 @@ class PhongTextureDarbouxShader(
 
     @staticmethod
     @jaxtyped
-    @partial(jax.jit, inline=True)
+    @partial(jit, inline=True)
     @add_tracing_name
     def vertex(
         gl_VertexID: ID,
         gl_InstanceID: ID,
         camera: Camera,
         extra: PhongTextureDarbouxExtraInput,
-    ) -> tuple[PerVertex, PhongTextureDarbouxExtraFragmentData]:
+    ) -> Tuple[PerVertex, PhongTextureDarbouxExtraFragmentData]:
         # Use gl_VertexID to index in `extra` buffer.
         assert isinstance(gl_VertexID, ID), gl_VertexID
         assert isinstance(gl_InstanceID, ID), gl_InstanceID
@@ -162,7 +171,7 @@ class PhongTextureDarbouxShader(
 
     @staticmethod
     @jaxtyped
-    @partial(jax.jit, inline=True)
+    @partial(jit, inline=True)
     @add_tracing_name
     def interpolate(
         values: PhongTextureDarbouxExtraFragmentData,
@@ -176,10 +185,10 @@ class PhongTextureDarbouxShader(
             mode=Interpolation.SMOOTH,
         )
 
-        normal: Vec3f = smooth_interpolation(values.normal)
+        normal = cast(Vec3f, smooth_interpolation(values.normal))
         assert isinstance(normal, Vec3f)
 
-        uv: Vec2f = smooth_interpolation(values.uv)
+        uv = cast(Vec2f, smooth_interpolation(values.uv))
         assert isinstance(uv, Vec2f)
 
         varying: PhongTextureDarbouxExtraFragmentData = PhongTextureDarbouxExtraFragmentData(
@@ -198,15 +207,15 @@ class PhongTextureDarbouxShader(
 
     @staticmethod
     @jaxtyped
-    @partial(jax.jit, inline=True)
+    @partial(jit, inline=True)
     @add_tracing_name
     def fragment(
         gl_FragCoord: Vec4f,
-        gl_FrontFacing: Bool[Array, ""],
+        gl_FrontFacing: BoolV,
         gl_PointCoord: Vec2f,
         varying: PhongTextureDarbouxExtraFragmentData,
         extra: PhongTextureDarbouxExtraInput,
-    ) -> tuple[PerFragment, PhongTextureDarbouxExtraFragmentData]:
+    ) -> Tuple[PerFragment, PhongTextureDarbouxExtraFragmentData]:
         built_in: PerFragment = Shader.fragment(
             gl_FragCoord,
             gl_FrontFacing,
@@ -220,22 +229,27 @@ class PhongTextureDarbouxShader(
         ), f"Expected PhongTextureDarbouxExtraFragmentData, got {varying}"
 
         # repeat texture
-        uv = lax.floor(varying.uv).astype(int) % jnp.asarray(extra.texture.shape[:2])
+        uv = lax.floor(varying.uv).astype(int)  # pyright: ignore
+        uv = uv % jnp.asarray(extra.texture.shape[:2])  # pyright: ignore
 
         normal: Vec3f = normalise(varying.normal)
-        A: Float[Array, "3 3"] = jnp.vstack(
+        A: Float[Array, "3 3"] = jnp.vstack(  # pyright: ignore[reportUnknownMemberType]
             [
                 varying.triangle[1, :] - varying.triangle[0, :],
                 varying.triangle[2, :] - varying.triangle[0, :],
                 normal,
             ]
         )
-        AI: Float[Array, "3 3"] = jnp.linalg.inv(A)
+        AI = cast(Float[Array, "3 3"], jnp.linalg.inv(A))
         _uv: Triangle2f = varying.triangle_uv
-        i: Vec3f = AI @ jnp.array([_uv[1, 0] - _uv[0, 0], _uv[2, 0] - _uv[0, 0], 0])
-        j: Vec3f = AI @ jnp.array([_uv[1, 1] - _uv[0, 1], _uv[2, 1] - _uv[0, 1], 0])
+        i: Vec3f = AI @ jnp.array(  # pyright: ignore[reportUnknownMemberType]
+            [_uv[1, 0] - _uv[0, 0], _uv[2, 0] - _uv[0, 0], 0]
+        )
+        j: Vec3f = AI @ jnp.array(  # pyright: ignore[reportUnknownMemberType]
+            [_uv[1, 1] - _uv[0, 1], _uv[2, 1] - _uv[0, 1], 0]
+        )
 
-        B: Float[Array, "3 3"] = lax.concatenate(
+        B = lax.concatenate(  # pyright: ignore[reportUnknownMemberType]
             [
                 normalise(i)[:, None],
                 normalise(j)[:, None],
@@ -243,43 +257,56 @@ class PhongTextureDarbouxShader(
             ],
             dimension=1,
         )
+        assert isinstance(B, Float[Array, "3 3"])
+
         normal = normalise(B @ extra.normal_map[uv[0], uv[1]])
         assert isinstance(normal, Vec3f)
 
         texture_colour: Colour = extra.texture[uv[0], uv[1]]
 
         # light colour * intensity
-        light_colour: Colour = extra.light.colour * lax.dot(
-            normal,
-            normalise(extra.light.direction),
+        light_colour: Colour = (
+            extra.light.colour
+            * lax.dot(  # pyright: ignore[reportUnknownMemberType]
+                normal,
+                normalise(extra.light.direction),
+            )
         )
 
         return (
             PerFragment(
-                keeps=jnp.logical_and(built_in.keeps, gl_FrontFacing),
+                keeps=jnp.logical_and(  # pyright: ignore[reportUnknownMemberType]
+                    built_in.keeps,
+                    gl_FrontFacing,
+                ),
                 use_default_depth=built_in.use_default_depth,
             ),
             varying._replace(
-                colour=lax.cond(
-                    (light_colour >= 0).all(),
+                colour=lax.cond(  # pyright: ignore[reportUnknownMemberType]
+                    jnp.all(  # pyright: ignore[reportUnknownMemberType]
+                        light_colour >= 0
+                    ),
                     lambda: texture_colour * light_colour,
-                    lambda: jnp.zeros(3),
+                    lambda: jnp.zeros(3),  # pyright: ignore[reportUnknownMemberType]
                 )
             ),
         )
 
     @staticmethod
     @jaxtyped
-    @partial(jax.jit, inline=True)
+    @partial(jit, inline=True)
     @add_tracing_name
     def mix(
         gl_FragDepth: Float[Array, "primitives"],
         keeps: Bool[Array, "primitives"],
         extra: PhongTextureDarbouxExtraFragmentData,
-    ) -> tuple[MixerOutput, PhongTextureDarbouxExtraMixerOutput]:
+    ) -> Tuple[MixerOutput, PhongTextureDarbouxExtraMixerOutput]:
         mixer_output: MixerOutput
         extra_output: PhongTextureDarbouxExtraFragmentData
-        mixer_output, extra_output = Shader.mix(gl_FragDepth, keeps, extra)
+        mixer_output, extra_output = cast(
+            Tuple[MixerOutput, PhongTextureDarbouxExtraFragmentData],
+            Shader.mix(gl_FragDepth, keeps, extra),
+        )
         assert isinstance(mixer_output, MixerOutput)
         assert isinstance(extra_output, PhongTextureDarbouxExtraFragmentData)
 

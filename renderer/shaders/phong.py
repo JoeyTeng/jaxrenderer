@@ -1,19 +1,22 @@
 from __future__ import annotations  # tolerate "subscriptable 'type' for < 3.9
 
 from functools import partial
-from typing import NamedTuple
+from typing import NamedTuple, cast
 
 import jax
 import jax.lax as lax
 import jax.numpy as jnp
-from jaxtyping import Array, Bool, Float, jaxtyped
+from jaxtyping import Array, Bool, Float
+from jaxtyping import jaxtyped  # pyright: ignore[reportUnknownVariableType]
 
+from .._backport import Tuple
 from .._meta_utils import add_tracing_name
+from .._meta_utils import typed_jit as jit
 from ..geometry import Camera, normalise, to_homogeneous
 from ..shader import ID, MixerOutput, PerFragment, PerVertex, Shader
-from ..types import Colour, LightSource, Texture, Vec2f, Vec3f, Vec4f
+from ..types import BoolV, Colour, LightSource, Texture, Vec2f, Vec3f, Vec4f
 
-jax.config.update("jax_array", True)
+jax.config.update("jax_array", True)  # pyright: ignore[reportUnknownMemberType]
 
 
 class PhongTextureExtraInput(NamedTuple):
@@ -44,9 +47,13 @@ class PhongTextureExtraFragmentData(NamedTuple):
       - colour: colour when passing from FS to mixer.
     """
 
-    normal: Vec3f = jnp.array([0.0, 0.0, 0.0])
-    uv: Vec2f = jnp.zeros(2)
-    colour: Colour = jnp.array([0.0, 0.0, 0.0])
+    normal: Vec3f = jnp.array(  # pyright: ignore[reportUnknownMemberType]
+        [0.0, 0.0, 0.0]
+    )
+    uv: Vec2f = jnp.zeros(2)  # pyright: ignore[reportUnknownMemberType]
+    colour: Colour = jnp.array(  # pyright: ignore[reportUnknownMemberType]
+        [0.0, 0.0, 0.0]
+    )
 
 
 class PhongTextureExtraMixerOutput(NamedTuple):
@@ -66,14 +73,14 @@ class PhongTextureShader(
 
     @staticmethod
     @jaxtyped
-    @partial(jax.jit, inline=True)
+    @partial(jit, inline=True)
     @add_tracing_name
     def vertex(
         gl_VertexID: ID,
         gl_InstanceID: ID,
         camera: Camera,
         extra: PhongTextureExtraInput,
-    ) -> tuple[PerVertex, PhongTextureExtraFragmentData]:
+    ) -> Tuple[PerVertex, PhongTextureExtraFragmentData]:
         # Use gl_VertexID to index in `extra` buffer.
         position: Vec4f = to_homogeneous(extra.position[gl_VertexID])
         gl_Position: Vec4f = camera.to_clip(position)
@@ -98,15 +105,15 @@ class PhongTextureShader(
 
     @staticmethod
     @jaxtyped
-    @partial(jax.jit, inline=True)
+    @partial(jit, inline=True)
     @add_tracing_name
     def fragment(
         gl_FragCoord: Vec4f,
-        gl_FrontFacing: Bool[Array, ""],
+        gl_FrontFacing: BoolV,
         gl_PointCoord: Vec2f,
         varying: PhongTextureExtraFragmentData,
         extra: PhongTextureExtraInput,
-    ) -> tuple[PerFragment, PhongTextureExtraFragmentData]:
+    ) -> Tuple[PerFragment, PhongTextureExtraFragmentData]:
         built_in: PerFragment = Shader.fragment(
             gl_FragCoord,
             gl_FrontFacing,
@@ -117,25 +124,39 @@ class PhongTextureShader(
         assert isinstance(built_in, PerFragment)
 
         # repeat texture
-        uv = lax.floor(varying.uv).astype(int) % jnp.asarray(extra.texture.shape[:2])
+        uv = lax.floor(varying.uv).astype(int)  # pyright: ignore
+        uv = uv % jnp.asarray(extra.texture.shape[:2])  # pyright: ignore
         texture_colour: Colour = extra.texture[uv[0], uv[1]]
 
         # light colour * intensity
-        light_colour: Colour = extra.light.colour * lax.dot(
-            normalise(varying.normal),
-            normalise(extra.light.direction),
+        light_colour: Colour = (
+            extra.light.colour
+            * lax.dot(  # pyright: ignore[reportUnknownMemberType]
+                normalise(varying.normal),
+                normalise(extra.light.direction),
+            )
         )
 
         return (
             PerFragment(
-                keeps=jnp.logical_and(built_in.keeps, gl_FrontFacing),
+                keeps=jnp.logical_and(  # pyright: ignore[reportUnknownMemberType]
+                    built_in.keeps,
+                    gl_FrontFacing,
+                ),
                 use_default_depth=built_in.use_default_depth,
             ),
             PhongTextureExtraFragmentData(
-                colour=lax.cond(
-                    (light_colour >= 0).all(),
-                    lambda: texture_colour * light_colour,
-                    lambda: jnp.zeros(3),
+                colour=cast(
+                    Vec3f,
+                    lax.cond(  # pyright: ignore[reportUnknownMemberType]
+                        jnp.all(  # pyright: ignore[reportUnknownMemberType]
+                            light_colour >= 0
+                        ),
+                        lambda: texture_colour * light_colour,
+                        lambda: jnp.zeros(  # pyright: ignore[reportUnknownMemberType]
+                            3
+                        ),
+                    ),
                 ),
                 uv=varying.uv,
                 normal=varying.normal,
@@ -144,16 +165,19 @@ class PhongTextureShader(
 
     @staticmethod
     @jaxtyped
-    @partial(jax.jit, inline=True)
+    @partial(jit, inline=True)
     @add_tracing_name
     def mix(
         gl_FragDepth: Float[Array, "primitives"],
         keeps: Bool[Array, "primitives"],
         extra: PhongTextureExtraFragmentData,
-    ) -> tuple[MixerOutput, PhongTextureExtraMixerOutput]:
+    ) -> Tuple[MixerOutput, PhongTextureExtraMixerOutput]:
         mixer_output: MixerOutput
         extra_output: PhongTextureExtraFragmentData
-        mixer_output, extra_output = Shader.mix(gl_FragDepth, keeps, extra)
+        mixer_output, extra_output = cast(
+            Tuple[MixerOutput, PhongTextureExtraFragmentData],
+            Shader.mix(gl_FragDepth, keeps, extra),
+        )
         assert isinstance(mixer_output, MixerOutput)
         assert isinstance(extra_output, PhongTextureExtraFragmentData)
 

@@ -1,17 +1,60 @@
-from typing import Generic, TypeVar, Union
+from typing import Any, Generic, TypeVar, Union, cast
 
 import jax
 import jax.lax as lax
 import jax.numpy as jnp
-from jaxtyping import Array, Bool, Float, Integer, jaxtyped
+from jaxtyping import Array, Bool, Float, Integer, Num
+from jaxtyping import jaxtyped  # pyright: ignore[reportUnknownVariableType]
 
-from ._backport import JaxFloating, JaxInteger, NamedTuple, TypeAlias
+from ._backport import JaxFloating, JaxInteger, NamedTuple, Tuple, Type, TypeAlias
 
-jax.config.update("jax_array", True)
+__all__ = [
+    "JaxFloating",
+    "JaxInteger",
+    "TRUE_ARRAY",
+    "FALSE_ARRAY",
+    "INF_ARRAY",
+    "Index",
+    "CanvasMask",
+    "BatchCanvasMask",
+    "Canvas",
+    "ZBuffer",
+    "Colour",
+    "Vec2i",
+    "Vec3i",
+    "Vec2f",
+    "Vec3f",
+    "Vec4f",
+    "Triangle2D",
+    "Triangle",
+    "TriangleBarycentric",
+    "FaceIndices",
+    "Vertices",
+    "Normals",
+    "UVCoordinates",
+    "Texture",
+    "SpecularMap",
+    "NormalMap",
+    "DtypeInfo",
+    "LightSource",
+    "Buffers",
+]
 
-TRUE_ARRAY: Bool[Array, ""] = lax.full((), True, dtype=jnp.bool_)
-FALSE_ARRAY: Bool[Array, ""] = lax.full((), False, dtype=jnp.bool_)
-INF_ARRAY: Float[Array, ""] = lax.full((), jnp.inf)
+jax.config.update("jax_array", True)  # pyright: ignore[reportUnknownMemberType]
+
+BoolV: TypeAlias = Bool[Array, ""]
+"""JAX Array with single bool value.""" ""
+FloatV: TypeAlias = Float[Array, ""]
+"""JAX Array with single float value."""
+IntV: TypeAlias = Integer[Array, ""]
+"""JAX Array with single int value.""" ""
+NumV: TypeAlias = Num[Array, ""]
+"""JAX Array with single num value.""" ""
+
+
+TRUE_ARRAY: BoolV = lax.full((), True, dtype=jnp.bool_)  # pyright: ignore
+FALSE_ARRAY: BoolV = lax.full((), False, dtype=jnp.bool_)  # pyright: ignore
+INF_ARRAY: FloatV = lax.full((), jnp.inf)  # pyright: ignore
 
 Index: TypeAlias = Integer[Array, ""]
 
@@ -46,35 +89,41 @@ Texture: TypeAlias = Float[Array, "textureWidth textureHeight channel"]
 SpecularMap: TypeAlias = Float[Array, "textureWidth textureHeight"]
 NormalMap: TypeAlias = Float[Array, "textureWidth textureHeight 3"]
 
-_DtypeT = TypeVar("_DtypeT", bound=Union[JaxFloating, JaxInteger])
+_DtypeT = TypeVar("_DtypeT", bound=Union[JaxFloating, JaxInteger, int])
 
 
 class DtypeInfo(NamedTuple, Generic[_DtypeT]):
     min: _DtypeT
     max: _DtypeT
     bits: int
-    dtype: type
+    dtype: Type
 
     @classmethod
     @jaxtyped
     # cannot be jitted as `dtype` will not be a valid JAX type
-    def create(cls, dtype: type) -> "DtypeInfo":
+    def create(cls, dtype: Type[_DtypeT]) -> "DtypeInfo[_DtypeT]":
         with jax.ensure_compile_time_eval():
-            if jnp.issubdtype(dtype, jnp.floating):
+            if jnp.issubdtype(dtype, jnp.floating):  # pyright: ignore
                 finfo = jnp.finfo(dtype)
 
                 return cls(
-                    min=finfo.min,
-                    max=finfo.max,
+                    min=cast(
+                        _DtypeT,
+                        finfo.min,  # pyright: ignore[reportUnknownMemberType]
+                    ),
+                    max=cast(
+                        _DtypeT,
+                        finfo.max,  # pyright: ignore[reportUnknownMemberType]
+                    ),
                     bits=finfo.bits,
                     dtype=dtype,
                 )
-            if jnp.issubdtype(dtype, jnp.integer):
+            if jnp.issubdtype(dtype, jnp.integer):  # pyright: ignore
                 iinfo = jnp.iinfo(dtype)
 
                 return cls(
-                    min=iinfo.min,
-                    max=iinfo.max,
+                    min=cast(_DtypeT, iinfo.min),
+                    max=cast(_DtypeT, iinfo.max),
                     bits=iinfo.bits,
                     dtype=dtype,
                 )
@@ -83,16 +132,16 @@ class DtypeInfo(NamedTuple, Generic[_DtypeT]):
 
 
 class LightSource(NamedTuple):
-    direction: Vec3f = jax.numpy.array((0.0, 0.0, -1.0))
+    direction: Vec3f = jax.numpy.array((0.0, 0.0, -1.0))  # pyright: ignore
     """in world space, as it goes from that position to origin (camera).
 
     For example, if direction = camera's eye, full specular will be applied to
     triangles with normal towards camera.
     """
-    colour: Colour = jax.numpy.ones(3)
+    colour: Colour = jax.numpy.ones(3)  # pyright: ignore[reportUnknownMemberType]
 
 
-_TargetsT = TypeVar("_TargetsT", bound=tuple)
+_TargetsT = TypeVar("_TargetsT", bound=Tuple[Any, ...])
 """Extra target buffers, must be in shape of (width, height, ...)."""
 
 

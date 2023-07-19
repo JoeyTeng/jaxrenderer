@@ -5,20 +5,16 @@ from typing import List
 from PIL import Image
 import jax
 import jax.numpy as jnp
-from jaxtyping import jaxtyped
+from jaxtyping import jaxtyped  # pyright: ignore[reportUnknownVariableType]
 import numpy as np
 
-from renderer.types import (
-    FaceIndices,
-    Normals,
-    Texture,
-    UVCoordinates,
-    Vec2f,
-    Vec3f,
-    Vertices,
-)
+from renderer import Tuple, TypeAlias
+from renderer.types import FaceIndices, Normals, Texture, UVCoordinates, Vertices
 
-jax.config.update("jax_array", True)
+jax.config.update("jax_array", True)  # pyright: ignore[reportUnknownMemberType]
+
+T2f: TypeAlias = Tuple[float, float]
+T3f: TypeAlias = Tuple[float, float, float]
 
 
 @dataclass(frozen=True)
@@ -31,7 +27,7 @@ class Model:
     faces_uv: FaceIndices
 
     @jaxtyped
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         assert isinstance(self.verts, Vertices), self.verts.shape
         assert isinstance(self.norms, Vertices), self.norms.shape
         assert isinstance(self.uv, UVCoordinates), self.uv.shape
@@ -49,9 +45,9 @@ class Model:
 
 
 def make_model(fileContent: List[str]) -> Model:
-    verts: List[Vec3f] = []
-    norms: List[Vec3f] = []
-    uv: List[Vec2f] = []
+    verts: List[T3f] = []
+    norms: List[T3f] = []
+    uv: List[T2f] = []
     faces: List[List[int]] = []
     faces_norm: List[List[int]] = []
     faces_uv: List[List[int]] = []
@@ -61,13 +57,13 @@ def make_model(fileContent: List[str]) -> Model:
     _one_vertex = re.compile(r"\d+/\d*/\d*")
     for line in fileContent:
         if line.startswith("v "):
-            vert: Vec3f = tuple(map(float, _float.findall(line, 2)[:3]))
+            vert: T3f = tuple(map(float, _float.findall(line, 2)[:3]))
             verts.append(vert)
         elif line.startswith("vn "):
-            norm: Vec3f = tuple(map(float, _float.findall(line, 2)[:3]))
+            norm: T3f = tuple(map(float, _float.findall(line, 2)[:3]))
             norms.append(norm)
         elif line.startswith("vt "):
-            uv_coord: Vec2f = tuple(map(float, _float.findall(line, 2)[:2]))
+            uv_coord: T2f = tuple(map(float, _float.findall(line, 2)[:2]))
             uv.append(uv_coord)
         elif line.startswith("f "):
             face: List[int] = []
@@ -92,12 +88,12 @@ def make_model(fileContent: List[str]) -> Model:
             faces_uv.append(face_uv)
 
     return Model(
-        verts=jnp.array(verts),
-        norms=jnp.array(norms),
-        uv=jnp.array(uv),
-        faces=jnp.array(faces),
-        faces_norm=jnp.array(faces_norm),
-        faces_uv=jnp.array(faces_uv),
+        verts=jnp.array(verts),  # pyright: ignore[reportUnknownMemberType]
+        norms=jnp.array(norms),  # pyright: ignore[reportUnknownMemberType]
+        uv=jnp.array(uv),  # pyright: ignore[reportUnknownMemberType]
+        faces=jnp.array(faces),  # pyright: ignore[reportUnknownMemberType]
+        faces_norm=jnp.array(faces_norm),  # pyright: ignore[reportUnknownMemberType]
+        faces_uv=jnp.array(faces_uv),  # pyright: ignore[reportUnknownMemberType]
     )
 
 
@@ -108,8 +104,11 @@ def load_tga(path: str) -> Texture:
 
     for y in range(height):
         for x in range(width):
-            buffer[y, x] = np.array(image.getpixel((x, y)))
+            buffer[y, x] = np.array(image.getpixel((x, y)))  # pyright: ignore
 
-    texture: Texture = jnp.array(buffer, dtype=jnp.single)
+    texture: Texture = jnp.array(  # pyright: ignore[reportUnknownMemberType]
+        buffer,
+        dtype=jnp.single,
+    )
 
     return texture

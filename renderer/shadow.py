@@ -4,8 +4,9 @@ from typing import NamedTuple
 import jax
 import jax.lax as lax
 import jax.numpy as jnp
-from jaxtyping import Array, Float, jaxtyped
+from jaxtyping import jaxtyped  # pyright: ignore[reportUnknownVariableType]
 
+from ._backport import Tuple
 from ._meta_utils import add_tracing_name
 from .geometry import Camera, View, Viewport
 from .pipeline import render
@@ -14,6 +15,7 @@ from .types import (
     Buffers,
     Colour,
     FaceIndices,
+    FloatV,
     Vec2f,
     Vec2i,
     Vec3f,
@@ -38,7 +40,7 @@ class Shadow(NamedTuple):
     @staticmethod
     @jaxtyped
     @partial(
-        jax.jit,
+        jax.jit,  # pyright: ignore[reportUnknownMemberType]
         static_argnames=("loop_unroll",),
         donate_argnums=(0,),
         inline=True,
@@ -101,7 +103,7 @@ class Shadow(NamedTuple):
         )
         assert isinstance(_camera, Camera)
 
-        buffers = Buffers(zbuffer=shadow_map, targets=tuple())
+        buffers: Buffers[Tuple[()]] = Buffers(zbuffer=shadow_map, targets=tuple())
         extra = DepthExtraInput(position=verts)
         shadow_map, _ = render(
             _camera,
@@ -123,9 +125,8 @@ class Shadow(NamedTuple):
         return shadow
 
     @jaxtyped
-    @partial(jax.jit, inline=True)
     @add_tracing_name
-    def get(self, position: Vec2f) -> Float[Array, ""]:
+    def get(self, position: Vec2f) -> FloatV:
         """Get shadow depth at `position`.
 
         Parameters:
@@ -133,17 +134,20 @@ class Shadow(NamedTuple):
         """
         assert isinstance(position, Vec2f), f"{position} is not a Vec3f."
 
-        pos: Vec2i = lax.round(position[:2]).astype(int)
+        pos: Vec2i = lax.round(  # pyright: ignore[reportUnknownMemberType]
+            position[:2]
+        ).astype(int)
         assert isinstance(pos, Vec2i)
 
-        value: Float[Array, ""]
-        value = self.shadow_map.at[pos[0], pos[1]].get(
+        value: FloatV = self.shadow_map.at[
+            pos[0], pos[1]
+        ].get(  # pyright: ignore[reportUnknownMemberType]
             mode="fill",
             indices_are_sorted=True,
             unique_indices=True,
             # outside shadow map, no shadow
             fill_value=jnp.inf,
         )
-        assert isinstance(value, Float[Array, ""])
+        assert isinstance(value, FloatV)
 
         return value

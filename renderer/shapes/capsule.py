@@ -1,13 +1,14 @@
 import enum
 
 import jax
-import jax.lax as lax
 import jax.numpy as jnp
-from jaxtyping import Array, Float, Integer, jaxtyped
+from jaxtyping import Array, Integer
+from jaxtyping import jaxtyped  # pyright: ignore[reportUnknownVariableType]
 
 from ..model import Model
 from ..types import (
     FaceIndices,
+    FloatV,
     Normals,
     SpecularMap,
     Texture,
@@ -16,7 +17,7 @@ from ..types import (
 )
 
 with jax.ensure_compile_time_eval():
-    _verts: Vertices = jnp.array(
+    _verts: Vertices = jnp.array(  # pyright: ignore[reportUnknownMemberType]
         (
             (0.000000, 0.879385, 0.500000),
             (0.000000, 0.652704, 0.766044),
@@ -596,7 +597,7 @@ with jax.ensure_compile_time_eval():
             (0.000000, 1.000000, 0.173648),
         )
     )
-    _normals: Normals = jnp.array(
+    _normals: Normals = jnp.array(  # pyright: ignore[reportUnknownMemberType]
         (
             (0.000000, 0.869900, 0.493200),
             (-0.000000, 0.653800, 0.756700),
@@ -1176,7 +1177,7 @@ with jax.ensure_compile_time_eval():
             (-0.000000, 0.985200, 0.171300),
         )
     )
-    _uvs: UVCoordinates = jnp.array(
+    _uvs: UVCoordinates = jnp.array(  # pyright: ignore[reportUnknownMemberType]
         (
             (0.500144, 0.744995),
             (0.500144, 0.876330),
@@ -1756,7 +1757,7 @@ with jax.ensure_compile_time_eval():
             (0.500144, 0.583887),
         )
     )
-    _faces: FaceIndices = jnp.array(
+    _faces: FaceIndices = jnp.array(  # pyright: ignore[reportUnknownMemberType]
         (
             (0, 1, 2),
             (3, 4, 5),
@@ -1962,8 +1963,8 @@ class UpAxis(enum.IntEnum):
 
 @jaxtyped
 def create_capsule(
-    radius: Float[Array, ""],
-    half_height: Float[Array, ""],
+    radius: FloatV,
+    half_height: FloatV,
     up_axis: UpAxis,
     diffuse_map: Texture,
     specular_map: SpecularMap,
@@ -1980,7 +1981,8 @@ def create_capsule(
     Reference:
       - [create_capsule](https://github.com/erwincoumans/tinyrenderer/blob/89e8adafb35ecf5134e7b17b71b0f825939dc6d9/tinyrenderer.cpp#L914)
     """
-    shuffled: Integer[Array, "3"] = jnp.array(
+    shuffled: Integer[Array, "3"]
+    shuffled = jnp.array(  # pyright: ignore[reportUnknownMemberType]
         (
             (1, 2, 0),
             (0, 1, 2),
@@ -1990,7 +1992,7 @@ def create_capsule(
 
     verts: Vertices = _verts[:, shuffled] * radius
     verts = verts.at[:, up_axis].add(
-        jnp.where(
+        jnp.where(  # pyright: ignore[reportUnknownMemberType]
             verts[:, up_axis] > 0,
             half_height,
             -half_height,

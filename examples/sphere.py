@@ -19,14 +19,14 @@ scene: Scene = Scene()
 
 width = 640
 height = 480
-eye: Vec3f = jnp.array([2.0, 4.0, 1.0])
-target: Vec3f = jnp.array([0.0, 0.0, 0.0])
+eye: Vec3f = jnp.array([2.0, 4.0, 1.0])  # pyright: ignore[reportUnknownMemberType]
+target: Vec3f = jnp.array([0.0, 0.0, 0.0])  # pyright: ignore[reportUnknownMemberType]
 
 light: LightParameters = LightParameters(
-    direction=jnp.array([2.0, 4.0, 1.0]),
-    ambient=jnp.zeros(3),
-    diffuse=jnp.full(3, 1.0),
-    specular=jnp.full(3, 0.0),
+    direction=jnp.array([2.0, 4.0, 1.0]),  # pyright: ignore[reportUnknownMemberType]
+    ambient=jnp.zeros(3),  # pyright: ignore[reportUnknownMemberType]
+    diffuse=jnp.full(3, 1.0),  # pyright: ignore[reportUnknownMemberType]
+    specular=jnp.full(3, 0.0),  # pyright: ignore[reportUnknownMemberType]
 )
 camera: CameraParameters = CameraParameters(
     viewWidth=width,
@@ -37,7 +37,7 @@ camera: CameraParameters = CameraParameters(
 
 texture: Texture = (
     build_texture_from_PyTinyrenderer(
-        jnp.array(
+        jnp.array(  # pyright: ignore[reportUnknownMemberType]
             (
                 255,
                 255,
@@ -77,11 +77,13 @@ with jax.disable_jit(False):
         shadow_param=ShadowParameters(offset=0.05),
     )
 
-rgb_array = lax.clamp(0.0, img * 255, 255.0).astype(jnp.uint8)
+rgb_array = lax.clamp(  # pyright: ignore[reportUnknownMemberType]
+    0.0, img * 255, 255.0
+).astype(jnp.uint8)
 
 import matplotlib.pyplot as plt
 
-fig, ax = plt.subplots()
-ax.imshow(transpose_for_display(rgb_array))
+fig, ax = plt.subplots()  # pyright: ignore
+ax.imshow(transpose_for_display(rgb_array))  # pyright: ignore[reportUnknownMemberType]
 
-plt.show()
+plt.show()  # pyright: ignore[reportUnknownMemberType]

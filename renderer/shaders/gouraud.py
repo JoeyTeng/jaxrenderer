@@ -1,18 +1,21 @@
 from __future__ import annotations  # tolerate "subscriptable 'type' for < 3.9
 
 from functools import partial
-from typing import NamedTuple
+from typing import NamedTuple, cast
 
 import jax
 import jax.numpy as jnp
-from jaxtyping import Array, Bool, Float, jaxtyped
+from jaxtyping import Array, Float
+from jaxtyping import jaxtyped  # pyright: ignore[reportUnknownVariableType]
 
+from .._backport import Tuple
 from .._meta_utils import add_tracing_name
+from .._meta_utils import typed_jit as jit
 from ..geometry import Camera, normalise, to_homogeneous
 from ..shader import ID, PerFragment, PerVertex, Shader
-from ..types import Colour, LightSource, Vec2f, Vec3f, Vec4f
+from ..types import BoolV, Colour, FloatV, LightSource, Vec2f, Vec3f, Vec4f
 
-jax.config.update("jax_array", True)
+jax.config.update("jax_array", True)  # pyright: ignore[reportUnknownMemberType]
 
 
 class GouraudExtraInput(NamedTuple):
@@ -32,7 +35,9 @@ class GouraudExtraInput(NamedTuple):
 
 
 class GouraudExtraFragmentData(NamedTuple):
-    colour: Colour = jnp.array([0.0, 0.0, 0.0])
+    colour: Colour = jnp.array(  # pyright: ignore[reportUnknownMemberType]
+        [0.0, 0.0, 0.0]
+    )
 
 
 class GouraudExtraMixerOutput(NamedTuple):
@@ -48,14 +53,14 @@ class GouraudShader(
 
     @staticmethod
     @jaxtyped
-    @partial(jax.jit, inline=True)
+    @partial(jit, inline=True)
     @add_tracing_name
     def vertex(
         gl_VertexID: ID,
         gl_InstanceID: ID,
         camera: Camera,
         extra: GouraudExtraInput,
-    ) -> tuple[PerVertex, GouraudExtraFragmentData]:
+    ) -> Tuple[PerVertex, GouraudExtraFragmentData]:
         # Use gl_VertexID to index in `extra` buffer.
         position: Vec4f = to_homogeneous(extra.position[gl_VertexID])
         gl_Position: Vec4f = camera.to_clip(position)
@@ -65,11 +70,14 @@ class GouraudShader(
         # must be transformed by the inverse transpose of the model matrix.
         # Ref: https://github.com/ssloy/tinyrenderer/wiki/Lesson-5:-Moving-the-camera#transformation-of-normal-vectors
         normal: Vec3f = normalise(extra.normal[gl_VertexID])
-        intensity: Float[Array, ""] = jnp.dot(
-            normal,
-            normalise(extra.light.direction),
+        intensity = cast(
+            FloatV,
+            jnp.dot(
+                normal,
+                normalise(extra.light.direction),
+            ),
         )
-        assert isinstance(intensity, Float[Array, ""])
+        assert isinstance(intensity, FloatV)
 
         colour: Colour
         colour = extra.colour[gl_VertexID] * extra.light.colour * intensity
@@ -81,15 +89,15 @@ class GouraudShader(
 
     @staticmethod
     @jaxtyped
-    @partial(jax.jit, inline=True)
+    @partial(jit, inline=True)
     @add_tracing_name
     def fragment(
         gl_FragCoord: Vec4f,
-        gl_FrontFacing: Bool[Array, ""],
+        gl_FrontFacing: BoolV,
         gl_PointCoord: Vec2f,
         varying: GouraudExtraFragmentData,
         extra: GouraudExtraInput,
-    ) -> tuple[PerFragment, GouraudExtraFragmentData]:
+    ) -> Tuple[PerFragment, GouraudExtraFragmentData]:
         built_in: PerFragment = Shader.fragment(
             gl_FragCoord,
             gl_FrontFacing,
@@ -101,11 +109,13 @@ class GouraudShader(
 
         return (
             PerFragment(
-                keeps=jnp.array(
+                keeps=jnp.array(  # pyright: ignore[reportUnknownMemberType]
                     (
                         built_in.keeps,
                         gl_FrontFacing,
-                        (varying.colour >= 0).all(),
+                        jnp.all(  # pyright: ignore[reportUnknownMemberType]
+                            varying.colour >= 0
+                        ),
                     )
                 ).all(),
                 use_default_depth=built_in.use_default_depth,

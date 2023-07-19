@@ -2,22 +2,35 @@ from __future__ import annotations  # tolerate "subscriptable 'type' for < 3.9
 
 from abc import ABC, abstractmethod
 from functools import partial
-from typing import Generic, NamedTuple, TypeVar
+from typing import Generic, NamedTuple, TypeVar, Union
 
 import jax
 import jax.lax as lax
 import jax.numpy as jnp
 from jax.tree_util import Partial, tree_map
-from jaxtyping import Array, Bool, Float, Integer, PyTree, Shaped, jaxtyped
+from jaxtyping import Array, Bool, Float, Shaped
+from jaxtyping import PyTree  # pyright: ignore[reportUnknownVariableType]
+from jaxtyping import jaxtyped  # pyright: ignore[reportUnknownVariableType]
 
-from ._backport import Tuple
+from ._backport import Tuple, TypeAlias
 from ._meta_utils import add_tracing_name
+from ._meta_utils import typed_jit as jit
 from .geometry import Camera, Interpolation, interpolate
-from .types import FALSE_ARRAY, INF_ARRAY, TRUE_ARRAY, Vec2f, Vec3f, Vec4f
+from .types import (
+    FALSE_ARRAY,
+    INF_ARRAY,
+    TRUE_ARRAY,
+    BoolV,
+    FloatV,
+    IntV,
+    Vec2f,
+    Vec3f,
+    Vec4f,
+)
 
-jax.config.update("jax_array", True)
+jax.config.update("jax_array", True)  # pyright: ignore[reportUnknownMemberType]
 
-ID = Integer[Array, ""]
+ID: TypeAlias = IntV
 
 ShaderExtraInputT = TypeVar(
     "ShaderExtraInputT",
@@ -35,7 +48,7 @@ class PerVertex(NamedTuple):
     gl_Position: Vec4f
     # gl_PointSize is meaningful only when rendering point primitives.
     # not supported for now
-    # gl_PointSize: Float[Array, ""]
+    # gl_PointSize: FloatV
 
 
 class PerFragment(NamedTuple):
@@ -45,10 +58,10 @@ class PerFragment(NamedTuple):
     later by default.
     """
 
-    gl_FragDepth: Float[Array, ""] = INF_ARRAY
+    gl_FragDepth: FloatV = INF_ARRAY
     # not discard
-    keeps: Bool[Array, ""] = TRUE_ARRAY
-    use_default_depth: Bool[Array, ""] = FALSE_ARRAY
+    keeps: BoolV = TRUE_ARRAY
+    use_default_depth: BoolV = FALSE_ARRAY
 
 
 VaryingT = TypeVar(
@@ -71,8 +84,8 @@ class MixerOutput(NamedTuple):
     zbuffer: store depth value, and the result is used to set zbuffer.
     """
 
-    keep: Bool[Array, ""]
-    zbuffer: Float[Array, ""]
+    keep: BoolV
+    zbuffer: FloatV
 
 
 class Shader(ABC, Generic[ShaderExtraInputT, VaryingT, MixedExtraT]):
@@ -84,7 +97,7 @@ class Shader(ABC, Generic[ShaderExtraInputT, VaryingT, MixedExtraT]):
 
     @staticmethod
     @jaxtyped
-    @partial(jax.jit, inline=True)
+    @partial(jit, inline=True)
     @add_tracing_name
     @abstractmethod
     def vertex(
@@ -92,7 +105,7 @@ class Shader(ABC, Generic[ShaderExtraInputT, VaryingT, MixedExtraT]):
         gl_InstanceID: ID,
         camera: Camera,
         extra: ShaderExtraInputT,
-    ) -> tuple[PerVertex, VaryingT]:
+    ) -> Tuple[PerVertex, VaryingT]:
         """Override this to implement the vertex shader as defined by OpenGL.
 
         The meaning of the inputs follows the definitions in OpenGL. Additional
@@ -141,7 +154,7 @@ class Shader(ABC, Generic[ShaderExtraInputT, VaryingT, MixedExtraT]):
 
     @staticmethod
     @jaxtyped
-    @partial(jax.jit, inline=True)
+    @partial(jit, inline=True)
     @add_tracing_name
     def primitive_chooser(
         gl_FragCoord: Float[Array, "primitives 4"],
@@ -151,7 +164,7 @@ class Shader(ABC, Generic[ShaderExtraInputT, VaryingT, MixedExtraT]):
         values: VaryingT,
         barycentric_screen: Float[Array, "primitives 3"],
         barycentric_clip: Float[Array, "primitives 3"],
-    ) -> tuple[  #
+    ) -> Tuple[  #
         Float[Array, "kept_primitives 4"],  # gl_FragCoord
         Bool[Array, "kept_primitives"],  # gl_FrontFacing
         Float[Array, "kept_primitives 2"],  # gl_PointCoord
@@ -192,18 +205,22 @@ class Shader(ABC, Generic[ShaderExtraInputT, VaryingT, MixedExtraT]):
           the input parameters. The returned fields must be batched.
         """
         depths: Float[Array, "primitives"]
-        depths = jnp.where(keeps & gl_FrontFacing, gl_FragCoord[:, 2], jnp.inf)
+        depths = jnp.where(  # pyright: ignore[reportUnknownMemberType]
+            keeps & gl_FrontFacing,
+            gl_FragCoord[:, 2],
+            jnp.inf,
+        )
         assert isinstance(depths, Float[Array, "primitives"])
 
         # when all keeps are false, all depths will be inf, and there will
         # still be a valid idx generated, as promised by argmin.
-        idx: Integer[Array, ""] = jnp.argmin(depths)
-        assert isinstance(idx, Integer[Array, ""])
+        idx: IntV = jnp.argmin(depths)  # pyright: ignore[reportUnknownMemberType]
+        assert isinstance(idx, IntV)
 
         _get = partial(
             # use `dynamic_slice` instead of `slice` according to benchmark
             # https://colab.research.google.com/drive/1idBbgEDbxI6wi5kzlHF6kzWryoFSm8-p#scrollTo=-bHrz3kZ5A0p
-            lax.dynamic_slice_in_dim,
+            lax.dynamic_slice_in_dim,  # pyright: ignore[reportUnknownMemberType]
             start_index=idx,
             slice_size=1,
             axis=0,
@@ -235,7 +252,7 @@ class Shader(ABC, Generic[ShaderExtraInputT, VaryingT, MixedExtraT]):
 
     @staticmethod
     @jaxtyped
-    @partial(jax.jit, inline=True)
+    @partial(jit, inline=True)
     @add_tracing_name
     def interpolate(
         values: VaryingT,
@@ -274,15 +291,15 @@ class Shader(ABC, Generic[ShaderExtraInputT, VaryingT, MixedExtraT]):
 
     @staticmethod
     @jaxtyped
-    @partial(jax.jit, inline=True)
+    @partial(jit, inline=True)
     @add_tracing_name
     def fragment(
         gl_FragCoord: Vec4f,
-        gl_FrontFacing: Bool[Array, ""],
+        gl_FrontFacing: BoolV,
         gl_PointCoord: Vec2f,
         varying: VaryingT,
         extra: ShaderExtraInputT,
-    ) -> tuple[PerFragment, VaryingT]:
+    ) -> Tuple[PerFragment, VaryingT]:
         """Override this to implement the vertex shader as defined by OpenGL.
 
         This is optional. The default implementation writes nothing and thus
@@ -317,13 +334,13 @@ class Shader(ABC, Generic[ShaderExtraInputT, VaryingT, MixedExtraT]):
 
     @staticmethod
     @jaxtyped
-    @partial(jax.jit, inline=True)
+    @partial(jit, inline=True)
     @add_tracing_name
     def mix(
         gl_FragDepth: Float[Array, "kept_primitives"],
         keeps: Bool[Array, "kept_primitives"],
         extra: VaryingT,
-    ) -> tuple[MixerOutput, MixedExtraT]:
+    ) -> Tuple[MixerOutput, Union[VaryingT, MixedExtraT]]:
         """Override this to customise the mixing behaviour per fragment over
             different primitives (triangles).
 
@@ -345,24 +362,33 @@ class Shader(ABC, Generic[ShaderExtraInputT, VaryingT, MixedExtraT]):
             The values will be directly set to the `Buffers` **in the same
             order of the given definition** as if a usual `tuple`, but not
             based on field name.
+            This type must be `MixedExtraT` when override; `VaryingT` is used for the
+            default implementation here simply due to the limitation that we cannot
+            know how to create a MixedExtraT from a VaryingT at this time.
+            TODO: figure out a better way to define these generics.
 
         Reference:
           - [Blending](https://www.khronos.org/opengl/wiki/Blending)
         """
 
         depths: Float[Array, "primitives"]
-        depths = jnp.where(keeps, gl_FragDepth, jnp.inf)
+        depths = jnp.where(  # pyright: ignore[reportUnknownMemberType]
+            keeps,
+            gl_FragDepth,
+            jnp.inf,
+        )
         assert isinstance(depths, Float[Array, "primitives"])
 
         # when all keeps are false, all depths will be inf, and there will
         # still be a valid idx generated, as promised by argmin.
-        idx: Integer[Array, ""] = jnp.argmin(depths)
-        assert isinstance(idx, Integer[Array, ""])
+        idx: IntV
+        idx = jnp.argmin(depths)  # pyright: ignore[reportUnknownMemberType]
+        assert isinstance(idx, IntV)
 
-        keep: Bool[Array, ""] = keeps[idx]
-        assert isinstance(keep, Bool[Array, ""])
-        depth: Float[Array, ""] = depths[idx]
-        assert isinstance(depth, Float[Array, ""])
+        keep: BoolV = keeps[idx]
+        assert isinstance(keep, BoolV)
+        depth: FloatV = depths[idx]
+        assert isinstance(depth, FloatV)
 
         return (
             MixerOutput(keep=keep, zbuffer=depth),

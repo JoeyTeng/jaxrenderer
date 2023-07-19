@@ -1,23 +1,22 @@
-import jax
 import jax.lax as lax
 import jax.numpy as jnp
+from jaxtyping import Array, UInt8
 
 from renderer import (
     CameraParameters,
     LightParameters,
+    List,
     Renderer,
     Scene,
     ShadowParameters,
     Texture,
-    UpAxis,
-    build_texture_from_PyTinyrenderer,
     transpose_for_display,
 )
 
 # PROCESS: Set up models and objects
 
 scene: Scene = Scene()
-texture: Texture = jnp.array(
+texture: Texture = jnp.array(  # pyright: ignore[reportUnknownMemberType]
     [
         [1.0, 0.0, 0.0],
         [0.0, 1.0, 0.0],
@@ -48,8 +47,10 @@ scene = scene.set_object_orientation(cube_2, (1.0, 0.0, 0.0, 0.0))
 
 width = 640
 height = 480
-eye = jnp.asarray([2.5894797, -2.5876467, 1.9174135])
-target = [0.0, 0.0, 0.0]
+eye = jnp.asarray(  # pyright: ignore[reportUnknownMemberType]
+    [2.5894797, -2.5876467, 1.9174135]
+)
+target = (0.0, 0.0, 0.0)
 
 light: LightParameters = LightParameters()
 camera: CameraParameters = CameraParameters(
@@ -64,7 +65,7 @@ shadow_param = ShadowParameters()
 
 # PROCESS: Render
 
-images = []
+images: List[UInt8[Array, "width height channels"]] = []
 
 img = Renderer.get_camera_image(
     objects=[scene.objects[cube_1]],
@@ -74,7 +75,9 @@ img = Renderer.get_camera_image(
     height=height,
     shadow_param=shadow_param,
 )
-rgb_array = lax.clamp(0.0, img * 255, 255.0).astype(jnp.uint8)
+rgb_array = lax.clamp(  # pyright: ignore[reportUnknownMemberType]
+    0.0, img * 255, 255.0
+).astype(jnp.uint8)
 images.append(rgb_array)
 
 img = Renderer.get_camera_image(
@@ -85,25 +88,39 @@ img = Renderer.get_camera_image(
     height=height,
     shadow_param=shadow_param,
 )
-rgb_array = lax.clamp(0.0, img * 255, 255.0).astype(jnp.uint8)
+rgb_array = lax.clamp(  # pyright: ignore[reportUnknownMemberType]
+    0.0, img * 255, 255.0
+).astype(jnp.uint8)
 images.append(rgb_array)
 
 # PROCESS: show
 
+from typing import cast
+
 import matplotlib.animation as animation
+import matplotlib.figure as figure
+import matplotlib.image as mimage
 import matplotlib.pyplot as plt
 
-fig, ax = plt.subplots()
+fig: figure.Figure
+fig, ax = plt.subplots()  # pyright: ignore
 
 # ims is a list of lists, each row is a list of artists to draw in the
 # current frame; here we are just animating one artist, the image, in
 # each frame
-ims = []
+ims: List[List[mimage.AxesImage]] = []
 for i, img in enumerate(images):
-    im = ax.imshow(transpose_for_display(img), animated=True)
+    im = cast(
+        mimage.AxesImage,
+        ax.imshow(  # pyright: ignore[reportUnknownMemberType]
+            transpose_for_display(img), animated=True
+        ),
+    )
     if i == 0:
         # show an initial one first
-        ax.imshow(transpose_for_display(img))
+        ax.imshow(  # pyright: ignore[reportUnknownMemberType]
+            transpose_for_display(img)
+        )
 
     ims.append([im])
 
@@ -115,4 +132,4 @@ ani = animation.ArtistAnimation(
     repeat_delay=0,
 )
 
-plt.show()
+plt.show()  # pyright: ignore[reportUnknownMemberType]
