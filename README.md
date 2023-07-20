@@ -1,5 +1,14 @@
 # JAX Renderer
 
+[![PyPI Version](https://img.shields.io/pypi/v/jaxrenderer?logo=pypi)](https://pypi.org/project/jaxrenderer)
+[![Python Versions](https://img.shields.io/pypi/pyversions/jaxrenderer?logo=python)](https://pypi.org/project/jaxrenderer)
+[![License](https://img.shields.io/github/license/JoeyTeng/jaxrenderer)](https://github.com/JoeyTeng/jaxrenderer/blob/master/LICENSE)
+[![Build & Publish](https://github.com/JoeyTeng/jaxrenderer/actions/workflows/pypi.yml/badge.svg)](https://github.com/JoeyTeng/jaxrenderer/actions/workflows/pypi.yml)
+[![Lint & Test](https://github.com/JoeyTeng/jaxrenderer/actions/workflows/checks.yml/badge.svg)](https://github.com/JoeyTeng/jaxrenderer/actions/workflows/checks.yml)
+[![Checked with pyright](https://microsoft.github.io/pyright/img/pyright_badge.svg)](https://microsoft.github.io/pyright/)
+[![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
+[![Poetry](https://img.shields.io/endpoint?url=https://python-poetry.org/badge/v0.json&label=packaging)](https://python-poetry.org/)
+
 ## Key Difference from [erwincoumans/tinyrenderer](https://github.com/erwincoumans/tinyrenderer)
 
 - Native JAX implementation, supports `jit`, `vmap`, etc.
