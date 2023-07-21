@@ -62,3 +62,11 @@
 
 1. Lower minimum Python version to 3.8
 2. Introducing `type_extensions` package and improved typing annotations.
+
+## 0.3.2
+
+1. Bump minimum `jax` and `jaxlib` version to 0.4.0 as `jaxtyping` does not support `jax` 0.3.25.
+2. Bug fix: add `static_argnames` for utility function `transpose_for_display`.
+3. Change to [isort](https://github.com/PyCQA/isort) + [black](https://github.com/psf/black) code style.
+4. Migrate full codebase to be type-checked with [pyright](https://github.com/microsoft/pyright).
+5. Add smoke tests, and use GitHub Action as CI to run them.
