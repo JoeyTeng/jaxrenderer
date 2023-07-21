@@ -9,7 +9,6 @@ import jax.lax as lax
 import jax.numpy as jnp
 from jax.tree_util import tree_map
 from jaxtyping import Array, Bool, Float, Integer, Num, Shaped
-from jaxtyping import PyTree  # pyright: ignore[reportUnknownVariableType]
 from jaxtyping import jaxtyped  # pyright: ignore[reportUnknownVariableType]
 
 from ._backport import List, NamedTuple, Sequence, Tuple, TypeAlias
@@ -268,11 +267,8 @@ class MergedModel(NamedTuple):
         # TODO: find a better way to merge maps
         with jax.ensure_compile_time_eval():
             dims: int = len(maps[0].shape)
-            shapes: PyTree[Tuple[int, ...], ...]
-            shapes = cast(  # pyright: ignore[reportUnknownVariableType]
-                PyTree[Tuple[int, ...], ...],
-                tree_map(lambda m: m.shape, maps),
-            )
+            shapes: Sequence[Tuple[int, ...]]
+            shapes = tree_map(lambda m: m.shape, maps)
             # pick the largest shape for each dimension
             single_shape: Tuple[int, ...] = cast(
                 Tuple[int, ...],
@@ -485,7 +481,7 @@ def merge_objects(objects: Sequence[ModelObject]) -> MergedModel:
     diffuse_map, single_map_shape = MergedModel.merge_maps(
         [m.diffuse_map for m in models]
     )
-    specular_map = cast(MapT, MergedModel.merge_maps([m.specular_map for m in models]))
+    specular_map = MergedModel.merge_maps([m.specular_map for m in models])[0]
 
     @jaxtyped
     @partial(jit, inline=True)

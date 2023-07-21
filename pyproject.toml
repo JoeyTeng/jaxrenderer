@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "jaxrenderer"
-version = "0.3.1"
+version = "0.3.2"
 description = "Jax implementation of rasterizer renderer."
 authors = ["Joey Teng <joey.teng.dev@gmail.com>"]
 license = "Apache-2.0"
@@ -33,9 +33,9 @@ include = [
 
 [tool.poetry.dependencies]
 python = "^3.8"
-jax = ">=0.3.25,<5.0.0"
+jax = "^0.4.0"
 numpy = "^1.22.0"
-jaxlib = {version = ">=0.3.25,<5.0.0", source = "jax"}
+jaxlib = {version = "^0.4.0", source = "jax"}
 jaxtyping = [
     {version = ">=0.2.13,<0.2.20", python = ">=3.8,<3.9"},
     {version = "^0.2.19", python = "^3.9"}

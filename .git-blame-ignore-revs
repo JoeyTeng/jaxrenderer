@@ -1,0 +1,6 @@
+# Migrate code style with isort
+ab8273d47c979b2a53d1e53908843f2055178686
+# Migrate code style to Black
+a0e157decc3a729bdec493c9c432ad3a9a314175
+# To pass Pyright type checks
+b77a15efc65f7750cefd89925feb855efe881fa0
