@@ -481,7 +481,7 @@ def merge_objects(objects: Sequence[ModelObject]) -> MergedModel:
     diffuse_map, single_map_shape = MergedModel.merge_maps(
         [m.diffuse_map for m in models]
     )
-    specular_map = cast(MapT, MergedModel.merge_maps([m.specular_map for m in models]))
+    specular_map = MergedModel.merge_maps([m.specular_map for m in models])[0]
 
     @jaxtyped
     @partial(jit, inline=True)
