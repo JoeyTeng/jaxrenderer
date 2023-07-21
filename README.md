@@ -1,4 +1,4 @@
-# JAX Renderer
+# JAX Renderer: Differentiable Rendering in Batch on Accelerators
 
 [![PyPI Version](https://img.shields.io/pypi/v/jaxrenderer?logo=pypi)](https://pypi.org/project/jaxrenderer)
 [![Python Versions](https://img.shields.io/pypi/pyversions/jaxrenderer?logo=python)](https://pypi.org/project/jaxrenderer)
@@ -8,10 +8,79 @@
 [![Checked with pyright](https://microsoft.github.io/pyright/img/pyright_badge.svg)](https://microsoft.github.io/pyright/)
 [![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
 [![Poetry](https://img.shields.io/endpoint?url=https://python-poetry.org/badge/v0.json&label=packaging)](https://python-poetry.org/)
+[![Open in Colab](https://img.shields.io/badge/%7F-Open_demo_in_Colab-blue.svg?logo=googlecolab)](https://colab.research.google.com/github/JoeyTeng/jaxrenderer/blob/master/notebooks/Demo.ipynb)
+
+JaxRenderer is a differentiable renderer implemented in [JAX](https://github.com/google/jax), which supports differentiable rendering and batch rendering on accelerators (e.g. GPU, TPU) using simple function transformations provided by JAX. It is designed to replace by [erwincoumans/tinyrenderer](https://github.com/erwincoumans/tinyrenderer) in [BRAX](https://github.com/google/brax) to support visualising simulation results through fast rendering on accelerators with no external dependencies (other than JAX).
+
+You may find the [slides](https://github.com/JoeyTeng/jaxrenderer/blob/master/docs/final%20presentation%20slides.pdf) of my final year project presentation useful, where I gave a brief introduction to the renderer and the implementation details, including the design of the pipeline and comparing it with the OpenGL's.
+
+## Installation
+
+This project is distributed in [PyPI](https://pypi.org/project/jaxrenderer), and can be installed simply using `pip`:
+
+```bash
+pip install jaxrenderer
+```
+
+The minimum Python version is `3.8`, and the minimum JAX version is `0.4.0`. You may need to install `jaxlib` separately if you are using GPU or TPU; by default, the CPU version of jaxlib is installed. Please refer to [JAX's installation guide](https://github.com/google/jax#installation) for more details.
+
+## Usage
+
+> Please note that the package is imported with name `renderer` rather than the PyPI package name `jaxrenderer`. This may change in the future though.
+
+Some example scripts are provided in [examples](examples) folder. You may find the [demo notebook](notebooks/Demo.ipynb) useful as well. In the demo, there is batch rendering and differentiable rendering examples.
+
+The following is a simple example of rendering a cube with a texture map:
+
+```python
+import jax.numpy as jnp
+import renderer
+
+
+ImageWidth: int = 640
+ImageHeight: int = 480
+
+# Create a cube with texture map of pure blue
+cube = renderer.create_cube(
+    half_extents=jnp.ones(3, dtype=jnp.single),
+    texture_scaling=jnp.ones(2, dtype=jnp.single),
+    # pure blue texture map
+    diffuse_map=jnp.zeros((2, 2, 3), dtype=jnp.single).at[..., 2].set(1),
+    specular_map=jnp.ones((2, 2), dtype=jnp.single) * 2.0,
+)
+
+# Render the cube
+image = renderer.Renderer.get_camera_image(
+    objects=[renderer.ModelObject(model=cube)],
+    # Simply use defaults
+    camera=renderer.CameraParameters(
+        viewWidth=ImageWidth,
+        viewHeight=ImageHeight,
+        position=jnp.array([2.0, 4.0, 1.0], dtype=jnp.single),
+    ),
+    # Simply use defaults
+    light=renderer.LightParameters(),
+    width=ImageWidth,
+    height=ImageHeight,
+)
+```
+
+You may refer to [demo](https://colab.research.google.com/github/JoeyTeng/jaxrenderer/blob/master/notebooks/Demo.ipynb) for more complex examples, including differentiable rendering and batch rendering.
+
+## Gallery
+
+![Batch Rendering Example, 30 Ants inference on A100 GPU with 90 iterations, rendered onto 84x84 canvas in 5.26s](docs/assets/84x84%2030ants%2090f%2030fps.gif)
+> Batch Rendering Example, 30 Ants inference on A100 GPU with 90 iterations, rendered onto 84x84 canvas in 5.26s.
+
+![Phong Reflection Model + Hard Shadow, 30 frames 1920x1080, 2492 triangles in 9.25s](docs/assets/head.gif)
+> Phong Reflection Model + Hard Shadow, 30 frames 1920x1080, 2492 triangles in 9.25s.
+
+![Differentiable Rendering Toy Example, deduce light colour parameters](docs/assets/differentiable%20rendering.gif)
+> Differentiable Rendering Toy Example, deduce light colour parameters.
 
 ## Key Difference from [erwincoumans/tinyrenderer](https://github.com/erwincoumans/tinyrenderer)
 
-- Native JAX implementation, supports `jit`, `vmap`, etc.
+- Native JAX implementation, supports `jit`, `vmap`, `grad`, etc.
 - Lighting is computed in main camera's eye space; while in PyTinyrenderer it is computed in world space.
 - Texture specification is different: in PyTinyrenderer, the texture is specified in a flattened array, while in JAX Renderer, the texture is specified in a shape of (width, height, colour channels). A simple way to transform old specification to new specification is to use the convenient method `build_texture_from_PyTinyrenderer`.
 - Rendering pipeline is different. PyTinyrenderer renders one object at a time, and share zbuffer and framebuffer across one pass. This renderer first merges all objects into one big mesh in world space, then process all vertices together, then interpolates and rasterise and render. For fragment shading, this is done by sweeping each row in a for loop, and batch compute all pixels together. For computing a pixel, all fragments for that pixels are batch compute together, then mixed. This is more memory efficient and allows `vmap` batching as far as possible.
@@ -27,6 +96,8 @@
 
 - [ ] Support double-sided objects
 - [ ] Profile and accelerate implementation
-- [ ] Differentiable rendering
 - [ ] Build a ray tracer as well
+- [ ] Differentiable rendering with respect to mesh
+- [x] Differentiable rendering with respect to light parameters
+- [x] Differentiable rendering with respect to camera parameters _(not tested)_
 - [ ] <s>Correctly implement a proper clipping algorithm</s>
