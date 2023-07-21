@@ -36,13 +36,13 @@ Viewport: TypeAlias = Float[Array, "4 4"]
 @jaxtyped
 @partial(jit, donate_argnums=(0,), inline=True)
 @add_tracing_name
-def normalise(vector: Float[Array, "dim"]) -> Float[Array, "dim"]:
+def normalise(vector: Float[Array, "*a dim"]) -> Float[Array, "*a dim"]:
     """normalise vector in-place."""
-    result: Float[Array, "dim"] = cast(
-        Float[Array, "dim"],
+    result: Float[Array, "*a dim"] = cast(
+        Float[Array, "*a dim"],
         vector / jnp.linalg.norm(vector),
     )
-    assert isinstance(result, Float[Array, "dim"])
+    assert isinstance(result, Float[Array, "*a dim"])
 
     return result
 
@@ -191,13 +191,13 @@ def to_cartesian(
     When last component is 0, this function just discard the w-component
     without division.
     """
-    result: Float[Array, "*batch dim-1"] = jnp.where(  # pyright: ignore
+    result: Float[Array, "*batch dim-1"]
+    result = jnp.where(  # pyright: ignore[reportUnknownMemberType]
         # if w component is 0, just discard it and return.
         coordinates[..., -1:] == 0.0,
         coordinates[..., :-1],
         normalise_homogeneous(coordinates)[..., :-1],
     )
-    assert isinstance(result, Float[Array, "*batch dim-1"])
 
     return result
 
