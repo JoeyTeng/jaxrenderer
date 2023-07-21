@@ -67,6 +67,32 @@ image = renderer.Renderer.get_camera_image(
 
 You may refer to [demo](https://colab.research.google.com/github/JoeyTeng/jaxrenderer/blob/master/notebooks/Demo.ipynb) for more complex examples, including differentiable rendering and batch rendering.
 
+### Supported Shaders
+
+#### Built-in Shaders
+
+See [`renderer/shaders`](renderer/shaders) for more details.
+
+| Shader Name | Description | Light Direction |
+| ----------- | ----------- | --------------- |
+| depth | Depth Shader, outputs only screen-space depth value | N.A. |
+| gouraud | Gouraud Shading, interpolates vertex colour and outputs it as fragment colour | In model space |
+| gouraud_texture | Gouraud Shading with Texture, interpolates vertex colour and samples texture map in fragment shader | In model space |
+| phong | Phong Shading, interpolates vertex normal and computes light direction in fragment shader | In eye space, like "head light" |
+| phong_darboux | Phong Shading with Normal Map in Tangent Space, interpolates vertex normal and computes light direction in fragment shader, and samples normal map in tangent space | In eye space, like "head light" |
+| phong_reflection | Phong Shading with Phong Reflection Approximation, interpolates vertex normal and computes light direction in fragment shader, and samples texture map and specular map in fragment shader | In eye space |
+| phong_reflection_shadow | Phong Shading with Phong Reflection Approximation and Shadow, interpolates vertex normal and computes light direction in fragment shader, samples texture map and specular map in fragment shader, and tests shadow in fragment shader | In eye space |
+
+#### Custom Shaders
+
+You may implement your own shaders by inheriting from `Shader` and implement the following methods:
+
+- `vertex`: this is like vertex shader in OpenGL; it must be overridden.
+- `primitive_chooser`: at this stage the visibility at each pixel level is tested, it works like pre-z test in OpenGL, makes the pipeline works like a deferred shading pipeline. Noted that you may override and return more than one primitive for each pixel to support transparency. The default implementation simply chooses the primitive with minimum z value (depth).
+- `interpolate`: this controls how attributes associated with a fragment is interpolated from the vertices; the default implementation interpolates everything using perspective interpolation.
+- `fragment`: this is like fragment shader in OpenGL; a default implementation is provided if you do not need to process any data in the fragment shader.
+- `mix`: this is like blending stage in OpenGL; the default implementation simple uses the data from the fragment with minimum screen-space z value (depth).
+
 ## Gallery
 
 ![Batch Rendering Example, 30 Ants inference on A100 GPU with 90 iterations, rendered onto 84x84 canvas in 5.26s](docs/assets/84x84%2030ants%2090f%2030fps.gif)
