@@ -30,7 +30,6 @@ from ..types import (
     Vec4f,
 )
 
-jax.config.update("jax_array", True)  # pyright: ignore[reportUnknownMemberType]
 
 
 class PhongReflectionShadowTextureExtraInput(NamedTuple):

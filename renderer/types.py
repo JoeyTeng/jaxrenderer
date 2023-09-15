@@ -40,7 +40,6 @@ __all__ = [
     "Buffers",
 ]
 
-jax.config.update("jax_array", True)  # pyright: ignore[reportUnknownMemberType]
 
 BoolV: TypeAlias = Bool[Array, ""]
 """JAX Array with single bool value.""" ""
