@@ -22,7 +22,7 @@ This project is distributed in [PyPI](https://pypi.org/project/jaxrenderer), and
 pip install jaxrenderer
 ```
 
-The minimum Python version is `3.8`, and the minimum JAX version is `0.4.0`. You may need to install `jaxlib` separately if you are using GPU or TPU; by default, the CPU version of jaxlib is installed. Please refer to [JAX's installation guide](https://github.com/google/jax#installation) for more details.
+The minimum Python version is `3.8`, and the minimum JAX version is `0.4.14`. You may need to install `jaxlib` separately if you are using GPU or TPU; by default, the CPU version of jaxlib is installed. Please refer to [JAX's installation guide](https://github.com/google/jax#installation) for more details.
 
 ## Usage
 
