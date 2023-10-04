@@ -46,7 +46,7 @@ typing_extensions = "^4.3.0"
 
 [tool.poetry.group.dev.dependencies]
 matplotlib = "^3.6.2"
-pillow = "^9.4.0"
+pillow = ">=9.4,<11.0"
 importlib-resources = "^5.12.0"
 
 
