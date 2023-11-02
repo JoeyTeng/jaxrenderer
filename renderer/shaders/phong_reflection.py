@@ -29,6 +29,8 @@ from ..types import (
     Vec4f,
 )
 
+jax.config.update("jax_array", True)  # pyright: ignore[reportUnknownMemberType]
+
 
 class PhongReflectionTextureExtraInput(NamedTuple):
     """Extra input for PhongReflection Shader.

@@ -14,6 +14,8 @@ from ..geometry import Camera, to_homogeneous
 from ..shader import ID, PerVertex, Shader
 from ..types import Vec4f
 
+jax.config.update("jax_array", True)  # pyright: ignore[reportUnknownMemberType]
+
 
 class DepthExtraInput(NamedTuple):
     """Extra input for Depth Shader.

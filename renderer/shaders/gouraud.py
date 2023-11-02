@@ -15,6 +15,8 @@ from ..geometry import Camera, normalise, to_homogeneous
 from ..shader import ID, PerFragment, PerVertex, Shader
 from ..types import BoolV, Colour, FloatV, LightSource, Vec2f, Vec3f, Vec4f
 
+jax.config.update("jax_array", True)  # pyright: ignore[reportUnknownMemberType]
+
 
 class GouraudExtraInput(NamedTuple):
     """Extra input for Gouraud Shader.
