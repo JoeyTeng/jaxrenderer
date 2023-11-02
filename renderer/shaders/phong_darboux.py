@@ -35,7 +35,8 @@ from ..types import (
     Vec4f,
 )
 
-jax.config.update("jax_array", True)  # pyright: ignore[reportUnknownMemberType]
+if "jax_array" in dir(jax.config):
+    jax.config.update("jax_array", True)  # pyright: ignore[reportUnknownMemberType]
 
 Triangle3f: TypeAlias = Float[Array, "3 3"]
 Triangle2f: TypeAlias = Float[Array, "3 2"]
