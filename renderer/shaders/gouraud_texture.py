@@ -16,7 +16,7 @@ from ..geometry import Camera, normalise, to_homogeneous
 from ..shader import ID, MixerOutput, PerFragment, PerVertex, Shader
 from ..types import BoolV, Colour, FloatV, LightSource, Texture, Vec2f, Vec3f, Vec4f
 
-if "jax_array" in dir(jax.config):
+if hasattr(jax.config, "jax_array"):
     jax.config.update("jax_array", True)  # pyright: ignore[reportUnknownMemberType]
 
 

@@ -11,7 +11,7 @@ import numpy as np
 from renderer import Tuple, TypeAlias
 from renderer.types import FaceIndices, Normals, Texture, UVCoordinates, Vertices
 
-if "jax_array" in dir(jax.config):
+if hasattr(jax.config, "jax_array"):
     jax.config.update("jax_array", True)  # pyright: ignore[reportUnknownMemberType]
 
 T2f: TypeAlias = Tuple[float, float]

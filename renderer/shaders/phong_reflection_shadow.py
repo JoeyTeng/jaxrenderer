@@ -30,7 +30,7 @@ from ..types import (
     Vec4f,
 )
 
-if "jax_array" in dir(jax.config):
+if hasattr(jax.config, "jax_array"):
     jax.config.update("jax_array", True)  # pyright: ignore[reportUnknownMemberType]
 
 
