@@ -40,7 +40,8 @@ from .types import (
     ZBuffer,
 )
 
-jax.config.update("jax_array", True)  # pyright: ignore[reportUnknownMemberType]
+if hasattr(jax.config, "jax_array"):
+    jax.config.update("jax_array", True)  # pyright: ignore[reportUnknownMemberType]
 
 RowIndices = Integer[Array, "row_batches row_batch_size"]
 """Indices of the rows in the buffers to be processed in this batch."""

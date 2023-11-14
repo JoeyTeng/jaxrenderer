@@ -28,7 +28,8 @@ from .types import (
     Vec4f,
 )
 
-jax.config.update("jax_array", True)  # pyright: ignore[reportUnknownMemberType]
+if hasattr(jax.config, "jax_array"):
+    jax.config.update("jax_array", True)  # pyright: ignore[reportUnknownMemberType]
 
 ID: TypeAlias = IntV
 
