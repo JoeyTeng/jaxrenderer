@@ -32,14 +32,11 @@ include = [
 
 
 [tool.poetry.dependencies]
-python = "^3.8"
+python = ">=3.9,<4.0"
 jax = "^0.4.0"
 numpy = "^1.22.0"
 jaxlib = {version = "^0.4.0", source = "jax"}
-jaxtyping = [
-    {version = ">=0.2.13,<0.2.20", python = ">=3.8,<3.9"},
-    {version = "^0.2.19", python = "^3.9"}
-]
+jaxtyping = "^0.2.19"
 importlib-metadata = "^6.6.0"
 typing_extensions = "^4.3.0"
 
@@ -90,7 +87,7 @@ only_modified = true
 skip_gitignore = true
 
 [tool.black]
-target-versions = ["py38", "py39", "py310", "py311"]
+target-versions = ["py39", "py310", "py311"]
 required-version = 23
 
 [tool.pyright]

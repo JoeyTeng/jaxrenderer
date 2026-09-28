@@ -3,7 +3,7 @@ from functools import partial
 import json
 import os
 from pathlib import Path
-from typing import Dict, cast
+from typing import cast
 
 import jax
 import jax.lax as lax
@@ -14,7 +14,7 @@ from renderer.shaders.gouraud import GouraudExtraInput, GouraudShader
 from renderer.types import FloatV
 
 
-def _write_gradient_report(metrics: Dict[str, float]) -> None:
+def _write_gradient_report(metrics: dict[str, float]) -> None:
     artifact_dir = Path(
         os.environ.get("JAXRENDERER_ARTIFACT_DIR", ".artifacts/render-regression")
     )

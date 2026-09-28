@@ -342,22 +342,6 @@ reference = "jax"
 
 [[package]]
 name = "jaxtyping"
-version = "0.2.19"
-description = "Type annotations and runtime checking for shape and dtype of JAX arrays, and PyTrees."
-optional = false
-python-versions = "~=3.8"
-files = [
-    {file = "jaxtyping-0.2.19-py3-none-any.whl", hash = "sha256:651352032799d422987e783fd1b77699b53c3bb28ffa644bbca5f75ec4fbb843"},
-    {file = "jaxtyping-0.2.19.tar.gz", hash = "sha256:21ff4c3caec6781cadfe980b019dde856c1011e17d11dfe8589298040056325a"},
-]
-
-[package.dependencies]
-numpy = ">=1.20.0"
-typeguard = ">=2.13.3"
-typing-extensions = ">=3.7.4.1"
-
-[[package]]
-name = "jaxtyping"
 version = "0.2.20"
 description = "Type annotations and runtime checking for shape and dtype of JAX arrays, and PyTrees."
 optional = false
@@ -1042,5 +1026,5 @@ testing = ["big-O", "jaraco.functools", "jaraco.itertools", "more-itertools", "p
 
 [metadata]
 lock-version = "2.0"
-python-versions = "^3.8"
-content-hash = "14f43caf57e21e7d516382fb9aa78383ef5f029c4634644937312caa6915192f"
+python-versions = ">=3.9,<4.0"
+content-hash = "c7ee4460ad29176dccdceb36078bc5495fbfc864838ef29dc9cf67f108ce4bb3"
