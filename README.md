@@ -104,6 +104,30 @@ You may implement your own shaders by inheriting from `Shader` and implement the
 ![Differentiable Rendering Toy Example, deduce light colour parameters](docs/assets/differentiable%20rendering.gif)
 > Differentiable Rendering Toy Example, deduce light colour parameters.
 
+## Continuous Integration and Render Regression
+
+The GitHub Actions workflow runs the existing Linux test and lint matrix on pull requests and pushes to `master`. A separate `macos-latest` job uses Python 3.11 and CPU-only JAX to render the cube and a 30-frame head animation. The job also checks the numerical gradient of the light direction's x component against a central finite difference. The camera-gradient smoke check still runs, but its current output includes non-finite leaves and is not used as a numerical gate.
+
+The Linux Pyright check is pinned to `1.1.315`; upgrading it requires resolving existing strict-type diagnostics in the renderer.
+
+The render regression compares the cube and head frames 0 and 15 with the checked-in images in `tests/references/`. It allows small renderer differences while requiring all of these bounds:
+
+- Foreground intersection-over-union (IoU) of at least `0.90`.
+- Mean absolute RGB error over the union of foreground pixels of at most `5/255`.
+- 95th-percentile per-pixel maximum-channel error of at most `20/255`.
+- Each animation frame has a foreground ratio from `0.15` to `0.27`; adjacent frames have mean absolute RGB error from `0.5/255` to `5/255`.
+
+The cube foreground mask includes pixels more than 20 intensity counts away from white; the head mask includes pixels with any channel above 8. This keeps background differences from dominating the image comparison. The job uploads the numerical report, keyframes, amplified difference images, and APNG for seven days, including when a test fails.
+
+To reproduce the render checks locally from the repository root, install the locked `dev` and `test` dependency groups with Poetry, then run:
+
+```bash
+JAX_PLATFORMS=cpu MPLBACKEND=Agg JAXRENDERER_ARTIFACT_DIR=render-artifacts \
+  poetry run python -m pytest -q tests/render_regression.py tests/test_smoke_grad.py
+```
+
+When an intentional rendering change updates the expected output, inspect the uploaded keyframes and numeric report first. Then render the same scenes on macOS with the current settings and replace only the affected PNGs in `tests/references/`. Run the render regression command against the proposed images and review the full-frame and animation checks before committing them. Do not change tolerances solely to make a new golden pass; change them only when a measured cross-platform or renderer variation justifies the new bounds.
+
 ## Key Difference from [erwincoumans/tinyrenderer](https://github.com/erwincoumans/tinyrenderer)
 
 - Native JAX implementation, supports `jit`, `vmap`, `grad`, etc.
