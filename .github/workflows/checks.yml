@@ -1,12 +1,15 @@
-# This workflow will install Python dependencies, run tests and lint with a variety of Python versions
-# For more information see: https://docs.github.com/en/actions/automating-builds-and-tests/building-and-testing-python
+# This workflow installs the locked dependencies, runs tests, and checks code style.
 
 name: lint & test
 
 on:
   push:
+    branches: [master]
   pull_request:
-    types: [opened, reopened]
+    types: [opened, reopened, synchronize]
+
+permissions:
+  contents: read
 
 jobs:
   check:
@@ -14,41 +17,75 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.8", "3.9", "3.10", "3.11"]
+        python-version: ["3.9", "3.10", "3.11"]
 
     steps:
-      - uses: actions/checkout@v3
-
-      - run: pipx install poetry
+      - uses: actions/checkout@v7
 
       - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v7
         with:
-          cache: 'poetry'
           python-version: ${{ matrix.python-version }}
 
+      - name: Install Poetry
+        run: python -m pip install poetry==1.8.5
 
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install --upgrade poetry
-          python -m pip install --upgrade black
-          python -m pip install --upgrade isort
+          python -m pip install black==23.1.0 isort==5.12.0
           poetry install --all-extras
 
       - name: Lint with isort
-        run: |
-          isort --check-only --jobs -1 .
+        run: isort --check-only --jobs -1 .
 
       - name: Lint with black
-        run: |
-          black --check .
+        # The checked-in Matplotlib stubs under typings/ follow upstream formatting.
+        run: black --check assets renderer examples test_resources tests
 
-      - run: echo "$(poetry env info --path)/bin" >> $GITHUB_PATH
+      - name: Add Poetry environment to PATH
+        run: echo "$(poetry env info --path)/bin" >> "$GITHUB_PATH"
 
       - name: Run pyright
         uses: jakebailey/pyright-action@v1.6.0
+        with:
+          version: 1.1.315
 
-      - name: Run test
-        run: |
-          pytest tests/ --import-mode importlib
+      - name: Run tests
+        run: poetry run pytest tests/ --import-mode importlib
+
+  macos-render-regression:
+    runs-on: macos-latest
+    timeout-minutes: 20
+    env:
+      JAX_PLATFORMS: cpu
+      MPLBACKEND: Agg
+      JAXRENDERER_ARTIFACT_DIR: render-artifacts
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install Poetry
+        run: pipx install poetry==1.8.5
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v7
+        with:
+          cache: poetry
+          python-version: "3.11"
+
+      - name: Install locked dependencies
+        run: poetry install --sync --with dev,test
+
+      - name: Run render and gradient regression tests
+        timeout-minutes: 12
+        run: poetry run python -m pytest -q tests/render_regression.py tests/test_smoke_grad.py
+
+      - name: Upload render regression artifacts
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: macos-render-regression
+          path: render-artifacts/
+          if-no-files-found: warn
+          retention-days: 7

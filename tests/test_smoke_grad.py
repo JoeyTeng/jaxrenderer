@@ -1,4 +1,8 @@
+# pyright: basic
 from functools import partial
+import json
+import os
+from pathlib import Path
 from typing import cast
 
 import jax
@@ -8,6 +12,24 @@ import jax.numpy as jnp
 from renderer import Buffers, Camera, LightSource, render
 from renderer.shaders.gouraud import GouraudExtraInput, GouraudShader
 from renderer.types import FloatV
+
+
+def _write_gradient_report(metrics: dict[str, float]) -> None:
+    artifact_dir = Path(
+        os.environ.get("JAXRENDERER_ARTIFACT_DIR", ".artifacts/render-regression")
+    )
+    artifact_dir.mkdir(parents=True, exist_ok=True)
+    report_path = artifact_dir / "numeric-report.json"
+    report = (
+        json.loads(report_path.read_text(encoding="utf-8"))
+        if report_path.exists()
+        else {}
+    )
+    report["light_gradient"] = metrics
+    report_path.write_text(
+        json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
+
 
 eye = jnp.array((0.0, 0, 2))  # pyright: ignore[reportUnknownMemberType]
 center = jnp.array((0.0, 0, 0))  # pyright: ignore[reportUnknownMemberType]
@@ -102,9 +124,8 @@ def test_grad_over_camera():
         )(camera),
     )
 
-    jax.tree_map(lambda a: a.block_until_ready(), grad_camera)
-
-    assert True
+    jax.tree_util.tree_map(lambda a: a.block_until_ready(), grad_camera)
+    assert jax.tree_util.tree_leaves(grad_camera)
 
 
 def test_grad_over_light():
@@ -116,13 +137,34 @@ def test_grad_over_light():
 
         return canvas.sum()  # pyright: ignore[reportUnknownMemberType]
 
-    grad_light = cast(
-        FloatV,
-        jax.jit(  # pyright: ignore[reportUnknownMemberType]
-            jax.grad(_render_light)  # pyright: ignore[reportUnknownMemberType]
-        )(LightSource()),
+    def loss_for_x(x: FloatV) -> FloatV:
+        light = LightSource(direction=jnp.array((x, 0.2, -1.0)))
+        return _render_light(light)
+
+    x = jnp.asarray(0.3)
+    epsilon = 0.01
+    gradient = jax.grad(loss_for_x)(x)
+    finite_difference = (loss_for_x(x + epsilon) - loss_for_x(x - epsilon)) / (
+        2 * epsilon
+    )
+    gradient.block_until_ready()
+    finite_difference.block_until_ready()
+
+    gradient_value = float(gradient)
+    finite_difference_value = float(finite_difference)
+    absolute_error = abs(gradient_value - finite_difference_value)
+    relative_error = absolute_error / max(abs(finite_difference_value), 1e-12)
+    _write_gradient_report(
+        {
+            "autodiff": gradient_value,
+            "central_difference": finite_difference_value,
+            "absolute_error": absolute_error,
+            "relative_error": relative_error,
+            "epsilon": float(epsilon),
+        }
     )
 
-    jax.tree_map(lambda a: a.block_until_ready(), grad_light)
-
-    assert True
+    assert bool(jnp.isfinite(gradient))
+    assert bool(jnp.isfinite(finite_difference))
+    assert float(gradient) < -1e-3
+    assert jnp.allclose(gradient, finite_difference, rtol=0.01, atol=0.01)

@@ -1,5 +1,5 @@
 """Export backward compatible bindings to replace new features used in later
-    Python versions to support Python 3.8+.
+    Python versions to support Python 3.9+.
 """
 
 import sys
