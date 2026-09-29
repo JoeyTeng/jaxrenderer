@@ -7,7 +7,7 @@
 [![Lint & Test](https://github.com/JoeyTeng/jaxrenderer/actions/workflows/checks.yml/badge.svg)](https://github.com/JoeyTeng/jaxrenderer/actions/workflows/checks.yml)
 [![Checked with pyright](https://microsoft.github.io/pyright/img/pyright_badge.svg)](https://microsoft.github.io/pyright/)
 [![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
-[![Poetry](https://img.shields.io/endpoint?url=https://python-poetry.org/badge/v0.json&label=packaging)](https://python-poetry.org/)
+[![uv](https://img.shields.io/badge/packaging-uv-blue)](https://docs.astral.sh/uv/)
 [![Open in Colab](https://img.shields.io/badge/%7F-Open_demo_in_Colab-blue.svg?logo=googlecolab)](https://colab.research.google.com/github/JoeyTeng/jaxrenderer/blob/master/notebooks/Demo.ipynb)
 
 JaxRenderer is a differentiable renderer implemented in [JAX](https://github.com/google/jax), which supports differentiable rendering and batch rendering on accelerators (e.g. GPU, TPU) using simple function transformations provided by JAX. It is designed to replace by [erwincoumans/tinyrenderer](https://github.com/erwincoumans/tinyrenderer) in [BRAX](https://github.com/google/brax) to support visualising simulation results through fast rendering on accelerators with no external dependencies (other than JAX).
@@ -22,7 +22,16 @@ This project is distributed in [PyPI](https://pypi.org/project/jaxrenderer), and
 pip install jaxrenderer
 ```
 
-The minimum Python version is `3.9`, and the minimum JAX version is `0.4.0`. You may need to install `jaxlib` separately if you are using GPU or TPU; by default, the CPU version of jaxlib is installed. Please refer to [JAX's installation guide](https://github.com/google/jax#installation) for more details.
+Python versions `3.9` to `3.14` are supported, and the minimum JAX version is `0.4.0`. You may need to install `jaxlib` separately if you are using GPU or TPU; by default, the CPU version of jaxlib is installed. Please refer to [JAX's installation guide](https://github.com/google/jax#installation) for more details.
+
+### Development
+
+Development dependencies are managed with [uv](https://docs.astral.sh/uv/). The default development environment uses Python `3.14`. From the repository root, install the locked dependencies and run commands with:
+
+```bash
+uv sync --locked --all-groups
+uv run pytest tests/ --import-mode importlib
+```
 
 ## Usage
 
@@ -106,9 +115,9 @@ You may implement your own shaders by inheriting from `Shader` and implement the
 
 ## Continuous Integration and Render Regression
 
-The GitHub Actions workflow runs the existing Linux test and lint matrix on pull requests and pushes to `master`. A separate `macos-latest` job uses Python 3.11 and CPU-only JAX to render the cube and a 30-frame head animation. The job also checks the numerical gradient of the light direction's x component against a central finite difference. The camera-gradient smoke check still runs, but its current output includes non-finite leaves and is not used as a numerical gate.
+The GitHub Actions workflow tests Python 3.9–3.14 on Linux and checks formatting on Python 3.14 for pull requests and pushes to `master`. A separate `macos-latest` job uses Python 3.14 and CPU-only JAX to render the cube and a 30-frame head animation. The job also checks the numerical gradient of the light direction's x component against a central finite difference. The camera-gradient smoke check still runs, but its current output includes non-finite leaves and is not used as a numerical gate.
 
-The Linux Pyright check is pinned to `1.1.315`; upgrading it requires resolving existing strict-type diagnostics in the renderer.
+The Linux job runs strict Pyright from the uv lockfile on Python 3.14. Its diagnostics remain visible, but the check is advisory until the existing JAX typing issues are resolved.
 
 The render regression compares the cube and head frames 0 and 15 with the checked-in images in `tests/references/`. It allows small renderer differences while requiring all of these bounds:
 
@@ -119,11 +128,11 @@ The render regression compares the cube and head frames 0 and 15 with the checke
 
 The cube foreground mask includes pixels more than 20 intensity counts away from white; the head mask includes pixels with any channel above 8. This keeps background differences from dominating the image comparison. The job uploads the numerical report, keyframes, amplified difference images, and APNG for seven days, including when a test fails.
 
-To reproduce the render checks locally from the repository root, install the locked `dev` and `test` dependency groups with Poetry, then run:
+To reproduce the render checks locally from the repository root, install the locked dependency groups with uv, then run:
 
 ```bash
 JAX_PLATFORMS=cpu MPLBACKEND=Agg JAXRENDERER_ARTIFACT_DIR=render-artifacts \
-  poetry run python -m pytest -q tests/render_regression.py tests/test_smoke_grad.py
+  uv run python -m pytest -q tests/render_regression.py tests/test_smoke_grad.py
 ```
 
 When an intentional rendering change updates the expected output, inspect the uploaded keyframes and numeric report first. Then render the same scenes on macOS with the current settings and replace only the affected PNGs in `tests/references/`. Run the render regression command against the proposed images and review the full-frame and animation checks before committing them. Do not change tolerances solely to make a new golden pass; change them only when a measured cross-platform or renderer variation justifies the new bounds.

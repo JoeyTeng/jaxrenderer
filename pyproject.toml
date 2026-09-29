@@ -1,13 +1,18 @@
-[tool.poetry]
+[project]
 name = "jaxrenderer"
 version = "0.3.2"
 description = "Jax implementation of rasterizer renderer."
-authors = ["Joey Teng <joey.teng.dev@gmail.com>"]
+authors = [{ name = "Joey Teng", email = "joey.teng.dev@gmail.com" }]
 license = "Apache-2.0"
 readme = "README.md"
-homepage = "https://github.com/JoeyTeng/jaxrenderer"
-repository = "https://github.com/JoeyTeng/jaxrenderer"
+requires-python = ">=3.9,<3.15"
 classifiers = [
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
     "Topic :: Multimedia :: Graphics :: 3D Rendering",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
     "Topic :: Scientific/Engineering :: Visualization",
@@ -20,53 +25,41 @@ classifiers = [
     "Natural Language :: English",
     "Typing :: Typed",
 ]
-packages = [
-    { include = "renderer" },
-]
-include = [
-    "LICENSE",
-    "README.md",
-    "changelog.md",
-    "pyproject.toml",
+dependencies = [
+    "jax>=0.4.0",
+    "jaxlib>=0.4.0",
+    "jaxtyping>=0.2.19",
+    "numpy>=1.22.0",
+    "typing_extensions>=4.3.0",
 ]
 
-
-[tool.poetry.dependencies]
-python = ">=3.9,<4.0"
-jax = "^0.4.0"
-numpy = "^1.22.0"
-jaxlib = {version = "^0.4.0", source = "jax"}
-jaxtyping = "^0.2.19"
-importlib-metadata = "^6.6.0"
-typing_extensions = "^4.3.0"
-
-
-[tool.poetry.group.dev.dependencies]
-matplotlib = "^3.6.2"
-pillow = "^9.4.0"
-importlib-resources = "^5.12.0"
-
-
-[tool.poetry.group.test.dependencies]
-pre-commit = "^3.3.3"
-pytest = "^7.0.0"
-tox = "^4.0.0"
-
-
-[[tool.poetry.source]]
-name = "jax"
-url = "https://storage.googleapis.com/jax-releases/jax_releases.html"
-priority = "explicit"
-
-
-[tool.poetry.urls]
+[project.urls]
+Homepage = "https://github.com/JoeyTeng/jaxrenderer"
+Repository = "https://github.com/JoeyTeng/jaxrenderer"
 "Bug Tracker" = "https://github.com/JoeyTeng/jaxrenderer/issues"
 
+[dependency-groups]
+dev = [
+    "black==23.7.0",
+    "isort==5.12.0",
+    "matplotlib>=3.6.2",
+    "pillow>=9.4.0",
+    "pyright>=1.1.407",
+    "importlib-resources>=5.12.0",
+]
+test = [
+    "pre-commit>=3.3.3",
+    "pytest>=7.0.0",
+    "tox>=4.0.0",
+    "tox-uv>=1.29; python_version >= '3.10'",
+]
 
 [build-system]
-requires = ["poetry-core>=1.0.0"]
-build-backend = "poetry.core.masonry.api"
+requires = ["hatchling>=1.27.0"]
+build-backend = "hatchling.build"
 
+[tool.hatch.build.targets.wheel]
+packages = ["renderer"]
 
 [tool.pytest.ini_options]
 addopts = [
@@ -75,7 +68,7 @@ addopts = [
 
 [tool.isort]
 profile = "black"
-py_version= 311
+py_version = 311
 src_paths = ["renderer", "examples", "test_resources", "tests"]
 line_length = 88
 combine_star = true
@@ -87,19 +80,18 @@ only_modified = true
 skip_gitignore = true
 
 [tool.black]
-target-versions = ["py39", "py310", "py311"]
-required-version = 23
+target-version = ["py39"]
 
 [tool.pyright]
 include = ["renderer", "examples", "test_resources", "tests"]
 exclude = ["typings/**", ".*/**", "**/node_modules", "**/__pycache__"]
 typeCheckingMode = "strict"
 
-pythonVersion = "3.11"
+pythonVersion = "3.14"
 pythonPlatform = "All"
 
 executionEnvironments = [
-  { root = ".", pythonVersion = "3.11", pythonPlatform = "All" },
+  { root = ".", pythonVersion = "3.14", pythonPlatform = "All" },
 ]
 
 reportCallInDefaultInitializer = "information"
@@ -108,7 +100,6 @@ reportImplicitStringConcatenation = "none"
 reportImportCycles = "error"
 reportMissingSuperCall = "information"
 reportPropertyTypeMismatch = "information"
-reportShadowedImports = "warning"
 reportUninitializedInstanceVariable = "warning"
 reportUnnecessaryTypeIgnoreComment = "warning"
 reportUnusedCallResult = "information"

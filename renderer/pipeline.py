@@ -40,8 +40,6 @@ from .types import (
     ZBuffer,
 )
 
-jax.config.update("jax_array", True)  # pyright: ignore[reportUnknownMemberType]
-
 RowIndices = Integer[Array, "row_batches row_batch_size"]
 """Indices of the rows in the buffers to be processed in this batch."""
 
@@ -463,7 +461,6 @@ def _postprocessing(
 @partial(
     jit,
     static_argnames=("shader", "loop_unroll"),
-    donate_argnums=(2,),
     inline=True,
 )
 @add_tracing_name
