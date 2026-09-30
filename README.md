@@ -115,7 +115,10 @@ You may implement your own shaders by inheriting from `Shader` and implement the
 
 ## Continuous Integration and Render Regression
 
-The GitHub Actions workflow tests Python 3.9–3.14 on Linux and checks import sorting and formatting with Ruff on Python 3.14 for pull requests and pushes to `master`. A separate `macos-latest` job uses Python 3.14 and CPU-only JAX to render the cube and a 30-frame head animation. The job also checks the numerical gradient of the light direction's x component against a central finite difference. The camera-gradient smoke check still runs, but its current output includes non-finite leaves and is not used as a numerical gate.
+The GitHub Actions workflow tests Python 3.9–3.14 on Linux. On Python 3.14, Ruff checks import sorting and formatting, then compares the pull request head (or pushed commit) with its exact base revision and rejects newly introduced E4, E7, E9 and F lint violations. The comparison checks the paths supplied with `--paths`; CI passes `assets`, `renderer`, `examples`, `test_resources`, `tests` and `tools`. Existing violations are tolerated while new ones are blocked. `F722` and `F821` are ignored because jaxtyping shape annotations can trigger false positives. A separate `macos-latest` job uses Python 3.14 and CPU-only JAX to render the cube and a 30-frame head animation. The job also checks the numerical gradient of the light direction's x component against a central finite difference. The camera-gradient smoke check still runs, but its current output includes non-finite leaves and is not used as a numerical gate.
+
+Run `uv run ruff check assets renderer examples test_resources tests tools` to inspect the existing lint diagnostics locally.
+To compare a different path set locally, pass it after `--paths` to `tools/check_ruff_lint.py`; the rule selection stays fixed, so changing Ruff configuration alone cannot suppress newly introduced violations.
 
 The Linux job runs strict Pyright from the uv lockfile on Python 3.14. Its diagnostics remain visible, but the check is advisory until the existing JAX typing issues are resolved.
 

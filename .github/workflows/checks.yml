@@ -12,6 +12,43 @@ permissions:
   contents: read
 
 jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          repository: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.base.sha || github.event.before }}
+          path: ruff-base
+
+      - name: Set up Python 3.14
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.14"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v9.0.0
+        with:
+          version: "0.12.20"
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --locked --all-groups --python 3.14
+
+      - name: Check import sorting with Ruff
+        run: uv run --no-sync --python 3.14 ruff check --select I assets renderer examples test_resources tests tools
+
+      - name: Check formatting with Ruff
+        # The checked-in Matplotlib stubs under typings/ follow upstream formatting.
+        run: uv run --no-sync --python 3.14 ruff format --check assets renderer examples test_resources tests tools
+
+      - name: Check for new Ruff lint violations
+        run: uv run --no-sync --python 3.14 python tools/check_ruff_lint.py --base-root ruff-base --candidate-root . --paths assets renderer examples test_resources tests tools
+
   check:
     runs-on: ubuntu-latest
     strategy:
@@ -38,15 +75,6 @@ jobs:
 
       - name: Check Python version
         run: uv run --no-sync --python "${{ matrix.python-version }}" python --version
-
-      - name: Check import sorting with Ruff
-        if: matrix.python-version == '3.14'
-        run: uv run --no-sync --python "${{ matrix.python-version }}" ruff check --select I assets renderer examples test_resources tests
-
-      - name: Check formatting with Ruff
-        if: matrix.python-version == '3.14'
-        # The checked-in Matplotlib stubs under typings/ follow upstream formatting.
-        run: uv run --no-sync --python "${{ matrix.python-version }}" ruff format --check assets renderer examples test_resources tests
 
       - name: Run pyright
         if: matrix.python-version == '3.14'

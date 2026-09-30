@@ -41,14 +41,14 @@ repos:
         entry: uv run --no-sync ruff check --select I --fix
         language: system
         types: [python]
-        files: ^(assets/|renderer/|examples/|test_resources/|tests/).*[.]py$
+        files: ^(assets/|renderer/|examples/|test_resources/|tests/|tools/).*[.]py$
 
       - id: ruff-format
         name: Ruff format
         entry: uv run --no-sync ruff format
         language: system
         types: [python]
-        files: ^(assets/|renderer/|examples/|test_resources/|tests/).*[.]py$
+        files: ^(assets/|renderer/|examples/|test_resources/|tests/|tools/).*[.]py$
 
       - id: pyright
         name: pyright
