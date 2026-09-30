@@ -25,8 +25,57 @@ jobs:
       with:
         version: "0.12.20"
         enable-cache: true
+    - name: Check release tag version
+      env:
+        RELEASE_TAG: ${{ github.event.release.tag_name }}
+      run: |
+        python - <<'PY'
+        import os
+        import tomllib
+        from pathlib import Path
+
+        version = tomllib.loads(Path("pyproject.toml").read_text())["project"]["version"]
+        tag = os.environ["RELEASE_TAG"]
+        tag_version = tag.removeprefix("v")
+        if tag_version != version:
+            raise SystemExit(
+                f"Release tag {tag!r} does not match project version {version!r}"
+            )
+        PY
     - name: Build package
       run: uv build
+    - name: Smoke test built wheel
+      env:
+        RELEASE_TAG: ${{ github.event.release.tag_name }}
+      run: |
+        set -euo pipefail
+        smoke_venv="$(mktemp -d)"
+        trap 'python -c "import shutil, sys; shutil.rmtree(sys.argv[1])" "$smoke_venv"' EXIT
+        python -m venv "$smoke_venv"
+        uv pip install --python "$smoke_venv/bin/python" dist/*.whl
+        (
+          cd "$smoke_venv"
+          ./bin/python - <<'PY'
+        import importlib.metadata
+        import os
+        from pathlib import Path
+
+        import renderer
+
+        expected = os.environ["RELEASE_TAG"].removeprefix("v")
+        actual = importlib.metadata.version("jaxrenderer")
+        module_path = Path(renderer.__file__).resolve()
+        site_packages = Path(
+            importlib.metadata.distribution("jaxrenderer").locate_file("")
+        ).resolve()
+        assert actual == expected, (
+            f"installed version {actual!r} does not match release tag {expected!r}"
+        )
+        assert module_path.is_relative_to(site_packages), (
+            f"renderer imported from outside the installed distribution: {module_path}"
+        )
+        PY
+        )
     - name: Publish package
       env:
         UV_PUBLISH_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
