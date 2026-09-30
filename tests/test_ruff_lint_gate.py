@@ -40,7 +40,14 @@ def test_candidate_only_issue_fails_even_when_total_matches(tmp_path: Path) -> N
         ):
             assert (
                 gate.main(
-                    ["--base-root", str(base), "--candidate-root", str(candidate)]
+                    [
+                        "--base-root",
+                        str(base),
+                        "--candidate-root",
+                        str(candidate),
+                        "--paths",
+                        "renderer",
+                    ]
                 )
                 == 1
             )
@@ -72,20 +79,22 @@ def test_ruff_error_exit_is_rejected(tmp_path: Path) -> None:
     root = tmp_path / "root"
     root.mkdir()
     (root / "renderer").mkdir()
+    (root / "renderer" / "module.py").write_text("pass\n", encoding="utf-8")
     completed = type(
         "Result", (), {"returncode": 2, "stderr": "configuration error", "stdout": ""}
     )()
     with patch.object(gate.subprocess, "run", return_value=completed):
         with pytest.raises(RuntimeError, match="configuration error"):
-            gate.run_ruff(root, "ruff")
+            gate.run_ruff(root, "ruff", ["renderer"])
 
 
 def test_ruff_uses_fixed_isolated_policy(tmp_path: Path) -> None:
     root = tmp_path / "root"
     (root / "renderer").mkdir(parents=True)
+    (root / "renderer" / "module.py").write_text("pass\n", encoding="utf-8")
     completed = type("Result", (), {"returncode": 0, "stderr": "", "stdout": "[]"})()
     with patch.object(gate.subprocess, "run", return_value=completed) as run:
-        gate.run_ruff(root, "ruff")
+        gate.run_ruff(root, "ruff", ["renderer"])
 
     command = run.call_args.args[0]
     assert "--isolated" in command
@@ -99,16 +108,29 @@ def test_ruff_uses_fixed_isolated_policy(tmp_path: Path) -> None:
 def test_relative_roots_are_resolved_before_scanning(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    (tmp_path / "base").mkdir()
-    (tmp_path / "candidate").mkdir()
+    for root in (tmp_path / "base", tmp_path / "candidate"):
+        (root / "renderer").mkdir(parents=True)
+        (root / "renderer" / "module.py").write_text("pass\n", encoding="utf-8")
     monkeypatch.chdir(tmp_path)
     with patch.object(gate.shutil, "which", return_value="ruff"):
         with patch.object(gate, "run_ruff", return_value=gate.Counter()) as run:
             assert (
-                gate.main(["--base-root", "base", "--candidate-root", "candidate"]) == 0
+                gate.main(
+                    [
+                        "--base-root",
+                        "base",
+                        "--candidate-root",
+                        "candidate",
+                        "--paths",
+                        "renderer",
+                    ]
+                )
+                == 0
             )
 
     assert run.call_args_list[0].args[0] == (tmp_path / "base").resolve()
+    assert run.call_args_list[0].args[2] == ["renderer"]
+    assert run.call_args_list[1].args[2] == ["renderer"]
 
 
 def test_real_ruff_ignores_candidate_rule_configuration(tmp_path: Path) -> None:
@@ -128,8 +150,8 @@ def test_real_ruff_ignores_candidate_rule_configuration(tmp_path: Path) -> None:
         "import os\nimport sys\n", encoding="utf-8"
     )
 
-    baseline = gate.run_ruff(base, str(ruff))
-    current = gate.run_ruff(candidate, str(ruff))
+    baseline = gate.run_ruff(base, str(ruff), ["renderer"])
+    current = gate.run_ruff(candidate, str(ruff), ["renderer"])
     assert sum(baseline.values()) == 1
     assert sum(current.values()) == 2
     assert sum(count for _, count in gate.compare(baseline, current)) == 1
@@ -144,24 +166,122 @@ def test_real_ruff_scans_files_ignored_by_candidate_gitignore(tmp_path: Path) ->
     (candidate / ".gitignore").write_text("renderer/module.py\n", encoding="utf-8")
     (renderer / "module.py").write_text("import os\n", encoding="utf-8")
 
-    diagnostics = gate.run_ruff(candidate, str(ruff))
+    diagnostics = gate.run_ruff(candidate, str(ruff), ["renderer"])
 
     assert sum(diagnostics.values()) == 1
     assert next(iter(diagnostics))[0] == "renderer/module.py"
 
 
-def test_nonempty_scope_without_python_files_fails(tmp_path: Path) -> None:
+def test_scope_without_python_files_in_either_revision_fails(tmp_path: Path) -> None:
     root = tmp_path / "root"
     (root / "renderer").mkdir(parents=True)
-    completed = type(
-        "Result",
-        (),
-        {
-            "returncode": 0,
-            "stderr": "warning: No Python files found under the given path(s)",
-            "stdout": "[]",
-        },
-    )()
-    with patch.object(gate.subprocess, "run", return_value=completed):
-        with pytest.raises(RuntimeError, match="no Python files"):
-            gate.run_ruff(root, "ruff")
+    with pytest.raises(RuntimeError, match="no Python files in either revision"):
+        gate.validate_scopes((root, root), ["renderer"])
+
+
+@pytest.mark.parametrize(
+    "path", ["/tmp/outside", "../outside", "renderer/../../outside"]
+)
+def test_cli_rejects_absolute_and_traversal_scopes(tmp_path: Path, path: str) -> None:
+    (tmp_path / "base").mkdir()
+    (tmp_path / "candidate").mkdir()
+    with pytest.raises(SystemExit) as error:
+        gate.main(
+            [
+                "--base-root",
+                str(tmp_path / "base"),
+                "--candidate-root",
+                str(tmp_path / "candidate"),
+                "--paths",
+                path,
+            ]
+        )
+    assert error.value.code == 2
+
+
+def test_cli_requires_paths(tmp_path: Path) -> None:
+    (tmp_path / "base").mkdir()
+    (tmp_path / "candidate").mkdir()
+    with pytest.raises(SystemExit) as error:
+        gate.main(
+            [
+                "--base-root",
+                str(tmp_path / "base"),
+                "--candidate-root",
+                str(tmp_path / "candidate"),
+            ]
+        )
+    assert error.value.code == 2
+
+
+def test_scope_missing_from_one_revision_is_empty(tmp_path: Path) -> None:
+    root = tmp_path / "root"
+    root.mkdir()
+    assert gate.run_ruff(root, "ruff", ["renderer"]) == gate.Counter()
+
+
+def test_custom_scopes_are_passed_to_ruff(tmp_path: Path) -> None:
+    root = tmp_path / "root"
+    (root / "renderer").mkdir(parents=True)
+    (root / "renderer" / "module.py").write_text("pass\n", encoding="utf-8")
+    (root / "examples").mkdir()
+    (root / "examples" / "module.py").write_text("pass\n", encoding="utf-8")
+    completed = type("Result", (), {"returncode": 0, "stderr": "", "stdout": "[]"})()
+    with patch.object(gate.subprocess, "run", return_value=completed) as run:
+        gate.run_ruff(root, "ruff", ["renderer", "examples"])
+    assert run.call_args.args[0][-2:] == ["renderer", "examples"]
+
+
+def test_each_scope_must_contain_python_files(tmp_path: Path) -> None:
+    root = tmp_path / "root"
+    (root / "renderer").mkdir(parents=True)
+    (root / "renderer" / "module.py").write_text("pass\n", encoding="utf-8")
+    (root / "docs").mkdir()
+    with pytest.raises(RuntimeError, match="no Python files in either revision"):
+        gate.validate_scopes((root, root), ["renderer", "docs"])
+
+
+def test_candidate_only_new_scope_is_scanned(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    ruff = Path(sys.executable).with_name("ruff")
+    assert ruff.is_file()
+    base = tmp_path / "base"
+    candidate = tmp_path / "candidate"
+    base.mkdir()
+    (candidate / "new_scope").mkdir(parents=True)
+    (candidate / "new_scope" / "module.py").write_text("import os\n", encoding="utf-8")
+    with patch.object(gate.shutil, "which", return_value=str(ruff)):
+        result = gate.main(
+            [
+                "--base-root",
+                str(base),
+                "--candidate-root",
+                str(candidate),
+                "--paths",
+                "new_scope",
+            ]
+        )
+    assert result == 1
+    assert "1 new diagnostic" in capsys.readouterr().err
+
+
+def test_scope_absent_from_both_revisions_fails(tmp_path: Path) -> None:
+    base = tmp_path / "base"
+    candidate = tmp_path / "candidate"
+    base.mkdir()
+    candidate.mkdir()
+    with patch.object(gate.shutil, "which", return_value="ruff"):
+        assert (
+            gate.main(
+                [
+                    "--base-root",
+                    str(base),
+                    "--candidate-root",
+                    str(candidate),
+                    "--paths",
+                    "typo",
+                ]
+            )
+            == 2
+        )

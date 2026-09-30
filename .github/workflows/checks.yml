@@ -47,7 +47,7 @@ jobs:
         run: uv run --no-sync --python 3.14 ruff format --check assets renderer examples test_resources tests tools
 
       - name: Check for new Ruff lint violations
-        run: uv run --no-sync --python 3.14 python tools/check_ruff_lint.py --base-root ruff-base --candidate-root .
+        run: uv run --no-sync --python 3.14 python tools/check_ruff_lint.py --base-root ruff-base --candidate-root . --paths assets renderer examples test_resources tests tools
 
   check:
     runs-on: ubuntu-latest
