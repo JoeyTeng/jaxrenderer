@@ -3,8 +3,14 @@ from typing import Any, Generic, TypeVar, Union, cast
 import jax
 import jax.lax as lax
 import jax.numpy as jnp
-from jaxtyping import Array, Bool, Float, Integer, Num
-from jaxtyping import jaxtyped  # pyright: ignore[reportUnknownVariableType]
+from jaxtyping import (
+    Array,
+    Bool,
+    Float,
+    Integer,
+    Num,
+    jaxtyped,  # pyright: ignore[reportUnknownVariableType]
+)
 
 from ._backport import JaxFloating, JaxInteger, NamedTuple, Tuple, Type, TypeAlias
 

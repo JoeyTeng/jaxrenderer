@@ -6,8 +6,12 @@ from typing import NamedTuple, cast
 import jax
 import jax.lax as lax
 import jax.numpy as jnp
-from jaxtyping import Array, Bool, Float
-from jaxtyping import jaxtyped  # pyright: ignore[reportUnknownVariableType]
+from jaxtyping import (
+    Array,
+    Bool,
+    Float,
+    jaxtyped,  # pyright: ignore[reportUnknownVariableType]
+)
 
 from .._backport import Tuple
 from .._meta_utils import add_tracing_name
@@ -127,12 +131,9 @@ class PhongTextureShader(
         texture_colour: Colour = extra.texture[uv[0], uv[1]]
 
         # light colour * intensity
-        light_colour: Colour = (
-            extra.light.colour
-            * lax.dot(  # pyright: ignore[reportUnknownMemberType]
-                normalise(varying.normal),
-                normalise(extra.light.direction),
-            )
+        light_colour: Colour = extra.light.colour * lax.dot(  # pyright: ignore[reportUnknownMemberType]
+            normalise(varying.normal),
+            normalise(extra.light.direction),
         )
 
         return (

@@ -3,8 +3,12 @@ from typing import NamedTuple, cast
 import jax
 import jax.lax as lax
 import jax.numpy as jnp
-from jaxtyping import Array, Bool, Float
-from jaxtyping import jaxtyped  # pyright: ignore[reportUnknownVariableType]
+from jaxtyping import (
+    Array,
+    Bool,
+    Float,
+    jaxtyped,  # pyright: ignore[reportUnknownVariableType]
+)
 
 from renderer import Tuple, jit
 from renderer.geometry import Camera, normalise, to_homogeneous
@@ -113,17 +117,20 @@ def test_render_batched_triangles():
     assert canvas.shape == (height, width, 3)
 
     # test zbuffer
-    assert jnp.unique(  # pyright: ignore[reportUnknownMemberType]
-        zbuffer[293:528, 964:1423].astype(jnp.uint8)  # pyright: ignore
-    ).shape == (  # pyright: ignore
-        1,
+    assert (
+        jnp.unique(  # pyright: ignore[reportUnknownMemberType]
+            zbuffer[293:528, 964:1423].astype(jnp.uint8)  # pyright: ignore
+        ).shape
+        == (  # pyright: ignore
+            1,
+        )
     ), "The depths of the triangle parallel to the camera should be uniform"
     assert jnp.all(  # pyright: ignore[reportUnknownMemberType]
         zbuffer[590:1049, 964:1423] == default_z
     ), "The depths of unrendered places should remain default"
-    assert (
-        zbuffer[551, 914] < zbuffer[1026, 92]
-    ), "The depths of a triangle facing towards camera should be closer"
+    assert zbuffer[551, 914] < zbuffer[1026, 92], (
+        "The depths of a triangle facing towards camera should be closer"
+    )
 
     # test canvas
     default_pixel = jnp.array([default_ch] * 3)  # pyright: ignore
@@ -318,9 +325,9 @@ def test_perspective_interpolation():
         "The depths of unrendered places should remain default, "
         "which is the majority of the screen space"
     )
-    assert (
-        zbuffer[679, 701] < zbuffer[779, 1388]
-    ), "The depths of a triangle facing towards camera should be closer"
+    assert zbuffer[679, 701] < zbuffer[779, 1388], (
+        "The depths of a triangle facing towards camera should be closer"
+    )
 
     # test canvas
     default_pixel = jnp.array([default_ch] * 3)  # pyright: ignore

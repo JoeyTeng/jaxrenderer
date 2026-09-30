@@ -1,8 +1,11 @@
 from typing import Union
 
 import jax.numpy as jnp
-from jaxtyping import Array, Integer
-from jaxtyping import jaxtyped  # pyright: ignore[reportUnknownVariableType]
+from jaxtyping import (
+    Array,
+    Integer,
+    jaxtyped,  # pyright: ignore[reportUnknownVariableType]
+)
 
 from .types import BoolV, IntV
 

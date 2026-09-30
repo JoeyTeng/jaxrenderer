@@ -19,7 +19,7 @@ def add_tracing_name(func: Callable[ArgT, RetT]) -> Callable[ArgT, RetT]:
     members: DictT[str, str]
     members = dict(inspect.getmembers(func, lambda v: isinstance(v, str)))
     annotation: str = (
-        f"{members.get('__module__', '')}" f":{members.get('__qualname__', '')}"
+        f"{members.get('__module__', '')}:{members.get('__qualname__', '')}"
     )
 
     @functools.wraps(func)
@@ -48,11 +48,9 @@ T_co = TypeVar("T_co", covariant=True)
 
 
 class Wrapped(Protocol[ArgT, T_co]):
-    def __call__(self, *args: ArgT.args, **kwargs: ArgT.kwargs) -> T_co:
-        ...
+    def __call__(self, *args: ArgT.args, **kwargs: ArgT.kwargs) -> T_co: ...
 
-    def lower(self, *args: ArgT.args, **kwargs: ArgT.kwargs) -> jax.stages.Lowered:
-        ...
+    def lower(self, *args: ArgT.args, **kwargs: ArgT.kwargs) -> jax.stages.Lowered: ...
 
 
 def typed_jit(

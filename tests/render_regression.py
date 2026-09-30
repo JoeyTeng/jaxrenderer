@@ -46,9 +46,9 @@ def compare_images(
     threshold: int,
     white_background: bool = False,
 ) -> dict[str, float]:
-    assert (
-        actual.shape == expected.shape
-    ), f"{name}: expected shape {expected.shape}, got {actual.shape}"
+    assert actual.shape == expected.shape, (
+        f"{name}: expected shape {expected.shape}, got {actual.shape}"
+    )
     expected_mask = foreground(expected, threshold, white_background)
     actual_mask = foreground(actual, threshold, white_background)
     union = expected_mask | actual_mask
@@ -76,16 +76,15 @@ def compare_images(
 
 
 def assert_image_metrics(name: str, metrics: dict[str, float]) -> None:
-    assert (
-        metrics["foreground_iou"] >= 0.90
-    ), f"{name}: foreground IoU {metrics['foreground_iou']:.5f} < 0.90"
-    assert metrics["union_channel_mae"] <= 5.0, (
-        f"{name}: union foreground channel MAE "
-        f"{metrics['union_channel_mae']:.3f} > 5"
+    assert metrics["foreground_iou"] >= 0.90, (
+        f"{name}: foreground IoU {metrics['foreground_iou']:.5f} < 0.90"
     )
-    assert (
-        metrics["union_pixel_max_abs_p95"] <= 20.0
-    ), f"{name}: foreground p95 {metrics['union_pixel_max_abs_p95']:.1f} > 20"
+    assert metrics["union_channel_mae"] <= 5.0, (
+        f"{name}: union foreground channel MAE {metrics['union_channel_mae']:.3f} > 5"
+    )
+    assert metrics["union_pixel_max_abs_p95"] <= 20.0, (
+        f"{name}: foreground p95 {metrics['union_pixel_max_abs_p95']:.1f} > 20"
+    )
 
 
 def save_image(name: str, image: np.ndarray) -> None:
@@ -164,17 +163,17 @@ def test_head_animation_matches_references_and_smoothly_moves() -> None:
         format="PNG",
     )
     write_report("head_animation", metrics)
-    assert (
-        min(foreground_ratios) >= 0.15
-    ), f"head foreground ratio minimum {min(foreground_ratios):.4f} < 0.15"
-    assert (
-        max(foreground_ratios) <= 0.27
-    ), f"head foreground ratio maximum {max(foreground_ratios):.4f} > 0.27"
-    assert (
-        min(adjacent_mae) >= 0.5
-    ), f"head adjacent-frame MAE minimum {min(adjacent_mae):.4f} < 0.5"
-    assert (
-        max(adjacent_mae) <= 5.0
-    ), f"head adjacent-frame MAE maximum {max(adjacent_mae):.4f} > 5"
+    assert min(foreground_ratios) >= 0.15, (
+        f"head foreground ratio minimum {min(foreground_ratios):.4f} < 0.15"
+    )
+    assert max(foreground_ratios) <= 0.27, (
+        f"head foreground ratio maximum {max(foreground_ratios):.4f} > 0.27"
+    )
+    assert min(adjacent_mae) >= 0.5, (
+        f"head adjacent-frame MAE minimum {min(adjacent_mae):.4f} < 0.5"
+    )
+    assert max(adjacent_mae) <= 5.0, (
+        f"head adjacent-frame MAE maximum {max(adjacent_mae):.4f} > 5"
+    )
     assert_image_metrics("head-frame-00", frame_0_metrics)
     assert_image_metrics("head-frame-15", frame_15_metrics)

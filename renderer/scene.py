@@ -4,8 +4,11 @@ from typing import NamedTuple, NewType, Optional, Union
 
 import jax.lax as lax
 import jax.numpy as jnp
-from jaxtyping import Array, Float
-from jaxtyping import jaxtyped  # pyright: ignore[reportUnknownVariableType]
+from jaxtyping import (
+    Array,
+    Float,
+    jaxtyped,  # pyright: ignore[reportUnknownVariableType]
+)
 
 from ._backport import DictT, Tuple, replace_dict
 from .model import Model, ModelObject
@@ -65,18 +68,16 @@ class Scene(NamedTuple):
             only one number is given, it is used for both x and y.
         """
         # reference: https://github.com/erwincoumans/tinyrenderer/blob/89e8adafb35ecf5134e7b17b71b0f825939dc6d9/model.cpp#L215
-        specular_map: SpecularMap = (
-            lax.full(  # pyright: ignore[reportUnknownMemberType]
-                diffuse_map.shape[:2], 2.0
-            )
+        specular_map: SpecularMap = lax.full(  # pyright: ignore[reportUnknownMemberType]
+            diffuse_map.shape[:2], 2.0
         )
 
         _half_extents = jnp.asarray(  # pyright: ignore[reportUnknownMemberType]
             half_extents
         )
-        assert isinstance(
-            _half_extents, Float[Array, "3"]
-        ), f"Expected 2 floats in half_extends, got {half_extents}"
+        assert isinstance(_half_extents, Float[Array, "3"]), (
+            f"Expected 2 floats in half_extends, got {half_extents}"
+        )
 
         _texture_scaling = jnp.asarray(  # pyright: ignore[reportUnknownMemberType]
             texture_scaling
@@ -85,9 +86,9 @@ class Scene(NamedTuple):
             _texture_scaling = lax.full(  # pyright: ignore[reportUnknownMemberType]
                 (2,), _texture_scaling
             )
-        assert isinstance(
-            _texture_scaling, Float[Array, "2"]
-        ), f"Expected 2 floats in texture_scaling, got {texture_scaling}"
+        assert isinstance(_texture_scaling, Float[Array, "2"]), (
+            f"Expected 2 floats in texture_scaling, got {texture_scaling}"
+        )
 
         model: Model = create_cube(
             half_extents=_half_extents,
@@ -115,11 +116,9 @@ class Scene(NamedTuple):
           - diffuse_map: the diffuse map of the capsule.
         """
         # reference: https://github.com/erwincoumans/tinyrenderer/blob/89e8adafb35ecf5134e7b17b71b0f825939dc6d9/model.cpp#L215
-        specular_map: SpecularMap = (
-            lax.full(  # pyright: ignore[reportUnknownMemberType]
-                diffuse_map.shape[:2],
-                2.0,
-            )
+        specular_map: SpecularMap = lax.full(  # pyright: ignore[reportUnknownMemberType]
+            diffuse_map.shape[:2],
+            2.0,
         )
         model: Model = create_capsule(
             radius=jnp.asarray(radius),  # pyright: ignore[reportUnknownMemberType]
@@ -170,7 +169,7 @@ class Scene(NamedTuple):
             for object_id, object in self.objects.items():
                 if object.model == model:
                     raise RuntimeError(
-                        f"model {model_id} is being used by object" f" {object_id}"
+                        f"model {model_id} is being used by object {object_id}"
                     )
 
         models = {k: v for k, v in self.models.items() if k != model_id}

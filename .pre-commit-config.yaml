@@ -36,28 +36,19 @@ repos:
 
   - repo: local
     hooks:
-      - id: isort
-        name: isort
-        entry: uv run --no-sync isort
+      - id: ruff-imports
+        name: Ruff import sorting
+        entry: uv run --no-sync ruff check --select I --fix
         language: system
         types: [python]
-        files: (renderer/|examples/|test_resources/tests/).*.py$
-        args:
-          [
-            --only-modified,
-            --combine-star,
-            --order-by-type,
-            --use-parentheses,
-            --case-sensitive,
-            --force-sort-within-sections,
-          ]
+        files: ^(assets/|renderer/|examples/|test_resources/|tests/).*[.]py$
 
-      - id: black
-        name: black
-        entry: uv run --no-sync black
+      - id: ruff-format
+        name: Ruff format
+        entry: uv run --no-sync ruff format
         language: system
         types: [python]
-        files: (renderer/|examples/|test_resources/tests/).*.py$
+        files: ^(assets/|renderer/|examples/|test_resources/|tests/).*[.]py$
 
       - id: pyright
         name: pyright

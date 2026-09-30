@@ -3,8 +3,12 @@ from typing import NamedTuple, cast
 import jax
 import jax.lax as lax
 import jax.numpy as jnp
-from jaxtyping import Array, Bool, Float
-from jaxtyping import jaxtyped  # pyright: ignore[reportUnknownVariableType]
+from jaxtyping import (
+    Array,
+    Bool,
+    Float,
+    jaxtyped,  # pyright: ignore[reportUnknownVariableType]
+)
 
 from renderer import Tuple, jit
 from renderer.geometry import Camera, normalise, to_homogeneous

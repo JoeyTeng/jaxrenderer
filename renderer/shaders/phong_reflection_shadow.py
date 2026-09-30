@@ -6,8 +6,13 @@ from typing import NamedTuple, cast
 import jax
 import jax.lax as lax
 import jax.numpy as jnp
-from jaxtyping import Array, Bool, Float, Integer
-from jaxtyping import jaxtyped  # pyright: ignore[reportUnknownVariableType]
+from jaxtyping import (
+    Array,
+    Bool,
+    Float,
+    Integer,
+    jaxtyped,  # pyright: ignore[reportUnknownVariableType]
+)
 from typing_extensions import override
 
 from .._backport import Tuple
@@ -224,9 +229,7 @@ class PhongReflectionShadowTextureShader(
         light_dir: Vec3f = normalise(extra.light_dir_eye)
 
         # Phong Reflection Model
-        diffuse: Float[
-            Array, ""
-        ] = jnp.maximum(  # pyright: ignore[reportUnknownMemberType]
+        diffuse: Float[Array, ""] = jnp.maximum(  # pyright: ignore[reportUnknownMemberType]
             lax.dot(normal, light_dir),  # pyright: ignore[reportUnknownMemberType]
             0,
         )
@@ -238,9 +241,7 @@ class PhongReflectionShadowTextureShader(
         )
         assert isinstance(reflected_light, Vec3f)
 
-        specular: Float[
-            Array, ""
-        ] = lax.pow(  # pyright: ignore[reportUnknownMemberType]
+        specular: Float[Array, ""] = lax.pow(  # pyright: ignore[reportUnknownMemberType]
             lax.max(reflected_light[2], 0.0),  # pyright: ignore
             extra.specular_map[uv[0], uv[1]],
         )

@@ -7,8 +7,13 @@ from typing import NamedTuple, Optional, Union, cast
 import jax
 import jax.lax as lax
 import jax.numpy as jnp
-from jaxtyping import Array, Float, Integer, Num
-from jaxtyping import jaxtyped  # pyright: ignore[reportUnknownVariableType]
+from jaxtyping import (
+    Array,
+    Float,
+    Integer,
+    Num,
+    jaxtyped,  # pyright: ignore[reportUnknownVariableType]
+)
 
 from ._backport import Tuple, TypeAlias
 from ._meta_utils import add_tracing_name
@@ -489,7 +494,7 @@ class Camera(NamedTuple):
     @partial(jit, inline=True)
     @add_tracing_name
     def inv_scale_translation_matrix(
-        scale_translation_mat: Float[Array, "4 4"]
+        scale_translation_mat: Float[Array, "4 4"],
     ) -> Float[Array, "4 4"]:
         """Compute the inverse matrix of a (4, 4) matrix representing a scale and translation, in a form of:
 

@@ -6,8 +6,13 @@ from typing import NamedTuple, cast
 import jax
 import jax.lax as lax
 import jax.numpy as jnp
-from jaxtyping import Array, Bool, Float, Integer
-from jaxtyping import jaxtyped  # pyright: ignore[reportUnknownVariableType]
+from jaxtyping import (
+    Array,
+    Bool,
+    Float,
+    Integer,
+    jaxtyped,  # pyright: ignore[reportUnknownVariableType]
+)
 
 from .._backport import Tuple
 from .._meta_utils import add_tracing_name
@@ -186,9 +191,7 @@ class PhongReflectionTextureShader(
         light_dir: Vec3f = normalise(extra.light_dir_eye)
 
         # Phong Reflection Model
-        diffuse: Float[
-            Array, ""
-        ] = jnp.maximum(  # pyright: ignore[reportUnknownMemberType]
+        diffuse: Float[Array, ""] = jnp.maximum(  # pyright: ignore[reportUnknownMemberType]
             lax.dot(normal, light_dir),  # pyright: ignore[reportUnknownMemberType]
             0,
         )
@@ -212,9 +215,11 @@ class PhongReflectionTextureShader(
         # compute colour
         colour: Colour = (
             extra.ambient * texture_colour
-            + (extra.diffuse * diffuse + extra.specular * specular) *
+            + (extra.diffuse * diffuse + extra.specular * specular)
+            *
             # intensity * light colour * texture colour
-            extra.light.colour * texture_colour
+            extra.light.colour
+            * texture_colour
         )
 
         return (

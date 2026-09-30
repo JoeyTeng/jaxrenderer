@@ -6,8 +6,13 @@ from typing import Sequence, Union, cast
 import jax
 from jax import lax
 import jax.numpy as jnp
-from jaxtyping import Array, Integer, Num, Shaped
-from jaxtyping import jaxtyped  # pyright: ignore[reportUnknownVariableType]
+from jaxtyping import (
+    Array,
+    Integer,
+    Num,
+    Shaped,
+    jaxtyped,  # pyright: ignore[reportUnknownVariableType]
+)
 
 from ._backport import Tuple
 from ._meta_utils import add_tracing_name

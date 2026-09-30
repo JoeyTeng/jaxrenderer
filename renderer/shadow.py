@@ -139,9 +139,7 @@ class Shadow(NamedTuple):
         ).astype(int)
         assert isinstance(pos, Vec2i)
 
-        value: FloatV = self.shadow_map.at[
-            pos[0], pos[1]
-        ].get(  # pyright: ignore[reportUnknownMemberType]
+        value: FloatV = self.shadow_map.at[pos[0], pos[1]].get(  # pyright: ignore[reportUnknownMemberType]
             mode="fill",
             indices_are_sorted=True,
             unique_indices=True,

@@ -8,8 +8,14 @@ from jax import lax
 import jax.lax as lax
 import jax.numpy as jnp
 from jax.tree_util import tree_map
-from jaxtyping import Array, Bool, Float, Integer, Num
-from jaxtyping import jaxtyped  # pyright: ignore[reportUnknownVariableType]
+from jaxtyping import (
+    Array,
+    Bool,
+    Float,
+    Integer,
+    Num,
+    jaxtyped,  # pyright: ignore[reportUnknownVariableType]
+)
 
 from ._backport import Tuple
 from ._meta_utils import add_tracing_name
