@@ -1,6 +1,4 @@
-"""Export backward compatible bindings to replace new features used in later
-Python versions to support Python 3.9+.
-"""
+"""Export stable type aliases and dictionary helpers for supported Python versions."""
 
 import sys
 from typing import Any, TypeVar
