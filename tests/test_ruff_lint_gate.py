@@ -101,7 +101,7 @@ def test_ruff_uses_fixed_isolated_policy(tmp_path: Path) -> None:
     assert "--no-respect-gitignore" in command
     assert command[command.index("--select") + 1] == "E4,E7,E9,F"
     assert command[command.index("--ignore") + 1] == "F722,F821"
-    assert command[command.index("--target-version") + 1] == "py39"
+    assert command[command.index("--target-version") + 1] == "py312"
     assert command[-1] == "renderer"
 
 

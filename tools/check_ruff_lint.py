@@ -130,7 +130,7 @@ def run_ruff(
         "--ignore",
         "F722,F821",
         "--target-version",
-        "py39",
+        "py312",
         "--output-format",
         "json",
         *active_paths,

@@ -5,11 +5,8 @@ description = "Jax implementation of rasterizer renderer."
 authors = [{ name = "Joey Teng", email = "joey.teng.dev@gmail.com" }]
 license = "Apache-2.0"
 readme = "README.md"
-requires-python = ">=3.9,<3.15"
+requires-python = ">=3.12,<3.15"
 classifiers = [
-    "Programming Language :: Python :: 3.9",
-    "Programming Language :: Python :: 3.10",
-    "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
     "Programming Language :: Python :: 3.14",
@@ -26,11 +23,11 @@ classifiers = [
     "Typing :: Typed",
 ]
 dependencies = [
-    "jax>=0.4.0",
-    "jaxlib>=0.4.0",
-    "jaxtyping>=0.2.19",
-    "numpy>=1.22.0",
-    "typing_extensions>=4.3.0",
+    "jax>=0.11.2",
+    "jaxlib>=0.11.2",
+    "jaxtyping>=0.3.11",
+    "numpy>=2.5.3",
+    "typing_extensions>=4.16.0",
 ]
 
 [project.urls]
@@ -41,20 +38,19 @@ Repository = "https://github.com/JoeyTeng/jaxrenderer"
 [dependency-groups]
 dev = [
     "ruff==0.16.9",
-    "matplotlib>=3.6.2",
-    "pillow>=9.4.0",
-    "pyright>=1.1.407",
-    "importlib-resources>=5.12.0",
+    "matplotlib>=3.11.2",
+    "pillow>=12.3.0",
+    "pyright>=1.1.414",
 ]
 test = [
-    "pre-commit>=3.3.3",
-    "pytest>=7.0.0",
-    "tox>=4.0.0",
-    "tox-uv>=1.29; python_version >= '3.10'",
+    "pre-commit>=4.6.2",
+    "pytest>=9.1.1",
+    "tox>=4.64.5",
+    "tox-uv>=1.36.0",
 ]
 
 [build-system]
-requires = ["hatchling>=1.27.0"]
+requires = ["hatchling>=1.32.4"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
@@ -66,7 +62,7 @@ addopts = [
 ]
 
 [tool.ruff]
-target-version = "py39"
+target-version = "py312"
 line-length = 88
 src = ["assets", "renderer", "examples", "test_resources", "tests", "tools"]
 include = [

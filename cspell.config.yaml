@@ -13,6 +13,7 @@ dictionaries:
   - en-gb
 words:
   - addopts
+  - APNG
   - arange
   - argmax
   - argmin
@@ -71,6 +72,7 @@ words:
   - matplotlib
   - mimage
   - mpimg
+  - MPLBACKEND
   - ncols
   - ndim
   - nfaces
