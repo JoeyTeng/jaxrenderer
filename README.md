@@ -6,7 +6,7 @@
 [![Build & Publish](https://github.com/JoeyTeng/jaxrenderer/actions/workflows/pypi.yml/badge.svg)](https://github.com/JoeyTeng/jaxrenderer/actions/workflows/pypi.yml)
 [![Lint & Test](https://github.com/JoeyTeng/jaxrenderer/actions/workflows/checks.yml/badge.svg)](https://github.com/JoeyTeng/jaxrenderer/actions/workflows/checks.yml)
 [![Checked with pyright](https://microsoft.github.io/pyright/img/pyright_badge.svg)](https://microsoft.github.io/pyright/)
-[![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
+[![Code style: Ruff](https://img.shields.io/badge/code%20style-Ruff-D7FF64.svg)](https://github.com/astral-sh/ruff)
 [![uv](https://img.shields.io/badge/packaging-uv-blue)](https://docs.astral.sh/uv/)
 [![Open in Colab](https://img.shields.io/badge/%7F-Open_demo_in_Colab-blue.svg?logo=googlecolab)](https://colab.research.google.com/github/JoeyTeng/jaxrenderer/blob/master/notebooks/Demo.ipynb)
 
@@ -115,7 +115,7 @@ You may implement your own shaders by inheriting from `Shader` and implement the
 
 ## Continuous Integration and Render Regression
 
-The GitHub Actions workflow tests Python 3.9–3.14 on Linux and checks formatting on Python 3.14 for pull requests and pushes to `master`. A separate `macos-latest` job uses Python 3.14 and CPU-only JAX to render the cube and a 30-frame head animation. The job also checks the numerical gradient of the light direction's x component against a central finite difference. The camera-gradient smoke check still runs, but its current output includes non-finite leaves and is not used as a numerical gate.
+The GitHub Actions workflow tests Python 3.9–3.14 on Linux and checks import sorting and formatting with Ruff on Python 3.14 for pull requests and pushes to `master`. A separate `macos-latest` job uses Python 3.14 and CPU-only JAX to render the cube and a 30-frame head animation. The job also checks the numerical gradient of the light direction's x component against a central finite difference. The camera-gradient smoke check still runs, but its current output includes non-finite leaves and is not used as a numerical gate.
 
 The Linux job runs strict Pyright from the uv lockfile on Python 3.14. Its diagnostics remain visible, but the check is advisory until the existing JAX typing issues are resolved.
 

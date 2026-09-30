@@ -7,8 +7,13 @@ import jax
 import jax.lax as lax
 import jax.numpy as jnp
 from jax.tree_util import Partial
-from jaxtyping import Array, Bool, Float, Integer
-from jaxtyping import jaxtyped  # pyright: ignore[reportUnknownVariableType]
+from jaxtyping import (
+    Array,
+    Bool,
+    Float,
+    Integer,
+    jaxtyped,  # pyright: ignore[reportUnknownVariableType]
+)
 
 from .._backport import Tuple, TypeAlias
 from .._meta_utils import add_tracing_name
@@ -189,14 +194,16 @@ class PhongTextureDarbouxShader(
         uv = cast(Vec2f, smooth_interpolation(values.uv))
         assert isinstance(uv, Vec2f)
 
-        varying: PhongTextureDarbouxExtraFragmentData = PhongTextureDarbouxExtraFragmentData(
-            normal=normal,
-            uv=uv,
-            # pick first of the 3, as they are the same
-            # noticed that `values` are batches, so here values.triangle is
-            # actually in the shape of (3, 3, 3)
-            triangle=values.triangle[0],
-            triangle_uv=values.triangle_uv[0],
+        varying: PhongTextureDarbouxExtraFragmentData = (
+            PhongTextureDarbouxExtraFragmentData(
+                normal=normal,
+                uv=uv,
+                # pick first of the 3, as they are the same
+                # noticed that `values` are batches, so here values.triangle is
+                # actually in the shape of (3, 3, 3)
+                triangle=values.triangle[0],
+                triangle_uv=values.triangle_uv[0],
+            )
         )
         assert isinstance(varying.triangle, Triangle3f)
         assert isinstance(varying.triangle_uv, Triangle2f)
@@ -222,9 +229,9 @@ class PhongTextureDarbouxShader(
             extra,
         )[0]
         assert isinstance(built_in, PerFragment)
-        assert isinstance(
-            varying, PhongTextureDarbouxExtraFragmentData
-        ), f"Expected PhongTextureDarbouxExtraFragmentData, got {varying}"
+        assert isinstance(varying, PhongTextureDarbouxExtraFragmentData), (
+            f"Expected PhongTextureDarbouxExtraFragmentData, got {varying}"
+        )
 
         # repeat texture
         uv = lax.floor(varying.uv).astype(int)  # pyright: ignore
@@ -263,12 +270,9 @@ class PhongTextureDarbouxShader(
         texture_colour: Colour = extra.texture[uv[0], uv[1]]
 
         # light colour * intensity
-        light_colour: Colour = (
-            extra.light.colour
-            * lax.dot(  # pyright: ignore[reportUnknownMemberType]
-                normal,
-                normalise(extra.light.direction),
-            )
+        light_colour: Colour = extra.light.colour * lax.dot(  # pyright: ignore[reportUnknownMemberType]
+            normal,
+            normalise(extra.light.direction),
         )
 
         return (

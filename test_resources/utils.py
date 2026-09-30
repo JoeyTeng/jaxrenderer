@@ -71,11 +71,11 @@ def make_model(fileContent: List[str]) -> Model:
             face_uv: List[int] = []
 
             vertices: List[str] = _one_vertex.findall(line)
-            assert len(vertices) == 3, "Expected 3 vertices, " f"(got {len(vertices)}"
+            assert len(vertices) == 3, f"Expected 3 vertices, (got {len(vertices)}"
             for vertex in _one_vertex.findall(line):
                 indices: List[int] = list(map(int, _integer.findall(vertex)))
                 assert len(indices) == 3, (
-                    "Expected 3 indices (v/vt/vn), " f"got {len(indices)}"
+                    f"Expected 3 indices (v/vt/vn), got {len(indices)}"
                 )
                 v, vt, vn = indices
                 # indexed from 1 in Wavefront Obj

@@ -4,8 +4,11 @@ from functools import partial
 
 import jax.numpy as jnp
 import jax.random as random
-from jaxtyping import Array, Shaped
-from jaxtyping import jaxtyped  # pyright: ignore[reportUnknownVariableType]
+from jaxtyping import (
+    Array,
+    Shaped,
+    jaxtyped,  # pyright: ignore[reportUnknownVariableType]
+)
 import numpy as np
 import pytest
 
@@ -36,9 +39,9 @@ class TestTransposeForDisplay:
         transposed: Shaped[Array, "snd fst *channel"]
         transposed = transpose_for_display(matrix, flip_vertical=flip_vertical)
 
-        assert (
-            np.array(matrix.shape) == np.array(shape)
-        ).all(), "Matrix shape must not be changed"
+        assert (np.array(matrix.shape) == np.array(shape)).all(), (
+            "Matrix shape must not be changed"
+        )
         assert (
             np.array(transposed.shape) == np.array([shape[1], shape[0], *shape[2:]])
         ).all(), "Transposed shape must be flipped along first two axises"

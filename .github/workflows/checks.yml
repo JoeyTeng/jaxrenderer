@@ -39,14 +39,14 @@ jobs:
       - name: Check Python version
         run: uv run --no-sync --python "${{ matrix.python-version }}" python --version
 
-      - name: Lint with isort
+      - name: Check import sorting with Ruff
         if: matrix.python-version == '3.14'
-        run: uv run --no-sync --python "${{ matrix.python-version }}" isort --check-only --jobs -1 .
+        run: uv run --no-sync --python "${{ matrix.python-version }}" ruff check --select I assets renderer examples test_resources tests
 
-      - name: Lint with black
+      - name: Check formatting with Ruff
         if: matrix.python-version == '3.14'
         # The checked-in Matplotlib stubs under typings/ follow upstream formatting.
-        run: uv run --no-sync --python "${{ matrix.python-version }}" black --check assets renderer examples test_resources tests
+        run: uv run --no-sync --python "${{ matrix.python-version }}" ruff format --check assets renderer examples test_resources tests
 
       - name: Run pyright
         if: matrix.python-version == '3.14'

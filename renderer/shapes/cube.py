@@ -1,7 +1,10 @@
 import jax
 import jax.numpy as jnp
-from jaxtyping import Array, Float
-from jaxtyping import jaxtyped  # pyright: ignore[reportUnknownVariableType]
+from jaxtyping import (
+    Array,
+    Float,
+    jaxtyped,  # pyright: ignore[reportUnknownVariableType]
+)
 
 from ..model import Model
 from ..types import (
