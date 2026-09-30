@@ -68,17 +68,19 @@ addopts = [
 [tool.ruff]
 target-version = "py39"
 line-length = 88
-src = ["assets", "renderer", "examples", "test_resources", "tests"]
+src = ["assets", "renderer", "examples", "test_resources", "tests", "tools"]
 include = [
     "assets/**/*.py",
     "renderer/**/*.py",
     "examples/**/*.py",
     "test_resources/**/*.py",
     "tests/**/*.py",
+    "tools/**/*.py",
 ]
 
 [tool.ruff.lint]
-select = ["I"]
+select = ["E4", "E7", "E9", "F", "I"]
+ignore = ["F722", "F821"]
 
 [tool.ruff.lint.isort]
 case-sensitive = true
