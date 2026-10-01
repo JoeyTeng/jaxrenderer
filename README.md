@@ -22,7 +22,7 @@ This project is distributed in [PyPI](https://pypi.org/project/jaxrenderer), and
 pip install jaxrenderer
 ```
 
-Python versions `3.12` to `3.14` are supported, and the minimum JAX version is `0.11.2`. You may need to install `jaxlib` separately if you are using GPU or TPU; by default, the CPU version of jaxlib is installed. Please refer to [JAX's installation guide](https://github.com/google/jax#installation) for more details.
+Python versions `3.12` to `3.14` are supported, with minimum versions of NumPy `2.1.3` and JAX `0.11.2`. You may need to install `jaxlib` separately if you are using GPU or TPU; by default, the CPU version of jaxlib is installed. Please refer to [JAX's installation guide](https://github.com/google/jax#installation) for more details.
 
 ### Development
 
@@ -115,7 +115,7 @@ You may implement your own shaders by inheriting from `Shader` and implement the
 
 ## Continuous Integration and Render Regression
 
-The GitHub Actions workflow tests Python 3.12–3.14 on Linux. On Python 3.14, Ruff checks import sorting and formatting, then compares the pull request head (or pushed commit) with its exact base revision and rejects newly introduced E4, E7, E9 and F lint violations. The comparison checks the paths supplied with `--paths`; CI passes `assets`, `renderer`, `examples`, `test_resources`, `tests` and `tools`. Existing violations are tolerated while new ones are blocked. `F722` and `F821` are ignored because jaxtyping shape annotations can trigger false positives. A separate `macos-latest` job uses Python 3.14 and CPU-only JAX to render the cube and a 30-frame head animation. The job also checks the numerical gradient of the light direction's x component against a central finite difference. The camera-gradient smoke check still runs, but its current output includes non-finite leaves and is not used as a numerical gate.
+The GitHub Actions workflow tests Python 3.12–3.14 on Linux using the locked dependencies. A separate Python 3.13 job installs NumPy `2.1.3`, checks the built wheel's dependency metadata, and runs the full test suite and CPU render and gradient regressions; its environment is isolated from the uv lockfile. On Python 3.14, Ruff checks import sorting and formatting, then compares the pull request head (or pushed commit) with its exact base revision and rejects newly introduced E4, E7, E9 and F lint violations. The comparison checks the paths supplied with `--paths`; CI passes `assets`, `renderer`, `examples`, `test_resources`, `tests` and `tools`. Existing violations are tolerated while new ones are blocked. `F722` and `F821` are ignored because jaxtyping shape annotations can trigger false positives. A separate `macos-latest` job uses Python 3.14 and CPU-only JAX to render the cube and a 30-frame head animation. The job also checks the numerical gradient of the light direction's x component against a central finite difference. The camera-gradient smoke check still runs, but its current output includes non-finite leaves and is not used as a numerical gate.
 
 Run `uv run ruff check assets renderer examples test_resources tests tools` to inspect the existing lint diagnostics locally.
 To compare a different path set locally, pass it after `--paths` to `tools/check_ruff_lint.py`; the rule selection stays fixed, so changing Ruff configuration alone cannot suppress newly introduced violations.
