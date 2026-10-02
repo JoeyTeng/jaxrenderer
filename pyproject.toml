@@ -1,6 +1,6 @@
 [project]
 name = "jaxrenderer"
-version = "0.4.0rc1"
+version = "0.4.0"
 description = "Jax implementation of rasterizer renderer."
 authors = [{ name = "Joey Teng", email = "joey.teng.dev@gmail.com" }]
 license = "Apache-2.0"
