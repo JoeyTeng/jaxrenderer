@@ -70,3 +70,10 @@
 3. Change to [isort](https://github.com/PyCQA/isort) + [black](https://github.com/psf/black) code style.
 4. Migrate full codebase to be type-checked with [pyright](https://github.com/microsoft/pyright).
 5. Add smoke tests, and use GitHub Action as CI to run them.
+
+## 0.4.0
+
+1. Support Python 3.12–3.14 and refresh the JAX, NumPy, and typing dependencies. Manage development dependencies with uv and use Ruff for linting and formatting.
+2. Require NumPy 2.1.3 or newer, with CI coverage for the minimum NumPy version, wheel metadata, the full test suite, and CPU render and gradient regressions.
+3. Check that a published release tag matches the package version and smoke-test the built wheel before publishing to PyPI.
+4. Validate rendering on free Colab T4 and TPU v5e-1 runtimes. TPU render regression requires `JAX_DEFAULT_MATMUL_PRECISION=highest` to match the CPU reference images.
