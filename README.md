@@ -24,6 +24,22 @@ pip install jaxrenderer
 
 Python versions `3.12` to `3.14` are supported, with minimum versions of NumPy `2.1.3` and JAX `0.11.2`. You may need to install `jaxlib` separately if you are using GPU or TPU; by default, the CPU version of jaxlib is installed. Please refer to [JAX's installation guide](https://github.com/google/jax#installation) for more details.
 
+### Google Colab TPU
+
+For a TPU runtime, install JAX with its TPU support using [JAX's TPU installation instructions](https://docs.jax.dev/en/latest/installation.html#pip-installation-google-cloud-tpu). The renderer `0.4.0` TPU check used NumPy `2.1.3` and JAX `0.11.2` on a free Colab TPU v5e-1:
+
+```python
+%pip install "numpy==2.1.3" "jax[tpu]" jaxrenderer
+```
+
+Restart the runtime after installation. Before importing JAX or compiling renderer work, set the TPU matmul precision:
+
+```python
+%env JAX_DEFAULT_MATMUL_PRECISION=highest
+```
+
+Alternatively, in Python, set `os.environ["JAX_DEFAULT_MATMUL_PRECISION"] = "highest"` before importing JAX, or call `jax.config.update("jax_default_matmul_precision", "highest")` before camera setup and render compilation. TPU's default float32 matrix multiplication can use reduced precision; `highest` brings the render regression in line with the CPU references. It can trade speed for accuracy. If your notebook uses Numba, keep a version compatible with NumPy `2.1.3` when installing these packages.
+
 ### Development
 
 Development dependencies are managed with [uv](https://docs.astral.sh/uv/). The default development environment uses Python `3.14`. From the repository root, install the locked dependencies and run commands with:
