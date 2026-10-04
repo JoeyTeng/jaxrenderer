@@ -136,7 +136,77 @@ The GitHub Actions workflow tests Python 3.12–3.14 on Linux using the locked d
 Run `uv run ruff check assets renderer examples test_resources tests tools` to inspect the existing lint diagnostics locally.
 To compare a different path set locally, pass it after `--paths` to `tools/check_ruff_lint.py`; the rule selection stays fixed, so changing Ruff configuration alone cannot suppress newly introduced violations.
 
-The Linux job runs strict Pyright from the uv lockfile on Python 3.14. Its diagnostics remain visible, but the check is advisory until the existing JAX typing issues are resolved.
+The Linux job runs strict Pyright from the uv lockfile on Python 3.14. Its diagnostics remain visible, but the check is advisory until the existing JAX typing issues are resolved. A dedicated `linux-render-regression` job also runs the CPU render and gradient regressions on Python 3.14 with the locked dependencies.
+
+### Manual GPU and TPU checks
+
+The `Manual accelerator regression` workflow runs the same test suite and render
+and gradient regressions on a Modal T4 GPU and a Kaggle TPU. These checks run only
+when a maintainer dispatches the workflow from `master`, specifying a pull request
+number. The workflow freezes its head and base revisions and records
+`accelerator/gpu` and `accelerator/tpu` statuses on the PR head. New commits need
+new checks; results from a changed head or base are rejected. Select `gpu` or
+`tpu` to retry one backend without resetting the other backend's status.
+
+Provider controller dependencies are pinned in the `ci-modal` and `ci-kaggle`
+groups in `uv.lock`. Each controller installs only its own group; ordinary CI
+and remote rendering tests install the development and test groups. GPU tests
+use Python 3.14, while TPU tests use Python 3.13 in an isolated environment.
+
+The tests require the requested JAX device and reject CPU fallback. TPU tests use
+`JAX_DEFAULT_MATMUL_PRECISION=highest`, as described in the Colab instructions.
+Images, numerical metrics, runtime versions and diagnostics are retained as
+GitHub Actions artefacts for 14 days. Existing numerical tolerances apply to all
+backends; the camera-gradient smoke test remains advisory about numerical values.
+
+#### Account and environment setup
+
+Create these environments under **Settings → Environments** in the GitHub
+repository. Restrict their deployment branches to `master`. Provider credentials
+are used by the trusted controller, not passed to the remote PR test process.
+
+| Environment | Secrets | Variables |
+| --- | --- | --- |
+| `modal-gpu` | `MODAL_TOKEN_ID`, `MODAL_TOKEN_SECRET` | None |
+| `kaggle-tpu` | `KAGGLE_API_TOKEN` | `KAGGLE_USERNAME` |
+
+- Register at [Modal](https://modal.com/) and use a Starter workspace. Create an
+  API token in the workspace settings. Before running tests, set the workspace
+  usage budget no higher than the available free credits and the net spend limit
+  to `$0` under **Usage & Billing**. Starter includes `$30` of monthly compute
+  credits, but the plan can charge for excess usage unless limits are configured;
+  see [pricing](https://modal.com/pricing) and
+  [budgets](https://modal.com/docs/guide/budgets). The workflow uses an on-demand
+  T4 function, without a persistent deployment or automatic retries.
+- Register at [Kaggle](https://www.kaggle.com/), complete the required account
+  verification, and confirm access to a TPU notebook. Generate an API token under
+  **Account Settings → API tokens**; see the [API documentation](https://www.kaggle.com/docs/api).
+  The controller submits a private notebook with
+  `TpuV5E8` and retrieves that run's output. Availability and quota depend on the
+  account; exhaustion, queue timeout or missing TPU devices fail the check.
+  Kaggle's CLI has no documented command to cancel an active kernel session;
+  the submission sets a 30-minute execution timeout, while an Actions timeout
+  stops waiting and must not be treated as proof that the remote run stopped.
+
+#### Enabling the merge requirements
+
+First merge the workflow and configure the environments. GitHub requires a
+`workflow_dispatch` workflow to exist on the default branch before it can run.
+Run both providers against an open PR and inspect their device and numerical
+reports before adding `accelerator/gpu` and `accelerator/tpu` as required status
+checks in the `master` ruleset. Require the PR branch to be up to date, and choose
+GitHub Actions as the expected status source. Missing or unsuccessful checks must
+block merging; do not replace a failed provider check with a skipped job.
+
+```sh
+gh workflow run accelerators.yml --ref master -f pr=25 -f backend=both
+```
+
+Kaggle documents TPU selection via its CLI, but an
+[open upstream issue](https://github.com/Kaggle/kaggle-cli/issues/1197) reports
+submissions that receive the wrong runtime. A real TPU run is required before
+enabling its merge requirement. Account configuration and mocked controller tests
+alone do not establish accelerator compatibility.
 
 The render regression compares the cube and head frames 0 and 15 with the checked-in images in `tests/references/`. It allows small renderer differences while requiring all of these bounds:
 

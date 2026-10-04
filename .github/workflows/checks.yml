@@ -37,7 +37,7 @@ jobs:
           enable-cache: true
 
       - name: Install dependencies
-        run: uv sync --locked --all-groups --python 3.14
+        run: uv sync --locked --group dev --group test --python 3.14
 
       - name: Check import sorting with Ruff
         run: uv run --no-sync --python 3.14 ruff check --select I assets renderer examples test_resources tests tools
@@ -71,7 +71,7 @@ jobs:
           enable-cache: true
 
       - name: Install dependencies
-        run: uv sync --locked --all-groups --python "${{ matrix.python-version }}"
+        run: uv sync --locked --group dev --group test --python "${{ matrix.python-version }}"
 
       - name: Check Python version
         run: uv run --no-sync --python "${{ matrix.python-version }}" python --version
@@ -108,7 +108,7 @@ jobs:
           python-version: "3.14"
 
       - name: Install locked dependencies
-        run: uv sync --locked --all-groups --python 3.14
+        run: uv sync --locked --group dev --group test --python 3.14
 
       - name: Check Python version
         run: uv run --no-sync python --version
@@ -122,6 +122,44 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: macos-render-regression
+          path: render-artifacts/
+          if-no-files-found: warn
+          retention-days: 7
+
+  linux-render-regression:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      JAX_PLATFORMS: cpu
+      MPLBACKEND: Agg
+      JAXRENDERER_ARTIFACT_DIR: render-artifacts
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v10.2.0
+        with:
+          version: "0.12.20"
+          enable-cache: true
+
+      - name: Set up Python 3.14
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.14"
+
+      - name: Install locked dependencies
+        run: uv sync --locked --group dev --group test --python 3.14
+
+      - name: Run render and gradient regression tests
+        timeout-minutes: 12
+        run: uv run --no-sync python -m pytest -q tests/render_regression.py tests/test_smoke_grad.py
+
+      - name: Upload render regression artefacts
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: linux-render-regression
           path: render-artifacts/
           if-no-files-found: warn
           retention-days: 7
