@@ -18,7 +18,8 @@ jobs:
   prepare:
     if: >-
       github.repository == 'JoeyTeng/jaxrenderer' &&
-      startsWith(github.event.head_commit.message, '[accelerator-bootstrap]')
+      (startsWith(github.event.head_commit.message, '[accelerator-bootstrap]') ||
+       startsWith(github.event.head_commit.message, '[accelerator-bootstrap-gpu]'))
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -27,6 +28,7 @@ jobs:
       statuses: write
     outputs:
       head_sha: ${{ steps.freeze.outputs.head_sha }}
+      backend: ${{ steps.selection.outputs.backend }}
     steps:
       - name: Require the authorised bootstrap branch
         run: test "$GITHUB_REF" = 'refs/heads/wip/accelerator-ci'
@@ -36,13 +38,24 @@ jobs:
       - uses: actions/setup-python@v7
         with:
           python-version: "3.14"
+      - name: Select the explicitly requested providers
+        id: selection
+        env:
+          GPU_ONLY: ${{ startsWith(github.event.head_commit.message, '[accelerator-bootstrap-gpu]') }}
+        run: |
+          backend=both
+          if [ "$GPU_ONLY" = true ]; then
+            backend=gpu
+          fi
+          echo "backend=$backend" >> "$GITHUB_OUTPUT"
       - name: Freeze the pull request and initialise selected checks
         id: freeze
         env:
           GH_TOKEN: ${{ github.token }}
+          BACKEND: ${{ steps.selection.outputs.backend }}
         run: >-
           python tools/accelerator_gate.py prepare
-          --pr 25 --backend both --bootstrap-pr 25
+          --pr 25 --backend "$BACKEND" --bootstrap-pr 25
           --output accelerator-binding.json --github-output "$GITHUB_OUTPUT"
       - uses: actions/upload-artifact@v7
         with:
@@ -106,6 +119,7 @@ jobs:
 
   tpu:
     needs: prepare
+    if: needs.prepare.outputs.backend == 'both'
     runs-on: ubuntu-latest
     timeout-minutes: 35
     environment: kaggle-tpu
