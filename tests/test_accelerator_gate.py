@@ -19,10 +19,7 @@ SYNTHETIC_ACCESS_A = "codex_synth_v1_access_a"
 SYNTHETIC_ACCESS_B = "codex_synth_v1_access_b"
 
 
-def pull_request(
-    head_repository: str = "Contributor/jaxrenderer",
-    head_ref: str = "wip/release",
-) -> dict[str, Any]:
+def pull_request() -> dict[str, Any]:
     return {
         "state": "open",
         "base": {
@@ -32,21 +29,18 @@ def pull_request(
         },
         "head": {
             "sha": HEAD_SHA,
-            "ref": head_ref,
-            "repo": {"full_name": head_repository, "private": False},
+            "repo": {"full_name": "Contributor/jaxrenderer", "private": False},
         },
     }
 
 
-def binding(
-    pr_number: int = 24, head_repository: str = "Contributor/jaxrenderer"
-) -> dict[str, object]:
+def binding() -> dict[str, object]:
     return {
-        "pr": pr_number,
+        "pr": 24,
         "head_sha": HEAD_SHA,
         "base_sha": BASE_SHA,
         "base_ref": "master",
-        "head_repository": head_repository,
+        "head_repository": "Contributor/jaxrenderer",
         "run_id": RUN_ID,
     }
 
@@ -71,7 +65,6 @@ def result(**overrides: object) -> dict[str, object]:
 class FakeGitHub:
     def __init__(self) -> None:
         self.pr = pull_request()
-        self.pr_number = 24
         self.compare_status = "ahead"
         self.statuses: list[dict[str, object]] = []
         self.posts: list[tuple[str, dict[str, object]]] = []
@@ -80,7 +73,7 @@ class FakeGitHub:
         self, command: list[str], **kwargs: object
     ) -> subprocess.CompletedProcess[str]:
         route = command[2]
-        if route == f"repos/{gate.REPOSITORY}/pulls/{self.pr_number}":
+        if route == f"repos/{gate.REPOSITORY}/pulls/24":
             value: object = self.pr
         elif route == f"repos/{gate.REPOSITORY}/compare/{BASE_SHA}...{HEAD_SHA}":
             value = {"status": self.compare_status}
@@ -180,163 +173,6 @@ def test_prepare_rejects_head_that_is_behind_base(
     with install_fake_github(github):
         with pytest.raises(gate.GateError, match="up to date"):
             gate.prepare(24, "both", tmp_path / "binding.json", tmp_path / "out")
-    assert github.posts == []
-
-
-def bootstrap_environment(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("GITHUB_EVENT_NAME", "push")
-    monkeypatch.setenv("GITHUB_REF", f"refs/heads/{gate.BOOTSTRAP_BRANCH}")
-    monkeypatch.setenv("GITHUB_REPOSITORY", gate.REPOSITORY)
-    monkeypatch.setenv("GITHUB_SHA", HEAD_SHA)
-
-
-def test_bootstrap_pr25_accepts_only_matching_same_repo_push(
-    tmp_path: Path, github: FakeGitHub, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    bootstrap_environment(monkeypatch)
-    github.pr_number = gate.BOOTSTRAP_PR
-    github.pr = pull_request(gate.REPOSITORY, gate.BOOTSTRAP_BRANCH)
-    output = tmp_path / "binding.json"
-    github_output = tmp_path / "github-output.txt"
-
-    with install_fake_github(github):
-        actual = gate.prepare(
-            gate.BOOTSTRAP_PR,
-            "both",
-            output,
-            github_output,
-            bootstrap_pr=gate.BOOTSTRAP_PR,
-        )
-
-    expected_binding = binding(gate.BOOTSTRAP_PR, gate.REPOSITORY)
-    assert actual == expected_binding
-    assert json.loads(output.read_text(encoding="utf-8")) == expected_binding
-    assert {body["context"] for _, body in github.posts} == {
-        "accelerator/gpu",
-        "accelerator/tpu",
-    }
-
-
-def test_parser_accepts_explicit_bootstrap_pr(
-    tmp_path: Path,
-) -> None:
-    args = gate.parser().parse_args(
-        [
-            "prepare",
-            "--pr",
-            "25",
-            "--backend",
-            "both",
-            "--bootstrap-pr",
-            "25",
-            "--output",
-            str(tmp_path / "binding.json"),
-            "--github-output",
-            str(tmp_path / "github-output.txt"),
-        ]
-    )
-
-    assert args.bootstrap_pr == gate.BOOTSTRAP_PR
-
-
-@pytest.mark.parametrize(
-    ("pr_number", "event", "ref", "repository", "sha", "head_repository", "head_ref"),
-    [
-        (
-            24,
-            "push",
-            f"refs/heads/{gate.BOOTSTRAP_BRANCH}",
-            gate.REPOSITORY,
-            HEAD_SHA,
-            gate.REPOSITORY,
-            gate.BOOTSTRAP_BRANCH,
-        ),
-        (
-            25,
-            "workflow_dispatch",
-            f"refs/heads/{gate.BOOTSTRAP_BRANCH}",
-            gate.REPOSITORY,
-            HEAD_SHA,
-            gate.REPOSITORY,
-            gate.BOOTSTRAP_BRANCH,
-        ),
-        (
-            25,
-            "push",
-            "refs/heads/master",
-            gate.REPOSITORY,
-            HEAD_SHA,
-            gate.REPOSITORY,
-            gate.BOOTSTRAP_BRANCH,
-        ),
-        (
-            25,
-            "push",
-            f"refs/heads/{gate.BOOTSTRAP_BRANCH}",
-            "Other/repo",
-            HEAD_SHA,
-            gate.REPOSITORY,
-            gate.BOOTSTRAP_BRANCH,
-        ),
-        (
-            25,
-            "push",
-            f"refs/heads/{gate.BOOTSTRAP_BRANCH}",
-            gate.REPOSITORY,
-            "c" * 40,
-            gate.REPOSITORY,
-            gate.BOOTSTRAP_BRANCH,
-        ),
-        (
-            25,
-            "push",
-            f"refs/heads/{gate.BOOTSTRAP_BRANCH}",
-            gate.REPOSITORY,
-            HEAD_SHA,
-            "Contributor/jaxrenderer",
-            gate.BOOTSTRAP_BRANCH,
-        ),
-        (
-            25,
-            "push",
-            f"refs/heads/{gate.BOOTSTRAP_BRANCH}",
-            gate.REPOSITORY,
-            HEAD_SHA,
-            gate.REPOSITORY,
-            "other-branch",
-        ),
-    ],
-)
-def test_bootstrap_rejects_wrong_pr_or_event_binding(
-    tmp_path: Path,
-    github: FakeGitHub,
-    monkeypatch: pytest.MonkeyPatch,
-    pr_number: int,
-    event: str,
-    ref: str,
-    repository: str,
-    sha: str,
-    head_repository: str,
-    head_ref: str,
-) -> None:
-    bootstrap_environment(monkeypatch)
-    monkeypatch.setenv("GITHUB_EVENT_NAME", event)
-    monkeypatch.setenv("GITHUB_REF", ref)
-    monkeypatch.setenv("GITHUB_REPOSITORY", repository)
-    monkeypatch.setenv("GITHUB_SHA", sha)
-    github.pr_number = pr_number
-    github.pr = pull_request(head_repository, head_ref)
-
-    with install_fake_github(github):
-        with pytest.raises(gate.GateError):
-            gate.prepare(
-                pr_number,
-                "both",
-                tmp_path / "binding.json",
-                tmp_path / "github-output.txt",
-                bootstrap_pr=gate.BOOTSTRAP_PR,
-            )
-
     assert github.posts == []
 
 

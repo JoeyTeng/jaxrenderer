@@ -208,6 +208,13 @@ submissions that receive the wrong runtime. A real TPU run is required before
 enabling its merge requirement. Account configuration and mocked controller tests
 alone do not establish accelerator compatibility.
 
+The initial provider validation passed on a Modal Tesla T4 with Python 3.14.7,
+JAX 0.11.2 and NumPy 2.5.3, including the full test suite and all four render and
+gradient regressions. The Kaggle submission installed its dependencies but
+failed TPU initialisation with `No jellyfish device found`; its tests did not
+start. Keep the TPU merge requirement disabled until a submission proves that
+Kaggle has allocated a TPU and passes the regressions.
+
 The render regression compares the cube and head frames 0 and 15 with the checked-in images in `tests/references/`. It allows small renderer differences while requiring all of these bounds:
 
 - Foreground intersection-over-union (IoU) of at least `0.90`.
