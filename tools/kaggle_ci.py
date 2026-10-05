@@ -193,6 +193,35 @@ def _kernel_slug(binding: dict[str, object]) -> str:
     return slug
 
 
+def _write_controller_state(
+    path: Path,
+    binding: dict[str, object],
+    kernel_id: str,
+    submitted_version: int | None,
+) -> None:
+    value = {
+        "binding": binding,
+        "kernel_id": kernel_id,
+        "submitted_version": submitted_version,
+    }
+    temporary: str | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            dir=path.parent,
+            prefix=".kaggle-state-",
+            delete=False,
+        ) as stream:
+            temporary = stream.name
+            json.dump(value, stream, sort_keys=True)
+            stream.write("\n")
+        os.replace(temporary, path)
+    finally:
+        if temporary and os.path.exists(temporary):
+            os.unlink(temporary)
+
+
 def _bootstrap_source(binding: dict[str, object], runner_path: Path) -> str:
     try:
         runner_source = runner_path.read_text(encoding="utf-8")
@@ -284,7 +313,12 @@ def _status(stdout: str) -> str:
     match = STATUS_RE.search(stdout)
     if match is None:
         raise KaggleError("Kaggle returned an unrecognised kernel status")
-    return match.group(1).strip().casefold()
+    raw_status = match.group(1).strip().casefold()
+    if raw_status.startswith("kernelworkerstatus."):
+        return raw_status.rsplit(".", maxsplit=1)[1]
+    if "." in raw_status:
+        raise KaggleError("Kaggle returned an unrecognised kernel status type")
+    return raw_status
 
 
 def _validate_downloaded_result(
@@ -335,6 +369,8 @@ def _run(binding: dict[str, object], backend: str, output_dir: Path) -> dict[str
 
         kernel_dir = Path(temporary) / "kernel"
         _make_kernel(kernel_dir, username, slug, binding, runner_path)
+        state_path = output_dir / "kaggle-controller-state.json"
+        _write_controller_state(state_path, binding, kernel_id, None)
         pushed = _command_ok(
             [
                 "kaggle",
@@ -352,6 +388,7 @@ def _run(binding: dict[str, object], backend: str, output_dir: Path) -> dict[str
         version_match = VERSION_RE.search(pushed.stdout)
         if version_match is None or version_match.group(1) != "1":
             raise KaggleError("fresh private Kaggle kernel did not report version 1")
+        _write_controller_state(state_path, binding, kernel_id, 1)
 
         deadline = time.monotonic() + KAGGLE_TIMEOUT_SECONDS
         remote_failure = ""
@@ -396,7 +433,7 @@ def _run(binding: dict[str, object], backend: str, output_dir: Path) -> dict[str
                     str(output_dir),
                     "--force",
                     "--file-pattern",
-                    r"^(?:result\.json|kaggle-controller\.log|(?:diagnostics|setup|device-probe|full-tests|render-gradient-tests)\.log|render-artifacts/(?:numeric-report\.json|[A-Za-z0-9._-]+\.png))$",
+                    r"^(?:result\.json|(?:diagnostics|setup|device-probe|full-tests|render-gradient-tests)\.log|render-artifacts/(?:numeric-report\.json|[A-Za-z0-9._-]+\.png))$",
                 ],
                 env=env,
             )

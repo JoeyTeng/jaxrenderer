@@ -65,6 +65,14 @@ def test_minimal_environment_keeps_accelerator_runtime_and_drops_credentials(
     assert "GITHUB_TOKEN" not in environment
 
 
+def test_gpu_platform_selects_cuda_without_rocm_alias_expansion(tmp_path: Path) -> None:
+    environment = runner._minimal_environment(
+        tmp_path / "home", tmp_path / "venv", "gpu", tmp_path / "artifacts"
+    )
+    assert environment["JAX_PLATFORMS"] == "cuda"
+    assert environment["JAX_DEFAULT_MATMUL_PRECISION"] == "highest"
+
+
 def test_output_directory_replacement_fails_identity_revalidation(
     tmp_path: Path,
 ) -> None:
@@ -142,7 +150,7 @@ def test_success_runs_both_suites_with_locked_jax_and_real_backend_probe(
         _log: Path,
     ) -> dict[str, object]:
         assert backend == "gpu"
-        assert environment["JAX_PLATFORMS"] == "gpu"
+        assert environment["JAX_PLATFORMS"] == "cuda"
         assert environment["JAX_DEFAULT_MATMUL_PRECISION"] == "highest"
         return {
             "device_backend": "gpu",

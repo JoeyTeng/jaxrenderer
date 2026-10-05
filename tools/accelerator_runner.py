@@ -170,6 +170,7 @@ def _extract_source_archive(data: bytes, destination: Path) -> Path:
 def _minimal_environment(
     home: Path, venv: Path, backend: str, artifacts: Path
 ) -> dict[str, str]:
+    jax_platform = "cuda" if backend == "gpu" else backend
     environment = {
         "HOME": str(home),
         "PATH": os.pathsep.join(
@@ -179,7 +180,7 @@ def _minimal_environment(
         "LC_ALL": "C.UTF-8",
         "PYTHONNOUSERSITE": "1",
         "PYTHONUNBUFFERED": "1",
-        "JAX_PLATFORMS": backend,
+        "JAX_PLATFORMS": jax_platform,
         "JAX_DEFAULT_MATMUL_PRECISION": "highest",
         "MPLBACKEND": "Agg",
         "JAXRENDERER_ARTIFACT_DIR": str(artifacts),

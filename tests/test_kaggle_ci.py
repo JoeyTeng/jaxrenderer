@@ -65,6 +65,13 @@ def test_quota_requires_unambiguous_tpu_headroom() -> None:
             kaggle_ci._read_quota(response)
 
 
+def test_status_accepts_kaggle_worker_status_enum_output() -> None:
+    assert kaggle_ci._status('has status "KernelWorkerStatus.QUEUED"') == "queued"
+    assert kaggle_ci._status('has status "KernelWorkerStatus.COMPLETE"') == "complete"
+    with pytest.raises(kaggle_ci.KaggleError, match="status type"):
+        kaggle_ci._status('has status "UntrustedStatus.QUEUED"')
+
+
 def test_missing_credentials_fail_before_any_kaggle_command(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -116,7 +123,12 @@ def test_success_uses_a_fresh_private_slug_polls_and_downloads_bound_result(
     )
     monkeypatch.setattr(kaggle_ci, "__file__", str(tmp_path / "kaggle_ci.py"))
     commands: list[list[str]] = []
-    status_responses = iter(('has status "RUNNING"', 'has status "COMPLETE"'))
+    status_responses = iter(
+        (
+            'has status "KernelWorkerStatus.RUNNING"',
+            'has status "KernelWorkerStatus.COMPLETE"',
+        )
+    )
 
     def fake_command(
         args: list[str],
@@ -133,7 +145,15 @@ def test_success_uses_a_fresh_private_slug_polls_and_downloads_bound_result(
             metadata = json.loads(
                 (kernel_dir / "kernel-metadata.json").read_text(encoding="utf-8")
             )
+            controller_state = json.loads(
+                (tmp_path / "output" / "kaggle-controller-state.json").read_text(
+                    encoding="utf-8"
+                )
+            )
             assert metadata["is_private"] is True
+            assert controller_state["binding"] == BINDING
+            assert controller_state["kernel_id"].startswith("test-user/jaxr-")
+            assert controller_state["submitted_version"] is None
             assert args[args.index("--accelerator") + 1] == "TpuV5E8"
             assert args[args.index("--timeout") + 1] == str(
                 kaggle_ci.KAGGLE_TIMEOUT_SECONDS
@@ -144,7 +164,12 @@ def test_success_uses_a_fresh_private_slug_polls_and_downloads_bound_result(
         if args[1:3] == ["kernels", "output"]:
             assert args[3].endswith("/1")
             assert "render-artifacts/" in args[args.index("--file-pattern") + 1]
-            output = Path(args[args.index("--path") + 1]) / "result.json"
+            output_dir = Path(args[args.index("--path") + 1])
+            # Remote output must preserve the controller's submission identity.
+            pattern = re.compile(args[args.index("--file-pattern") + 1])
+            if pattern.fullmatch("kaggle-controller-state.json"):
+                (output_dir / "kaggle-controller-state.json").write_text("{}")
+            output = output_dir / "result.json"
             output.write_text(json.dumps(success_result()), encoding="utf-8")
             return completed(args)
         pytest.fail(f"unexpected Kaggle command: {args}")
@@ -154,6 +179,13 @@ def test_success_uses_a_fresh_private_slug_polls_and_downloads_bound_result(
     result = kaggle_ci.run(BINDING, "tpu", tmp_path / "output")
 
     assert result == success_result()
+    controller_state = json.loads(
+        (tmp_path / "output" / "kaggle-controller-state.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert controller_state["submitted_version"] == 1
+    assert controller_state["binding"] == BINDING
     pushes = [command for command in commands if command[1:3] == ["kernels", "push"]]
     assert len(pushes) == 1
     # The private slug includes a random suffix so output from an older run cannot match.
@@ -162,6 +194,7 @@ def test_success_uses_a_fresh_private_slug_polls_and_downloads_bound_result(
     ]
     assert len(status_commands) == 2
     assert status_commands[0][-1] == status_commands[1][-1]
+    assert controller_state["kernel_id"] == status_commands[0][-1]
     assert re.fullmatch(
         r"test-user/jaxr-[0-9a-f]{16}-[0-9a-f]{10}", status_commands[0][-1]
     )
@@ -225,7 +258,7 @@ def test_failed_remote_status_still_retrieves_scoped_diagnostics(
         if args[1:3] == ["kernels", "push"]:
             return completed(args, "Kernel version 1 successfully pushed.\n")
         if args[1:3] == ["kernels", "status"]:
-            return completed(args, 'has status "ERROR"')
+            return completed(args, 'has status "KernelWorkerStatus.ERROR"')
         if args[1:3] == ["kernels", "output"]:
             output = Path(args[args.index("--path") + 1]) / "diagnostics.log"
             output.write_text("device backend was cpu", encoding="utf-8")
