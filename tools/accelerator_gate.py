@@ -14,6 +14,8 @@ from typing import Any
 
 REPOSITORY = "JoeyTeng/jaxrenderer"
 BASE_BRANCH = "master"
+BOOTSTRAP_PR = 25
+BOOTSTRAP_BRANCH = "wip/accelerator-ci"
 CONTEXTS = {"gpu": "accelerator/gpu", "tpu": "accelerator/tpu"}
 BINDING_FIELDS = {
     "pr",
@@ -84,6 +86,21 @@ def _require_dispatch_context() -> None:
         raise GateError(f"prepare is restricted to {REPOSITORY}")
 
 
+def _require_bootstrap_context(pr_number: int, bootstrap_pr: int) -> str:
+    if bootstrap_pr != BOOTSTRAP_PR or pr_number != BOOTSTRAP_PR:
+        raise GateError(f"bootstrap is restricted to PR #{BOOTSTRAP_PR}")
+    if os.environ.get("GITHUB_EVENT_NAME") != "push":
+        raise GateError("bootstrap must run from a push event")
+    if os.environ.get("GITHUB_REF") != f"refs/heads/{BOOTSTRAP_BRANCH}":
+        raise GateError(f"bootstrap must run from {BOOTSTRAP_BRANCH}")
+    if os.environ.get("GITHUB_REPOSITORY", "").casefold() != REPOSITORY.casefold():
+        raise GateError(f"bootstrap is restricted to pushes in {REPOSITORY}")
+    sha = os.environ.get("GITHUB_SHA", "")
+    if not SHA_RE.fullmatch(sha):
+        raise GateError("bootstrap GITHUB_SHA is malformed")
+    return sha
+
+
 def _read_pr(pr_number: int) -> dict[str, object]:
     value = _gh_api(f"repos/{REPOSITORY}/pulls/{pr_number}")
     if not isinstance(value, dict):
@@ -95,7 +112,9 @@ def _is_repository(value: object, expected: str) -> bool:
     return isinstance(value, str) and value.casefold() == expected.casefold()
 
 
-def _binding_from_pr(pr_number: int, run_id: str) -> dict[str, object]:
+def _binding_from_pr(
+    pr_number: int, run_id: str, expected_head_ref: str | None = None
+) -> dict[str, object]:
     pr = _read_pr(pr_number)
     base = pr.get("base")
     head = pr.get("head")
@@ -109,6 +128,8 @@ def _binding_from_pr(pr_number: int, run_id: str) -> dict[str, object]:
     base_sha = base.get("sha")
     head_sha = head.get("sha")
     head_repository = head_repo.get("full_name")
+    if expected_head_ref is not None and head.get("ref") != expected_head_ref:
+        raise GateError(f"bootstrap PR head must use {expected_head_ref}")
     if pr.get("state") != "open":
         raise GateError("pull request is not open")
     if base_ref != BASE_BRANCH:
@@ -196,15 +217,34 @@ def _append_github_output(path: Path, values: dict[str, object]) -> None:
 
 
 def prepare(
-    pr_number: int, backend_selection: str, output: Path, github_output: Path
+    pr_number: int,
+    backend_selection: str,
+    output: Path,
+    github_output: Path,
+    bootstrap_pr: int | None = None,
 ) -> dict[str, object]:
-    _require_dispatch_context()
+    push_sha = (
+        _require_bootstrap_context(pr_number, bootstrap_pr)
+        if bootstrap_pr is not None
+        else None
+    )
+    if bootstrap_pr is None:
+        _require_dispatch_context()
     if backend_selection not in {"both", "gpu", "tpu"}:
         raise GateError("backend must be both, gpu, or tpu")
     if output.resolve() == github_output.resolve():
         raise GateError("binding output and GITHUB_OUTPUT must be different files")
     run_id = _run_id_from_env()
-    binding = _binding_from_pr(pr_number, run_id)
+    binding = _binding_from_pr(
+        pr_number,
+        run_id,
+        expected_head_ref=BOOTSTRAP_BRANCH if bootstrap_pr is not None else None,
+    )
+    if bootstrap_pr is not None:
+        if not _is_repository(binding["head_repository"], REPOSITORY):
+            raise GateError("bootstrap requires a PR head in the same repository")
+        if binding["head_sha"] != push_sha:
+            raise GateError("bootstrap GITHUB_SHA does not match the PR head")
     _atomic_write_json(output, binding)
     backends = tuple(CONTEXTS) if backend_selection == "both" else (backend_selection,)
     run_number, attempt = RUN_ID_RE.fullmatch(run_id).groups()  # type: ignore[union-attr]
@@ -435,6 +475,7 @@ def parser() -> argparse.ArgumentParser:
     )
     prepare_parser.add_argument("--output", type=Path, required=True)
     prepare_parser.add_argument("--github-output", type=Path, required=True)
+    prepare_parser.add_argument("--bootstrap-pr", type=_positive_pr)
     finish_parser = commands.add_parser("finish")
     finish_parser.add_argument("--binding", type=Path, required=True)
     finish_parser.add_argument("--backend", choices=tuple(CONTEXTS), required=True)
@@ -449,7 +490,13 @@ def main(argv: list[str] | None = None) -> int:
     args = parser().parse_args(argv)
     try:
         if args.command == "prepare":
-            result = prepare(args.pr, args.backend, args.output, args.github_output)
+            result = prepare(
+                args.pr,
+                args.backend,
+                args.output,
+                args.github_output,
+                bootstrap_pr=args.bootstrap_pr,
+            )
             exit_code = 0
         else:
             result = finish(
