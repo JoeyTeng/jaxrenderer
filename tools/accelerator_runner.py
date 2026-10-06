@@ -23,6 +23,15 @@ import urllib.request
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 RUN_ID_RE = re.compile(r"^[1-9][0-9]*\.[1-9][0-9]*$")
 REPOSITORY_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
+PR_BINDING_FIELDS = {
+    "pr",
+    "head_sha",
+    "base_sha",
+    "base_ref",
+    "head_repository",
+    "run_id",
+}
+RELEASE_BINDING_FIELDS = {"kind", "head_sha", "head_repository", "run_id"}
 MAX_ARCHIVE_BYTES = 100 * 1024 * 1024
 MAX_EXTRACTED_BYTES = 500 * 1024 * 1024
 MAX_ARCHIVE_MEMBERS = 10_000
@@ -36,24 +45,23 @@ class RunnerError(RuntimeError):
 
 
 def _validate_binding(binding: Mapping[str, object]) -> dict[str, object]:
-    required = {
-        "pr",
-        "head_sha",
-        "base_sha",
-        "base_ref",
-        "head_repository",
-        "run_id",
-    }
-    if set(binding) != required:
-        raise RunnerError("binding must contain exactly the six frozen PR fields")
-    if type(binding["pr"]) is not int or binding["pr"] <= 0:
-        raise RunnerError("binding PR number must be a positive integer")
-    for name in ("head_sha", "base_sha"):
+    fields = set(binding)
+    if fields == PR_BINDING_FIELDS:
+        if type(binding["pr"]) is not int or binding["pr"] <= 0:
+            raise RunnerError("binding PR number must be a positive integer")
+        if not isinstance(binding["base_ref"], str) or not binding["base_ref"]:
+            raise RunnerError("binding base_ref must be a non-empty string")
+    elif fields == RELEASE_BINDING_FIELDS and binding.get("kind") == "release":
+        if binding.get("head_repository") != "JoeyTeng/jaxrenderer":
+            raise RunnerError("release binding must name the canonical repository")
+    else:
+        raise RunnerError("binding must be an exact frozen PR or release binding")
+    for name in (
+        ("head_sha", "base_sha") if fields == PR_BINDING_FIELDS else ("head_sha",)
+    ):
         value = binding[name]
         if not isinstance(value, str) or not SHA_RE.fullmatch(value):
             raise RunnerError(f"binding {name} must be a full lowercase commit SHA")
-    if not isinstance(binding["base_ref"], str) or not binding["base_ref"]:
-        raise RunnerError("binding base_ref must be a non-empty string")
     repository = binding["head_repository"]
     if not isinstance(repository, str) or not REPOSITORY_RE.fullmatch(repository):
         raise RunnerError("binding head_repository must be owner/repository")
@@ -385,11 +393,23 @@ def _probe_accelerator(
 
 
 def _initial_result(binding: Mapping[str, object], backend: str) -> dict[str, object]:
+    identity = (
+        {
+            "pr": binding["pr"],
+            "head_sha": binding["head_sha"],
+            "base_sha": binding["base_sha"],
+            "run_id": binding["run_id"],
+        }
+        if "pr" in binding
+        else {
+            "kind": "release",
+            "head_sha": binding["head_sha"],
+            "head_repository": binding["head_repository"],
+            "run_id": binding["run_id"],
+        }
+    )
     return {
-        "pr": binding["pr"],
-        "head_sha": binding["head_sha"],
-        "base_sha": binding["base_sha"],
-        "run_id": binding["run_id"],
+        **identity,
         "backend": backend,
         "device_backend": "unknown",
         "device_count": 0,
@@ -412,6 +432,11 @@ def run(
     frozen = _validate_binding(binding)
     if backend not in {"gpu", "tpu"}:
         raise RunnerError("backend must be gpu or tpu")
+    expected_backend = "gpu" if "pr" in frozen else "tpu"
+    if backend != expected_backend:
+        raise RunnerError(
+            f"{expected_backend.upper()} is the only backend allowed for this binding type"
+        )
     output, output_identity = _prepare_output(Path(output_dir))
     result = _initial_result(frozen, backend)
     diagnostics: list[str] = []

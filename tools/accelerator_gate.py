@@ -14,7 +14,7 @@ from typing import Any
 
 REPOSITORY = "JoeyTeng/jaxrenderer"
 BASE_BRANCH = "master"
-CONTEXTS = {"gpu": "accelerator/gpu", "tpu": "accelerator/tpu"}
+CONTEXTS = {"gpu": "accelerator/gpu"}
 BINDING_FIELDS = {
     "pr",
     "head_sha",
@@ -199,14 +199,14 @@ def prepare(
     pr_number: int, backend_selection: str, output: Path, github_output: Path
 ) -> dict[str, object]:
     _require_dispatch_context()
-    if backend_selection not in {"both", "gpu", "tpu"}:
-        raise GateError("backend must be both, gpu, or tpu")
+    if backend_selection != "gpu":
+        raise GateError("PR accelerator gate only supports the GPU backend")
     if output.resolve() == github_output.resolve():
         raise GateError("binding output and GITHUB_OUTPUT must be different files")
     run_id = _run_id_from_env()
     binding = _binding_from_pr(pr_number, run_id)
     _atomic_write_json(output, binding)
-    backends = tuple(CONTEXTS) if backend_selection == "both" else (backend_selection,)
+    backends = (backend_selection,)
     run_number, attempt = RUN_ID_RE.fullmatch(run_id).groups()  # type: ignore[union-attr]
     run_url = (
         f"https://github.com/{REPOSITORY}/actions/runs/{run_number}/attempts/{attempt}"
@@ -414,15 +414,11 @@ def finish(
 
 
 def _positive_pr(value: str) -> int:
-    try:
-        result = int(value)
-    except ValueError as error:
+    if not re.fullmatch(r"[1-9][0-9]*", value):
         raise argparse.ArgumentTypeError(
-            "PR number must be a positive integer"
-        ) from error
-    if result <= 0:
-        raise argparse.ArgumentTypeError("PR number must be a positive integer")
-    return result
+            "PR number must be a canonical positive decimal integer"
+        )
+    return int(value)
 
 
 def parser() -> argparse.ArgumentParser:
@@ -430,9 +426,7 @@ def parser() -> argparse.ArgumentParser:
     commands = root.add_subparsers(dest="command", required=True)
     prepare_parser = commands.add_parser("prepare")
     prepare_parser.add_argument("--pr", required=True, type=_positive_pr)
-    prepare_parser.add_argument(
-        "--backend", choices=("both", "gpu", "tpu"), required=True
-    )
+    prepare_parser.add_argument("--backend", choices=("gpu",), required=True)
     prepare_parser.add_argument("--output", type=Path, required=True)
     prepare_parser.add_argument("--github-output", type=Path, required=True)
     finish_parser = commands.add_parser("finish")

@@ -21,14 +21,7 @@ POLL_INTERVAL_SECONDS = 20
 CLI_TIMEOUT_SECONDS = 90
 MAX_CLI_OUTPUT_BYTES = 64 * 1024
 MIN_TPU_QUOTA_HOURS = 0.5
-BINDING_FIELDS = {
-    "pr",
-    "head_sha",
-    "base_sha",
-    "base_ref",
-    "head_repository",
-    "run_id",
-}
+BINDING_FIELDS = {"kind", "head_sha", "head_repository", "run_id"}
 TERMINAL_SUCCESS = {"complete", "completed", "success", "succeeded"}
 TERMINAL_FAILURE = {"error", "failed", "failure", "cancelled", "canceled", "aborted"}
 IN_PROGRESS = {"queued", "running", "starting", "compiling", "initializing"}
@@ -46,14 +39,13 @@ class KaggleError(RuntimeError):
 def _validate_binding(value: object) -> dict[str, object]:
     if not isinstance(value, dict) or set(value) != BINDING_FIELDS:
         raise KaggleError("binding has missing or unexpected fields")
-    if type(value["pr"]) is not int or value["pr"] <= 0:
-        raise KaggleError("binding PR number is invalid")
-    for field in ("head_sha", "base_sha"):
-        if not isinstance(value[field], str) or not SHA_RE.fullmatch(value[field]):
-            raise KaggleError(f"binding {field} is invalid")
-    if value["base_ref"] != "master":
-        raise KaggleError("binding base_ref is not master")
-    if not isinstance(value["head_repository"], str) or not value["head_repository"]:
+    if value["kind"] != "release":
+        raise KaggleError("binding kind is not release")
+    if not isinstance(value["head_sha"], str) or not SHA_RE.fullmatch(
+        value["head_sha"]
+    ):
+        raise KaggleError("binding head_sha is invalid")
+    if value["head_repository"] != "JoeyTeng/jaxrenderer":
         raise KaggleError("binding head_repository is invalid")
     if not isinstance(value["run_id"], str) or not re.fullmatch(
         r"[1-9][0-9]*\.[1-9][0-9]*", value["run_id"]
@@ -332,7 +324,17 @@ def _validate_downloaded_result(
         ) from error
     if not isinstance(result, dict):
         raise KaggleError("Kaggle result.json was not an object")
-    for field in ("pr", "head_sha", "base_sha", "run_id"):
+    expected_fields = BINDING_FIELDS | {
+        "backend",
+        "device_backend",
+        "device_count",
+        "success",
+        "devices",
+        "versions",
+    }
+    if set(result) != expected_fields:
+        raise KaggleError("Kaggle result.json has missing or unexpected fields")
+    for field in ("kind", "head_sha", "head_repository", "run_id"):
         if result.get(field) != binding[field] or type(result.get(field)) is not type(
             binding[field]
         ):
@@ -343,6 +345,35 @@ def _validate_downloaded_result(
         raise KaggleError("Kaggle result.json did not report a TPU device backend")
     if type(result.get("success")) is not bool or result["success"] is not True:
         raise KaggleError("Kaggle result.json did not report success")
+    devices = result.get("devices")
+    if not isinstance(devices, list) or not devices:
+        raise KaggleError("Kaggle result.json has no TPU devices")
+    if type(result.get("device_count")) is not int or result["device_count"] != len(
+        devices
+    ):
+        raise KaggleError(
+            "Kaggle result.json device_count does not match its device list"
+        )
+    for device in devices:
+        if (
+            not isinstance(device, dict)
+            or set(device) != {"platform", "device_kind", "id"}
+            or device.get("platform") != "tpu"
+            or not all(
+                isinstance(device.get(key), str) and device[key] for key in device
+            )
+        ):
+            raise KaggleError("Kaggle result.json contains invalid TPU device metadata")
+    versions = result.get("versions")
+    if (
+        not isinstance(versions, dict)
+        or not versions
+        or not all(
+            isinstance(name, str) and name and isinstance(version, str) and version
+            for name, version in versions.items()
+        )
+    ):
+        raise KaggleError("Kaggle result.json versions are invalid")
     return result
 
 

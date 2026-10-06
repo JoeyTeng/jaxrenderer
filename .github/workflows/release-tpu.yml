@@ -1,0 +1,96 @@
+name: Manual TPU release confirmation
+
+on:
+  workflow_dispatch:
+    inputs:
+      commit:
+        description: Full commit SHA to confirm before publishing a release
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+# Serialise submissions for the same candidate. An Actions cancellation does
+# not prove that an already submitted Kaggle notebook has stopped.
+concurrency:
+  group: release-tpu-${{ inputs.commit }}
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      head_sha: ${{ steps.freeze.outputs.head_sha }}
+    steps:
+      - name: Require the trusted default branch
+        run: test "$GITHUB_REF" = 'refs/heads/master'
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.14"
+      - name: Freeze the release candidate and workflow attempt
+        id: freeze
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_COMMIT: ${{ inputs.commit }}
+        run: >-
+          python -m tools.release_tpu_gate prepare
+          --commit "$RELEASE_COMMIT"
+          --output tpu-release-binding.json --github-output "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: tpu-release-binding
+          path: tpu-release-binding.json
+          if-no-files-found: error
+          retention-days: 30
+
+  tpu:
+    needs: prepare
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    environment: kaggle-tpu
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v7
+        with:
+          name: tpu-release-binding
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.14"
+      - uses: astral-sh/setup-uv@v10.2.0
+        with:
+          version: "0.12.20"
+          enable-cache: true
+      - name: Install the locked Kaggle controller
+        run: uv sync --locked --only-group ci-kaggle --python 3.14
+      - name: Confirm the release candidate on a Kaggle TPU
+        id: provider
+        timeout-minutes: 30
+        env:
+          KAGGLE_API_TOKEN: ${{ secrets.KAGGLE_API_TOKEN }}
+          KAGGLE_USERNAME: ${{ vars.KAGGLE_USERNAME }}
+        run: >-
+          .venv/bin/python -m tools.kaggle_ci --binding tpu-release-binding.json
+          --output-dir release-artifacts/tpu
+      - name: Validate the bound TPU result
+        if: always()
+        env:
+          PROVIDER_SUCCESS: ${{ steps.provider.outcome == 'success' }}
+        run: >-
+          python -m tools.release_tpu_gate finish
+          --binding tpu-release-binding.json --output-dir release-artifacts/tpu
+          --provider-success "$PROVIDER_SUCCESS"
+      - name: Upload TPU release confirmation artefacts
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-tpu-${{ needs.prepare.outputs.head_sha }}
+          path: release-artifacts/tpu/
+          if-no-files-found: warn
+          retention-days: 30

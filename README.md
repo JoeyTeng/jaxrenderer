@@ -138,15 +138,16 @@ To compare a different path set locally, pass it after `--paths` to `tools/check
 
 The Linux job runs strict Pyright from the uv lockfile on Python 3.14. Its diagnostics remain visible, but the check is advisory until the existing JAX typing issues are resolved. A dedicated `linux-render-regression` job also runs the CPU render and gradient regressions on Python 3.14 with the locked dependencies.
 
-### Manual GPU and TPU checks
+### Manual GPU checks before merging
 
-The `Manual accelerator regression` workflow runs the same test suite and render
-and gradient regressions on a Modal T4 GPU and a Kaggle TPU. These checks run only
-when a maintainer dispatches the workflow from `master`, specifying a pull request
-number. The workflow freezes its head and base revisions and records
-`accelerator/gpu` and `accelerator/tpu` statuses on the PR head. New commits need
-new checks; results from a changed head or base are rejected. Select `gpu` or
-`tpu` to retry one backend without resetting the other backend's status.
+The `Manual GPU regression` workflow runs the same test suite and render and
+gradient regressions on a Modal T4 GPU. A maintainer dispatches it from `master`
+once before merging, specifying a pull request number. The workflow freezes its
+head and base revisions and records `accelerator/gpu` on the PR head. New commits
+need new checks; results from a changed head or base are rejected.
+
+TPU confirmation runs separately before a release. It is not a PR merge
+requirement, allowing Kaggle's free quota and queue to be used less frequently.
 
 Provider controller dependencies are pinned in the `ci-modal` and `ci-kaggle`
 groups in `uv.lock`. Each controller installs only its own group; ordinary CI
@@ -156,14 +157,15 @@ use Python 3.14, while TPU tests use Python 3.13 in an isolated environment.
 The tests require the requested JAX device and reject CPU fallback. TPU tests use
 `JAX_DEFAULT_MATMUL_PRECISION=highest`, as described in the Colab instructions.
 Images, numerical metrics, runtime versions and diagnostics are retained as
-GitHub Actions artefacts for 14 days. Existing numerical tolerances apply to all
-backends; the camera-gradient smoke test remains advisory about numerical values.
+GitHub Actions artefacts for 14 days for GPU checks and 30 days for TPU release
+confirmation. Existing numerical tolerances apply to all backends; the
+camera-gradient smoke test remains advisory about numerical values.
 
 #### Account and environment setup
 
 Create these environments under **Settings → Environments** in the GitHub
 repository. Restrict their deployment branches to `master`. Provider credentials
-are used by the trusted controller, not passed to the remote PR test process.
+are used by the trusted controller and are not passed to the remote test process.
 
 | Environment | Secrets | Variables |
 | --- | --- | --- |
@@ -188,32 +190,50 @@ are used by the trusted controller, not passed to the remote PR test process.
   the submission sets a 30-minute execution timeout, while an Actions timeout
   stops waiting and must not be treated as proof that the remote run stopped.
 
-#### Enabling the merge requirements
+#### Enabling the GPU merge requirement
 
 First merge the workflow and configure the environments. GitHub requires a
 `workflow_dispatch` workflow to exist on the default branch before it can run.
-Run both providers against an open PR and inspect their device and numerical
-reports before adding `accelerator/gpu` and `accelerator/tpu` as required status
-checks in the `master` ruleset. Require the PR branch to be up to date, and choose
+Run the GPU workflow against an open PR and inspect its device and numerical
+reports before adding `accelerator/gpu` as a required status check in the
+`master` ruleset. Require the PR branch to be up to date, and choose
 GitHub Actions as the expected status source. Missing or unsuccessful checks must
 block merging; do not replace a failed provider check with a skipped job.
 
 ```sh
-gh workflow run accelerators.yml --ref master -f pr=25 -f backend=both
+gh workflow run accelerators.yml --ref master -f pr=25
 ```
+
+#### Confirming a release on TPU
+
+After the release preparation changes have landed, copy the full commit SHA
+that the release tag will point to. Dispatch `Manual TPU release confirmation`
+from `master` with that SHA. The candidate must belong to this repository and
+be on `master` or in its history. The controller freezes the SHA and workflow
+attempt, submits one private Kaggle notebook and validates its bound result.
+
+```sh
+gh workflow run release-tpu.yml --ref master -f commit=FULL_COMMIT_SHA
+```
+
+Before creating or publishing the release, require a successful workflow and
+inspect its device report, numerical metrics and test logs. A changed candidate
+SHA requires a new confirmation. This is a maintainer release checklist step;
+the workflow does not publish packages, write PR statuses or automatically
+block the existing publishing workflow. No `accelerator/tpu` PR check is created.
 
 Kaggle documents TPU selection via its CLI, but an
 [open upstream issue](https://github.com/Kaggle/kaggle-cli/issues/1197) reports
-submissions that receive the wrong runtime. A real TPU run is required before
-enabling its merge requirement. Account configuration and mocked controller tests
-alone do not establish accelerator compatibility.
+submissions that receive the wrong runtime. A real TPU run is required to
+confirm a release. Account configuration and mocked controller tests alone do
+not establish accelerator compatibility.
 
 The initial provider validation passed on a Modal Tesla T4 with Python 3.14.7,
 JAX 0.11.2 and NumPy 2.5.3, including the full test suite and all four render and
 gradient regressions. The Kaggle submission installed its dependencies but
 failed TPU initialisation with `No jellyfish device found`; its tests did not
-start. Keep the TPU merge requirement disabled until a submission proves that
-Kaggle has allocated a TPU and passes the regressions.
+start. A successful live Kaggle run proving TPU allocation and passing the
+regressions remains outstanding.
 
 The render regression compares the cube and head frames 0 and 15 with the checked-in images in `tests/references/`. It allows small renderer differences while requiring all of these bounds:
 

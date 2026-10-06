@@ -11,20 +11,18 @@ from tools import kaggle_ci
 SYNTHETIC_API_KEY = "codex_synth_v1_api_key_a"
 
 BINDING = {
-    "pr": 123,
+    "kind": "release",
     "head_sha": "a" * 40,
-    "base_sha": "b" * 40,
-    "base_ref": "master",
-    "head_repository": "contributor/jaxrenderer",
+    "head_repository": "JoeyTeng/jaxrenderer",
     "run_id": "371234567.1",
 }
 
 
 def success_result(binding: dict[str, object] = BINDING) -> dict[str, object]:
     return {
-        "pr": binding["pr"],
+        "kind": binding["kind"],
         "head_sha": binding["head_sha"],
-        "base_sha": binding["base_sha"],
+        "head_repository": binding["head_repository"],
         "run_id": binding["run_id"],
         "backend": "tpu",
         "device_backend": "tpu",

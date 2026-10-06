@@ -162,7 +162,7 @@ def test_prepare_rejects_non_default_dispatch_before_api(
     monkeypatch.setenv("GITHUB_REF", "refs/heads/feature")
     with install_fake_github(github) as api:
         with pytest.raises(gate.GateError, match="default master"):
-            gate.prepare(24, "both", tmp_path / "binding.json", tmp_path / "out")
+            gate.prepare(24, "gpu", tmp_path / "binding.json", tmp_path / "out")
     api.assert_not_called()
 
 
@@ -172,8 +172,36 @@ def test_prepare_rejects_head_that_is_behind_base(
     github.compare_status = "behind"
     with install_fake_github(github):
         with pytest.raises(gate.GateError, match="up to date"):
-            gate.prepare(24, "both", tmp_path / "binding.json", tmp_path / "out")
+            gate.prepare(24, "gpu", tmp_path / "binding.json", tmp_path / "out")
     assert github.posts == []
+
+
+@pytest.mark.parametrize("backend", ["tpu", "both"])
+def test_prepare_rejects_non_gpu_backends(
+    tmp_path: Path, github: FakeGitHub, backend: str
+) -> None:
+    with install_fake_github(github) as api:
+        with pytest.raises(gate.GateError, match="only supports the GPU"):
+            gate.prepare(24, backend, tmp_path / "binding.json", tmp_path / "out")
+    api.assert_not_called()
+
+
+@pytest.mark.parametrize("value", ["025", "+25", " 25", "25 ", "0", "-25", ""])
+def test_pr_cli_value_requires_canonical_positive_decimal(value: str) -> None:
+    with pytest.raises(SystemExit):
+        gate.parser().parse_args(
+            [
+                "prepare",
+                "--pr",
+                value,
+                "--backend",
+                "gpu",
+                "--output",
+                "binding.json",
+                "--github-output",
+                "output.txt",
+            ]
+        )
 
 
 def test_gh_api_prefers_gh_token_and_bounds_calls(

@@ -1,4 +1,4 @@
-name: Manual accelerator regression
+name: Manual GPU regression
 
 on:
   workflow_dispatch:
@@ -7,18 +7,11 @@ on:
         description: Pull request number to validate
         required: true
         type: string
-      backend:
-        description: Backends to run (retry a failed backend separately)
-        required: true
-        default: both
-        type: choice
-        options: [both, gpu, tpu]
 
 permissions:
   contents: read
 
-# Serialise runs for a PR. Cancelling an Actions job does not necessarily cancel
-# an already submitted Kaggle session.
+# Serialise GPU runs for a PR.
 concurrency:
   group: accelerator-pr-${{ inputs.pr }}
   cancel-in-progress: false
@@ -42,26 +35,37 @@ jobs:
       - uses: actions/setup-python@v7
         with:
           python-version: "3.14"
-      - name: Freeze the pull request and initialise selected checks
+      - name: Freeze the pull request and initialise the GPU check
         id: freeze
         env:
           GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ inputs.pr }}
-          BACKEND: ${{ inputs.backend }}
         run: >-
           python tools/accelerator_gate.py prepare
-          --pr "$PR_NUMBER" --backend "$BACKEND"
+          --pr "$PR_NUMBER" --backend gpu
           --output accelerator-binding.json --github-output "$GITHUB_OUTPUT"
       - uses: actions/upload-artifact@v7
+        id: binding
         with:
           name: accelerator-binding
           path: accelerator-binding.json
           if-no-files-found: error
           retention-days: 7
+      - name: Close the GPU check if preparation fails
+        if: >-
+          always() &&
+          (steps.freeze.outcome != 'success' || steps.binding.outcome != 'success')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ -f accelerator-binding.json ]; then
+            python tools/accelerator_gate.py finish \
+              --binding accelerator-binding.json --backend gpu \
+              --output-dir accelerator-artifacts/gpu --provider-success false
+          fi
 
   gpu:
     needs: prepare
-    if: inputs.backend == 'both' || inputs.backend == 'gpu'
     runs-on: ubuntu-latest
     timeout-minutes: 35
     environment: modal-gpu
@@ -110,59 +114,5 @@ jobs:
         with:
           name: gpu-${{ needs.prepare.outputs.head_sha }}
           path: accelerator-artifacts/gpu/
-          if-no-files-found: warn
-          retention-days: 14
-
-  tpu:
-    needs: prepare
-    if: inputs.backend == 'both' || inputs.backend == 'tpu'
-    runs-on: ubuntu-latest
-    timeout-minutes: 35
-    environment: kaggle-tpu
-    permissions:
-      contents: read
-      pull-requests: read
-      statuses: write
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          persist-credentials: false
-      - uses: actions/download-artifact@v7
-        with:
-          name: accelerator-binding
-      - uses: actions/setup-python@v7
-        with:
-          python-version: "3.14"
-      - uses: astral-sh/setup-uv@v10.2.0
-        with:
-          version: "0.12.20"
-          enable-cache: true
-      - name: Install the locked Kaggle controller
-        run: uv sync --locked --only-group ci-kaggle --python 3.14
-      - name: Run the TPU regression on Kaggle
-        id: provider
-        timeout-minutes: 30
-        env:
-          KAGGLE_API_TOKEN: ${{ secrets.KAGGLE_API_TOKEN }}
-          KAGGLE_USERNAME: ${{ vars.KAGGLE_USERNAME }}
-        run: >-
-          .venv/bin/python -m tools.kaggle_ci --binding accelerator-binding.json
-          --output-dir accelerator-artifacts/tpu
-      - name: Record the TPU result on the frozen PR commit
-        if: always()
-        env:
-          GH_TOKEN: ${{ github.token }}
-          PROVIDER_SUCCESS: ${{ steps.provider.outcome == 'success' }}
-        run: >-
-          python tools/accelerator_gate.py finish
-          --binding accelerator-binding.json --backend tpu
-          --output-dir accelerator-artifacts/tpu
-          --provider-success "$PROVIDER_SUCCESS"
-      - name: Upload TPU regression artefacts
-        if: always()
-        uses: actions/upload-artifact@v7
-        with:
-          name: tpu-${{ needs.prepare.outputs.head_sha }}
-          path: accelerator-artifacts/tpu/
           if-no-files-found: warn
           retention-days: 14
