@@ -1,7 +1,4 @@
-# This workflow builds and uploads the Python package with uv when a release is created.
-# For more information see: https://docs.github.com/en/actions/automating-builds-and-tests/building-and-testing-python#publishing-to-package-registries
-
-name: build
+name: Build, validate and publish
 
 on:
   release:
@@ -10,73 +7,167 @@ on:
 permissions:
   contents: read
 
+# Never cancel a candidate while a remote accelerator run may still be active.
+concurrency:
+  group: publish-${{ github.event.release.tag_name }}
+  cancel-in-progress: false
+
 jobs:
-  publish:
+  prepare:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      head_sha: ${{ steps.freeze.outputs.head_sha }}
+      lint_base: ${{ steps.baseline.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 2
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.14"
+      - name: Freeze and validate the published release
+        id: freeze
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_COMMIT: ${{ github.sha }}
+        run: >-
+          python -m tools.release_tpu_gate prepare --commit "$RELEASE_COMMIT"
+          --output release-binding.json --github-output "$GITHUB_OUTPUT"
+      - name: Freeze the Ruff baseline
+        id: baseline
+        run: |
+          if baseline_sha="$(git rev-parse --verify HEAD^)"; then
+            printf 'sha=%s\n' "$baseline_sha" >> "$GITHUB_OUTPUT"
+          else
+            printf 'sha=%s\n' "$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Check release tag version
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          python - <<'PY'
+          import os
+          import tomllib
+          from pathlib import Path
+
+          version = tomllib.loads(Path("pyproject.toml").read_text())["project"]["version"]
+          tag = os.environ["RELEASE_TAG"]
+          if tag.removeprefix("v") != version:
+              raise SystemExit(f"Release tag {tag!r} does not match project version {version!r}")
+          PY
+      - uses: actions/upload-artifact@v7
+        with:
+          name: release-binding-${{ github.run_attempt }}
+          path: release-binding.json
+          if-no-files-found: error
+          retention-days: 30
+
+  cpu:
+    needs: prepare
+    uses: ./.github/workflows/checks.yml
+    with:
+      commit: ${{ needs.prepare.outputs.head_sha }}
+      lint-base: ${{ needs.prepare.outputs.lint_base }}
+
+  build:
+    needs: prepare
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.prepare.outputs.head_sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.14"
+      - uses: astral-sh/setup-uv@v10.2.0
+        with:
+          version: "0.12.20"
+          enable-cache: true
+      - name: Build package once
+        run: uv build
+      - name: Smoke test built wheel
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          set -euo pipefail
+          smoke_venv="$(mktemp -d)"
+          trap 'python -c "import shutil, sys; shutil.rmtree(sys.argv[1])" "$smoke_venv"' EXIT
+          python -m venv "$smoke_venv"
+          uv pip install --python "$smoke_venv/bin/python" dist/*.whl
+          (
+            cd "$smoke_venv"
+            ./bin/python - <<'PY'
+          import importlib.metadata
+          import os
+          from pathlib import Path
+
+          import renderer
+
+          expected = os.environ["RELEASE_TAG"].removeprefix("v")
+          actual = importlib.metadata.version("jaxrenderer")
+          module_path = Path(renderer.__file__).resolve()
+          site_packages = Path(importlib.metadata.distribution("jaxrenderer").locate_file("")).resolve()
+          assert actual == expected, f"installed version {actual!r} does not match release tag {expected!r}"
+          assert module_path.is_relative_to(site_packages), f"renderer imported from outside the installed distribution: {module_path}"
+          PY
+          )
+      - name: Retain the validated distributions
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-dist-${{ github.run_attempt }}
+          path: dist/
+          if-no-files-found: error
+          retention-days: 30
+
+  gpu:
+    needs: [prepare, cpu, build]
+    uses: ./.github/workflows/release-gpu.yml
+    with:
+      commit: ${{ needs.prepare.outputs.head_sha }}
+
+  tpu:
+    needs: [prepare, cpu, build]
+    uses: ./.github/workflows/release-tpu.yml
+    with:
+      commit: ${{ needs.prepare.outputs.head_sha }}
+
+  publish:
+    needs: [prepare, cpu, build, gpu, tpu]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
     environment: PyPI
     steps:
-    - uses: actions/checkout@v7
-    - name: Set up Python
-      uses: actions/setup-python@v7
-      with:
-        python-version: '3.14'
-    - name: Install uv
-      uses: astral-sh/setup-uv@v10.2.0
-      with:
-        version: "0.12.20"
-        enable-cache: true
-    - name: Check release tag version
-      env:
-        RELEASE_TAG: ${{ github.event.release.tag_name }}
-      run: |
-        python - <<'PY'
-        import os
-        import tomllib
-        from pathlib import Path
-
-        version = tomllib.loads(Path("pyproject.toml").read_text())["project"]["version"]
-        tag = os.environ["RELEASE_TAG"]
-        tag_version = tag.removeprefix("v")
-        if tag_version != version:
-            raise SystemExit(
-                f"Release tag {tag!r} does not match project version {version!r}"
-            )
-        PY
-    - name: Build package
-      run: uv build
-    - name: Smoke test built wheel
-      env:
-        RELEASE_TAG: ${{ github.event.release.tag_name }}
-      run: |
-        set -euo pipefail
-        smoke_venv="$(mktemp -d)"
-        trap 'python -c "import shutil, sys; shutil.rmtree(sys.argv[1])" "$smoke_venv"' EXIT
-        python -m venv "$smoke_venv"
-        uv pip install --python "$smoke_venv/bin/python" dist/*.whl
-        (
-          cd "$smoke_venv"
-          ./bin/python - <<'PY'
-        import importlib.metadata
-        import os
-        from pathlib import Path
-
-        import renderer
-
-        expected = os.environ["RELEASE_TAG"].removeprefix("v")
-        actual = importlib.metadata.version("jaxrenderer")
-        module_path = Path(renderer.__file__).resolve()
-        site_packages = Path(
-            importlib.metadata.distribution("jaxrenderer").locate_file("")
-        ).resolve()
-        assert actual == expected, (
-            f"installed version {actual!r} does not match release tag {expected!r}"
-        )
-        assert module_path.is_relative_to(site_packages), (
-            f"renderer imported from outside the installed distribution: {module_path}"
-        )
-        PY
-        )
-    - name: Publish package
-      env:
-        UV_PUBLISH_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
-      run: uv publish
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.prepare.outputs.head_sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.14"
+      - uses: astral-sh/setup-uv@v10.2.0
+        with:
+          version: "0.12.20"
+      - uses: actions/download-artifact@v7
+        with:
+          name: release-binding-${{ github.run_attempt }}
+      - name: Recheck the tag and frozen workflow attempt
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_COMMIT: ${{ needs.prepare.outputs.head_sha }}
+        run: |
+          python -m tools.release_tpu_gate prepare --commit "$RELEASE_COMMIT" \
+            --output publish-binding.json --github-output "$GITHUB_OUTPUT"
+          cmp release-binding.json publish-binding.json
+      - uses: actions/download-artifact@v7
+        with:
+          name: release-dist-${{ github.run_attempt }}
+          path: dist/
+      - name: Publish the validated distributions
+        env:
+          UV_PUBLISH_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
+        run: uv publish

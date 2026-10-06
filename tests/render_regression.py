@@ -1,5 +1,5 @@
 # pyright: basic
-"""Numeric rendering regression checks for the dedicated macOS CI job."""
+"""Numerical rendering regression checks shared by the CI backends."""
 
 from importlib.metadata import version
 import json

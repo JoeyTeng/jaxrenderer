@@ -1,0 +1,101 @@
+name: GPU release confirmation
+
+on:
+  workflow_call:
+    inputs:
+      commit:
+        description: Frozen release commit SHA
+        required: true
+        type: string
+  workflow_dispatch:
+    inputs:
+      commit:
+        description: Full commit SHA to confirm before publishing a release
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-gpu-${{ inputs.commit }}
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      head_sha: ${{ steps.freeze.outputs.head_sha }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.14"
+      - name: Freeze the release candidate and workflow attempt
+        id: freeze
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_COMMIT: ${{ inputs.commit }}
+        run: >-
+          python -m tools.release_tpu_gate prepare
+          --commit "$RELEASE_COMMIT"
+          --output gpu-release-binding.json --github-output "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: gpu-release-binding-${{ github.run_attempt }}
+          path: gpu-release-binding.json
+          if-no-files-found: error
+          retention-days: 30
+
+  gpu:
+    needs: prepare
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    environment: modal-gpu
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/download-artifact@v7
+        with:
+          name: gpu-release-binding-${{ github.run_attempt }}
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.14"
+      - uses: astral-sh/setup-uv@v10.2.0
+        with:
+          version: "0.12.20"
+          enable-cache: true
+      - name: Install the locked Modal controller
+        run: uv sync --locked --only-group ci-modal --python 3.14
+      - name: Confirm the release candidate on a Modal T4
+        id: provider
+        timeout-minutes: 30
+        env:
+          MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
+          MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
+        run: >-
+          .venv/bin/python -m tools.modal_ci --binding gpu-release-binding.json
+          --output-dir release-artifacts/gpu
+      - name: Validate the bound GPU result
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PROVIDER_SUCCESS: ${{ steps.provider.outcome == 'success' }}
+        run: >-
+          python -m tools.release_tpu_gate finish
+          --binding gpu-release-binding.json --output-dir release-artifacts/gpu
+          --backend gpu --provider-success "$PROVIDER_SUCCESS"
+      - name: Upload GPU release confirmation artefacts
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-gpu-${{ needs.prepare.outputs.head_sha }}-${{ github.run_attempt }}
+          path: release-artifacts/gpu/
+          if-no-files-found: warn
+          retention-days: 30

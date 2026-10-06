@@ -36,6 +36,8 @@ Repository = "https://github.com/JoeyTeng/jaxrenderer"
 "Bug Tracker" = "https://github.com/JoeyTeng/jaxrenderer/issues"
 
 [dependency-groups]
+ci-modal = ["modal==1.6.1"]
+ci-kaggle = ["kaggle==2.2.4"]
 dev = [
     "ruff==0.16.9",
     "matplotlib>=3.11.2",
@@ -45,6 +47,7 @@ dev = [
 test = [
     "pre-commit>=4.6.2",
     "pytest>=9.1.1",
+    "PyYAML>=6.0.3",
     "tox>=4.64.5",
     "tox-uv>=1.36.0",
 ]

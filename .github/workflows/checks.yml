@@ -3,6 +3,16 @@
 name: lint & test
 
 on:
+  workflow_call:
+    inputs:
+      commit:
+        description: Frozen commit SHA to test
+        required: true
+        type: string
+      lint-base:
+        description: Frozen parent commit for the Ruff comparison
+        required: true
+        type: string
   push:
     branches: [master]
   pull_request:
@@ -18,11 +28,11 @@ jobs:
       - uses: actions/checkout@v7
         with:
           repository: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          ref: ${{ inputs.commit || github.event.pull_request.head.sha || github.sha }}
 
       - uses: actions/checkout@v7
         with:
-          ref: ${{ github.event.pull_request.base.sha || github.event.before }}
+          ref: ${{ inputs.lint-base || github.event.pull_request.base.sha || github.event.before }}
           path: ruff-base
 
       - name: Set up Python 3.14
@@ -58,6 +68,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.commit || github.sha }}
 
       - name: Set up Python ${{ matrix.python-version }}
         uses: actions/setup-python@v7
@@ -95,6 +107,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.commit || github.sha }}
 
       - name: Install uv
         uses: astral-sh/setup-uv@v10.2.0
@@ -121,7 +135,47 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: macos-render-regression
+          name: macos-render-regression-${{ github.run_attempt }}
+          path: render-artifacts/
+          if-no-files-found: warn
+          retention-days: 7
+
+  linux-render-regression:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      JAX_PLATFORMS: cpu
+      MPLBACKEND: Agg
+      JAXRENDERER_ARTIFACT_DIR: render-artifacts
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.commit || github.sha }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v10.2.0
+        with:
+          version: "0.12.20"
+          enable-cache: true
+
+      - name: Set up Python 3.14
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.14"
+
+      - name: Install locked dependencies
+        run: uv sync --locked --all-groups --python 3.14
+
+      - name: Run render and gradient regression tests
+        timeout-minutes: 12
+        run: uv run --no-sync python -m pytest -q tests/render_regression.py tests/test_smoke_grad.py
+
+      - name: Upload render regression artefacts
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: linux-render-regression-${{ github.run_attempt }}
           path: render-artifacts/
           if-no-files-found: warn
           retention-days: 7
@@ -136,6 +190,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.commit || github.sha }}
 
       - name: Set up Python 3.13
         uses: actions/setup-python@v7
@@ -176,7 +232,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: ubuntu-numpy-2.1.3-render-regression
+          name: ubuntu-numpy-2.1.3-render-regression-${{ github.run_attempt }}
           path: render-artifacts/
           if-no-files-found: warn
           retention-days: 7
