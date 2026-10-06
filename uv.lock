@@ -712,6 +712,7 @@ dev = [
 test = [
     { name = "pre-commit" },
     { name = "pytest" },
+    { name = "pyyaml" },
     { name = "tox" },
     { name = "tox-uv" },
 ]
@@ -737,6 +738,7 @@ dev = [
 test = [
     { name = "pre-commit", specifier = ">=4.6.2" },
     { name = "pytest", specifier = ">=9.1.1" },
+    { name = "pyyaml", specifier = ">=6.0.3" },
     { name = "tox", specifier = ">=4.64.5" },
     { name = "tox-uv", specifier = ">=1.36.0" },
 ]

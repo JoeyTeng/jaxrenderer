@@ -51,11 +51,12 @@ def _load_binding(path: Path) -> dict[str, object]:
 def _validate_result(
     result: object, binding: Mapping[str, object], backend: str = "gpu"
 ) -> dict[str, object]:
-    fields = {
-        "pr",
-        "head_sha",
-        "base_sha",
-        "run_id",
+    identity_fields = (
+        ("pr", "head_sha", "base_sha", "run_id")
+        if "pr" in binding
+        else ("kind", "head_sha", "head_repository", "run_id")
+    )
+    fields = set(identity_fields) | {
         "backend",
         "device_backend",
         "device_count",
@@ -65,7 +66,7 @@ def _validate_result(
     }
     if not isinstance(result, dict) or set(result) != fields:
         raise ModalCIError("remote result has missing or unexpected fields")
-    for name in ("pr", "head_sha", "base_sha", "run_id"):
+    for name in identity_fields:
         if (
             type(result[name]) is not type(binding[name])
             or result[name] != binding[name]
@@ -74,7 +75,9 @@ def _validate_result(
                 f"remote result {name} does not match the frozen binding"
             )
     if result["backend"] != backend:
-        raise ModalCIError("remote result backend does not match the Modal T4 request")
+        raise ModalCIError(
+            "remote result backend does not match the Modal accelerator request"
+        )
     if type(result["success"]) is not bool:
         raise ModalCIError("remote result success must be a boolean")
     devices = result["devices"]
@@ -105,6 +108,8 @@ def _validate_result(
         for name, version in versions.items()
     ):
         raise ModalCIError("remote result versions must map names to strings")
+    if result["success"] is True and not versions:
+        raise ModalCIError("successful remote result must include version metadata")
     return result
 
 
@@ -241,18 +246,7 @@ def execute(binding: Mapping[str, object], output_dir: Path) -> dict[str, object
             except Exception as error:
                 controller_error = f"{type(error).__name__}: {error}"
         if remote_result is None:
-            remote_result = {
-                "pr": frozen["pr"],
-                "head_sha": frozen["head_sha"],
-                "base_sha": frozen["base_sha"],
-                "run_id": frozen["run_id"],
-                "backend": "gpu",
-                "device_backend": "unknown",
-                "device_count": 0,
-                "success": False,
-                "devices": [],
-                "versions": {},
-            }
+            remote_result = accelerator_runner._initial_result(frozen, "gpu")
             _atomic_write(
                 output / "diagnostics.log",
                 (controller_error or "Modal invocation failed").encode("utf-8"),
@@ -274,18 +268,7 @@ def execute(binding: Mapping[str, object], output_dir: Path) -> dict[str, object
         )
     except Exception as error:
         if not (output / "result.json").exists():
-            failure = {
-                "pr": frozen["pr"],
-                "head_sha": frozen["head_sha"],
-                "base_sha": frozen["base_sha"],
-                "run_id": frozen["run_id"],
-                "backend": "gpu",
-                "device_backend": "unknown",
-                "device_count": 0,
-                "success": False,
-                "devices": [],
-                "versions": {},
-            }
+            failure = accelerator_runner._initial_result(frozen, "gpu")
             _atomic_write(
                 output / "diagnostics.log",
                 f"{type(error).__name__}: {error}\n".encode("utf-8"),

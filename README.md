@@ -146,8 +146,9 @@ once before merging, specifying a pull request number. The workflow freezes its
 head and base revisions and records `accelerator/gpu` on the PR head. New commits
 need new checks; results from a changed head or base are rejected.
 
-TPU confirmation runs separately before a release. It is not a PR merge
-requirement, allowing Kaggle's free quota and queue to be used less frequently.
+GPU and TPU confirmation run automatically before PyPI publication. TPU is not
+a PR merge requirement, allowing Kaggle's free quota and queue to be used less
+frequently.
 
 Provider controller dependencies are pinned in the `ci-modal` and `ci-kaggle`
 groups in `uv.lock`. Each controller installs only its own group. Standard CI
@@ -165,13 +166,17 @@ camera-gradient smoke test remains advisory about numerical values.
 #### Account and environment setup
 
 Create these environments under **Settings → Environments** in the GitHub
-repository. Restrict their deployment branches to `master`. Provider credentials
-are used by the trusted controller and are not passed to the remote test process.
+repository. Allow `master` for manual checks and add a separate deployment tag
+rule for `v*` to both provider environments. The `PyPI` environment must also
+allow the release tags. Environment rules use the triggering ref, including
+when a release calls a reusable workflow. Provider credentials are used by the
+trusted controller and are not passed to the remote test process.
 
 | Environment | Secrets | Variables |
 | --- | --- | --- |
 | `modal-gpu` | `MODAL_TOKEN_ID`, `MODAL_TOKEN_SECRET` | None |
 | `kaggle-tpu` | `KAGGLE_API_TOKEN` | `KAGGLE_USERNAME` |
+| `PyPI` | `PYPI_API_TOKEN` | None |
 
 - Register at [Modal](https://modal.com/) and use a Starter workspace. Create an
   API token in the workspace settings. Before running tests, set the workspace
@@ -205,10 +210,32 @@ block merging; do not replace a failed provider check with a skipped job.
 gh workflow run accelerators.yml --ref master -f pr=25
 ```
 
-#### Confirming a release on TPU
+#### Publishing a release
+
+Publishing a GitHub Release starts `Build, validate and publish`. The workflow
+freezes the tag's full commit SHA, requires that commit to be in `master`
+history, and checks that the tag matches the package version. It reuses all
+seven ordinary CI jobs: Ruff, Python 3.12–3.14 tests, Linux/macOS render and
+gradient regressions, and the isolated NumPy `2.1.3` compatibility check. Ruff
+compares the candidate with its frozen first parent; Pyright remains advisory.
+
+The package is built once and its installed wheel is smoke-tested. Only after
+CPU CI and the build pass do Modal GPU and Kaggle TPU confirmation run in
+parallel. Each validates the same frozen SHA and workflow attempt, genuine
+devices and the existing numerical tolerances. Failure, cancellation, timeout,
+missing reports or insufficient free quota block PyPI publication; there is no
+paid fallback or automatic retry.
+
+The final `PyPI` job requires every gate to pass, rechecks the tag and downloads
+the validated distributions from the same workflow attempt without rebuilding.
+Its token is only provided to the upload step. Artefacts are scoped by attempt,
+so use **Re-run all jobs** after a failure to obtain a complete new confirmation.
+Neither release accelerator check writes a PR status.
+
+#### Manually confirming a release candidate
 
 After the release preparation changes have landed, copy the full commit SHA
-that the release tag will point to. Dispatch `Manual TPU release confirmation`
+that the release tag will point to. Dispatch `TPU release confirmation`
 from `master` with that SHA. The candidate must belong to this repository and
 be on `master` or in its history. The controller freezes the SHA and workflow
 attempt, submits one private Kaggle notebook and validates its bound result.
@@ -217,11 +244,18 @@ attempt, submits one private Kaggle notebook and validates its bound result.
 gh workflow run release-tpu.yml --ref master -f commit=FULL_COMMIT_SHA
 ```
 
-Before creating or publishing the release, require a successful workflow and
-inspect its device report, numerical metrics and test logs. A changed candidate
-SHA requires a new confirmation. This is a maintainer release checklist step;
-the workflow does not publish packages, write PR statuses or automatically
-block the existing publishing workflow. No `accelerator/tpu` PR check is created.
+The matching `GPU release confirmation` workflow also accepts a full candidate
+SHA from `master`:
+
+```sh
+gh workflow run release-gpu.yml --ref master -f commit=FULL_COMMIT_SHA
+```
+
+These manual entries help diagnose account and device problems before a
+release. Inspect their device reports, numerical metrics and test logs. They do
+not publish packages or replace the automatic checks in the publishing run.
+A changed candidate SHA requires a new confirmation. No `accelerator/tpu` PR
+check is created.
 
 Kaggle documents TPU selection via its CLI, but an
 [open upstream issue](https://github.com/Kaggle/kaggle-cli/issues/1197) reports

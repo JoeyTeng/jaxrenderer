@@ -47,6 +47,7 @@ dev = [
 test = [
     "pre-commit>=4.6.2",
     "pytest>=9.1.1",
+    "PyYAML>=6.0.3",
     "tox>=4.64.5",
     "tox-uv>=1.36.0",
 ]

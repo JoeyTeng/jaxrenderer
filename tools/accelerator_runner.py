@@ -438,8 +438,8 @@ def run(
     frozen = _validate_binding(binding)
     if backend not in {"gpu", "tpu"}:
         raise RunnerError("backend must be gpu or tpu")
-    expected_backend = "gpu" if "pr" in frozen else "tpu"
-    if backend != expected_backend:
+    expected_backend = "gpu" if "pr" in frozen else backend
+    if "pr" in frozen and backend != expected_backend:
         raise RunnerError(
             f"{expected_backend.upper()} is the only backend allowed for this binding type"
         )

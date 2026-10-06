@@ -17,6 +17,12 @@ GOOD_BINDING = {
     "head_repository": "JoeyTeng/jaxrenderer",
     "run_id": "371234567.1",
 }
+RELEASE_BINDING = {
+    "kind": "release",
+    "head_sha": "c" * 40,
+    "head_repository": "JoeyTeng/jaxrenderer",
+    "run_id": "371234568.1",
+}
 
 
 def _result(**overrides: Any) -> dict[str, object]:
@@ -25,6 +31,20 @@ def _result(**overrides: Any) -> dict[str, object]:
         "head_sha": "a" * 40,
         "base_sha": "b" * 40,
         "run_id": "371234567.1",
+        "backend": "gpu",
+        "device_backend": "gpu",
+        "device_count": 1,
+        "success": True,
+        "devices": [{"platform": "gpu", "device_kind": "T4", "id": "0"}],
+        "versions": {"python": "3.14.1", "jax": "0.11.2"},
+    }
+    result.update(overrides)
+    return result
+
+
+def _release_result(**overrides: Any) -> dict[str, object]:
+    result: dict[str, object] = {
+        **RELEASE_BINDING,
         "backend": "gpu",
         "device_backend": "gpu",
         "device_count": 1,
@@ -52,6 +72,19 @@ def test_result_must_match_frozen_binding_and_report_real_gpu() -> None:
         modal_ci._validate_result(
             _result(device_backend="cpu", devices=[], device_count=0), GOOD_BINDING
         )
+
+
+def test_result_accepts_exact_release_binding_and_requires_versions() -> None:
+    accepted = modal_ci._validate_result(_release_result(), RELEASE_BINDING)
+    assert accepted["success"] is True
+    with pytest.raises(modal_ci.ModalCIError, match="head_sha"):
+        modal_ci._validate_result(_release_result(head_sha="d" * 40), RELEASE_BINDING)
+    with pytest.raises(modal_ci.ModalCIError, match="unexpected fields"):
+        modal_ci._validate_result(
+            _release_result(pr=25, base_sha="b" * 40), RELEASE_BINDING
+        )
+    with pytest.raises(modal_ci.ModalCIError, match="version metadata"):
+        modal_ci._validate_result(_release_result(versions={}), RELEASE_BINDING)
 
 
 def test_failed_remote_result_is_preserved_for_controller_failure_status() -> None:
@@ -149,3 +182,17 @@ def test_execute_records_credential_preflight_failure(tmp_path: Path) -> None:
     )
     assert result["success"] is False
     assert (tmp_path / "output" / "diagnostics.log").is_file()
+
+
+def test_release_execute_failure_manifest_keeps_release_identity(
+    tmp_path: Path,
+) -> None:
+    with pytest.raises(modal_ci.ModalCIError, match="Modal credentials"):
+        modal_ci.execute(RELEASE_BINDING, tmp_path / "release-output")
+    result = json.loads(
+        (tmp_path / "release-output" / "result.json").read_text(encoding="utf-8")
+    )
+    assert result["kind"] == "release"
+    assert result["head_sha"] == RELEASE_BINDING["head_sha"]
+    assert "pr" not in result
+    assert "base_sha" not in result

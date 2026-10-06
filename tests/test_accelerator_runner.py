@@ -217,8 +217,25 @@ def test_success_runs_both_suites_with_locked_jax_and_real_backend_probe(
     assert all("GITHUB_TOKEN" not in environment for _, environment in calls)
 
 
-def test_release_tpu_run_uses_release_identity_and_locked_tpu_runtime(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize(
+    ("backend", "python_version", "extra", "accelerator_packages"),
+    [
+        ("tpu", "3.13.15", "tpu", {"libtpu": "0.0.48"}),
+        (
+            "gpu",
+            "3.14.1",
+            "cuda12",
+            {"jax-cuda12-plugin": "0.11.2", "jax-cuda12-pjrt": "0.11.2"},
+        ),
+    ],
+)
+def test_release_run_uses_release_identity_and_selected_runtime(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    backend: str,
+    python_version: str,
+    extra: str,
+    accelerator_packages: dict[str, str],
 ) -> None:
     monkeypatch.setenv("GITHUB_TOKEN", SYNTHETIC_ACCESS)
     monkeypatch.setenv("GH_TOKEN", SYNTHETIC_ACCESS)
@@ -229,7 +246,7 @@ def test_release_tpu_run_uses_release_identity_and_locked_tpu_runtime(
     (source_root / ".venv" / "bin").mkdir(parents=True)
     (source_root / ".venv" / "bin" / "python").touch()
     locked = {"jax": "0.11.2", "jaxlib": "0.11.2", "numpy": "2.5.3"}
-    installed = {**locked, "libtpu": "0.0.48"}
+    installed = {**locked, **accelerator_packages}
     calls: list[tuple[list[str], dict[str, str]]] = []
     monkeypatch.setattr(runner, "_download_archive", lambda _: b"frozen-archive")
     monkeypatch.setattr(
@@ -245,7 +262,7 @@ def test_release_tpu_run_uses_release_identity_and_locked_tpu_runtime(
     monkeypatch.setattr(runner.shutil, "which", find_conda_uv)
     monkeypatch.setattr(runner, "_locked_jax_version", lambda _path: "0.11.2")
     monkeypatch.setattr(runner, "_uv_version", lambda uv, *_: f"{uv} 0.12.20")
-    monkeypatch.setattr(runner, "_python_version", lambda *_: "3.13.15")
+    monkeypatch.setattr(runner, "_python_version", lambda *_: python_version)
     version_calls = 0
 
     def versions(*_: object) -> dict[str, str]:
@@ -262,11 +279,16 @@ def test_release_tpu_run_uses_release_identity_and_locked_tpu_runtime(
         environment: dict[str, str],
         _log: Path,
     ) -> dict[str, object]:
-        assert backend == "tpu"
-        assert environment["JAX_PLATFORMS"] == "tpu"
+        assert environment["JAX_PLATFORMS"] == ("cuda" if backend == "gpu" else backend)
         return {
-            "device_backend": "tpu",
-            "devices": [{"platform": "tpu", "device_kind": "TPU v5e-8", "id": "0"}],
+            "device_backend": backend,
+            "devices": [
+                {
+                    "platform": backend,
+                    "device_kind": "TPU v5e-8" if backend == "tpu" else "T4",
+                    "id": "0",
+                }
+            ],
         }
 
     monkeypatch.setattr(runner, "_probe_accelerator", probe)
@@ -280,15 +302,18 @@ def test_release_tpu_run_uses_release_identity_and_locked_tpu_runtime(
         return "completed\n"
 
     monkeypatch.setattr(runner, "_run_command", command)
-    manifest = runner.run(RELEASE_BINDING, "tpu", tmp_path / "output")
+    manifest = runner.run(RELEASE_BINDING, backend, tmp_path / "output")
     assert manifest["success"] is True
     assert manifest["kind"] == "release"
     assert manifest["head_sha"] == RELEASE_BINDING["head_sha"]
     assert "pr" not in manifest and "base_sha" not in manifest
-    assert manifest["versions"]["python"] == "3.13.15"
+    assert manifest["versions"]["python"] == python_version
     assert manifest["versions"]["uv"] == "/opt/conda/bin/uv 0.12.20"
-    assert manifest["versions"]["libtpu"] == "0.0.48"
-    assert any("jax[tpu]==0.11.2" in argv for argv, _ in calls)
+    assert all(
+        manifest["versions"][name] == version
+        for name, version in accelerator_packages.items()
+    )
+    assert any(f"jax[{extra}]==0.11.2" in argv for argv, _ in calls)
     uv_calls = [argv for argv, _ in calls if "uv" in Path(argv[0]).name]
     assert len(uv_calls) == 3
     assert all(argv[0] == "/opt/conda/bin/uv" for argv in uv_calls)
@@ -321,9 +346,7 @@ def test_runner_requires_frozen_binding_and_backend() -> None:
         runner._validate_binding({**GOOD_BINDING, "run_id": "0.1"})
 
 
-@pytest.mark.parametrize(
-    ("binding", "backend"), [(GOOD_BINDING, "tpu"), (RELEASE_BINDING, "gpu")]
-)
+@pytest.mark.parametrize(("binding", "backend"), [(GOOD_BINDING, "tpu")])
 def test_runner_rejects_backend_binding_type_mismatch(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
