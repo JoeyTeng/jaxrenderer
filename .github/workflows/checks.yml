@@ -37,7 +37,7 @@ jobs:
           enable-cache: true
 
       - name: Install dependencies
-        run: uv sync --locked --group dev --group test --python 3.14
+        run: uv sync --locked --all-groups --python 3.14
 
       - name: Check import sorting with Ruff
         run: uv run --no-sync --python 3.14 ruff check --select I assets renderer examples test_resources tests tools
@@ -71,7 +71,7 @@ jobs:
           enable-cache: true
 
       - name: Install dependencies
-        run: uv sync --locked --group dev --group test --python "${{ matrix.python-version }}"
+        run: uv sync --locked --all-groups --python "${{ matrix.python-version }}"
 
       - name: Check Python version
         run: uv run --no-sync --python "${{ matrix.python-version }}" python --version
@@ -108,7 +108,7 @@ jobs:
           python-version: "3.14"
 
       - name: Install locked dependencies
-        run: uv sync --locked --group dev --group test --python 3.14
+        run: uv sync --locked --all-groups --python 3.14
 
       - name: Check Python version
         run: uv run --no-sync python --version
@@ -149,7 +149,7 @@ jobs:
           python-version: "3.14"
 
       - name: Install locked dependencies
-        run: uv sync --locked --group dev --group test --python 3.14
+        run: uv sync --locked --all-groups --python 3.14
 
       - name: Run render and gradient regression tests
         timeout-minutes: 12

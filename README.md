@@ -150,8 +150,9 @@ TPU confirmation runs separately before a release. It is not a PR merge
 requirement, allowing Kaggle's free quota and queue to be used less frequently.
 
 Provider controller dependencies are pinned in the `ci-modal` and `ci-kaggle`
-groups in `uv.lock`. Each controller installs only its own group; ordinary CI
-and remote rendering tests install the development and test groups. GPU tests
+groups in `uv.lock`. Each controller installs only its own group. Standard CI
+installs all locked groups, including both controller SDKs; remote rendering
+tests install the development and test groups. GPU tests
 use Python 3.14, while TPU tests use Python 3.13 in an isolated environment.
 
 The tests require the requested JAX device and reject CPU fallback. TPU tests use

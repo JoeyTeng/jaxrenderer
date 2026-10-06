@@ -12,6 +12,8 @@ from tools import accelerator_runner as runner
 
 # Synthetic fixture catalogue: access-a (active), joey-private-v3.
 SYNTHETIC_ACCESS = "codex_synth_v1_access_a"
+# Synthetic fixture catalogue: api-key-a (active), joey-private-v3.
+SYNTHETIC_KAGGLE_API_KEY = "codex_synth_v1_api_key_a"
 
 GOOD_BINDING = {
     "pr": 24,
@@ -82,6 +84,8 @@ def test_minimal_environment_keeps_accelerator_runtime_and_drops_credentials(
     monkeypatch.setenv("TPU_WORKER_ID", "0")
     monkeypatch.setenv("LD_LIBRARY_PATH", "/driver/lib")
     monkeypatch.setenv("GITHUB_TOKEN", SYNTHETIC_ACCESS)
+    monkeypatch.setenv("KAGGLE_API_TOKEN", SYNTHETIC_KAGGLE_API_KEY)
+    monkeypatch.setenv("KAGGLE_USERNAME", "test-user")
     environment = runner._minimal_environment(
         tmp_path / "home", tmp_path / "venv", "tpu", tmp_path / "artifacts"
     )
@@ -90,6 +94,9 @@ def test_minimal_environment_keeps_accelerator_runtime_and_drops_credentials(
     assert environment["JAX_PLATFORMS"] == "tpu"
     assert environment["JAX_DEFAULT_MATMUL_PRECISION"] == "highest"
     assert "GITHUB_TOKEN" not in environment
+    assert "KAGGLE_API_TOKEN" not in environment
+    assert "KAGGLE_USERNAME" not in environment
+    assert "/opt/conda/bin" in environment["PATH"].split(os.pathsep)
 
 
 def test_gpu_platform_selects_cuda_without_rocm_alias_expansion(tmp_path: Path) -> None:
@@ -213,20 +220,31 @@ def test_success_runs_both_suites_with_locked_jax_and_real_backend_probe(
 def test_release_tpu_run_uses_release_identity_and_locked_tpu_runtime(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    monkeypatch.setenv("GITHUB_TOKEN", SYNTHETIC_ACCESS)
+    monkeypatch.setenv("GH_TOKEN", SYNTHETIC_ACCESS)
+    monkeypatch.setenv("KAGGLE_API_TOKEN", SYNTHETIC_KAGGLE_API_KEY)
+    monkeypatch.setenv("KAGGLE_USERNAME", "test-user")
     source_root = tmp_path / "source"
     source_root.mkdir()
     (source_root / ".venv" / "bin").mkdir(parents=True)
     (source_root / ".venv" / "bin" / "python").touch()
     locked = {"jax": "0.11.2", "jaxlib": "0.11.2", "numpy": "2.5.3"}
     installed = {**locked, "libtpu": "0.0.48"}
-    calls: list[list[str]] = []
+    calls: list[tuple[list[str], dict[str, str]]] = []
     monkeypatch.setattr(runner, "_download_archive", lambda _: b"frozen-archive")
     monkeypatch.setattr(
         runner, "_extract_source_archive", lambda _data, _dest: source_root
     )
-    monkeypatch.setattr(runner.shutil, "which", lambda _name, path=None: "/trusted/uv")
+
+    def find_conda_uv(name: str, path: str | None = None) -> str | None:
+        assert name == "uv"
+        if path and "/opt/conda/bin" in path.split(os.pathsep):
+            return "/opt/conda/bin/uv"
+        return None
+
+    monkeypatch.setattr(runner.shutil, "which", find_conda_uv)
     monkeypatch.setattr(runner, "_locked_jax_version", lambda _path: "0.11.2")
-    monkeypatch.setattr(runner, "_uv_version", lambda *_: "uv 0.12.20")
+    monkeypatch.setattr(runner, "_uv_version", lambda uv, *_: f"{uv} 0.12.20")
     monkeypatch.setattr(runner, "_python_version", lambda *_: "3.13.15")
     version_calls = 0
 
@@ -253,8 +271,10 @@ def test_release_tpu_run_uses_release_identity_and_locked_tpu_runtime(
 
     monkeypatch.setattr(runner, "_probe_accelerator", probe)
 
-    def command(argv: list[str], _cwd: Path, _env: dict[str, str], log: Path) -> str:
-        calls.append(argv)
+    def command(
+        argv: list[str], _cwd: Path, environment: dict[str, str], log: Path
+    ) -> str:
+        calls.append((argv, environment))
         log.parent.mkdir(parents=True, exist_ok=True)
         log.write_text("completed\n", encoding="utf-8")
         return "completed\n"
@@ -266,8 +286,17 @@ def test_release_tpu_run_uses_release_identity_and_locked_tpu_runtime(
     assert manifest["head_sha"] == RELEASE_BINDING["head_sha"]
     assert "pr" not in manifest and "base_sha" not in manifest
     assert manifest["versions"]["python"] == "3.13.15"
+    assert manifest["versions"]["uv"] == "/opt/conda/bin/uv 0.12.20"
     assert manifest["versions"]["libtpu"] == "0.0.48"
-    assert any("jax[tpu]==0.11.2" in argv for argv in calls)
+    assert any("jax[tpu]==0.11.2" in argv for argv, _ in calls)
+    uv_calls = [argv for argv, _ in calls if "uv" in Path(argv[0]).name]
+    assert len(uv_calls) == 3
+    assert all(argv[0] == "/opt/conda/bin/uv" for argv in uv_calls)
+    assert all(
+        not {"GITHUB_TOKEN", "GH_TOKEN", "KAGGLE_API_TOKEN", "KAGGLE_USERNAME"}
+        & environment.keys()
+        for _, environment in calls
+    )
 
 
 def test_command_stops_when_log_budget_is_exceeded(

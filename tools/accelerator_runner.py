@@ -182,7 +182,13 @@ def _minimal_environment(
     environment = {
         "HOME": str(home),
         "PATH": os.pathsep.join(
-            (str(venv / "bin"), "/usr/local/bin", "/usr/bin", "/bin")
+            (
+                str(venv / "bin"),
+                "/opt/conda/bin",
+                "/usr/local/bin",
+                "/usr/bin",
+                "/bin",
+            )
         ),
         "LANG": "C.UTF-8",
         "LC_ALL": "C.UTF-8",
