@@ -3,13 +3,14 @@ name: Build, validate and publish
 on:
   release:
     types: [published]
+  workflow_dispatch:
 
 permissions:
   contents: read
 
 # Never cancel a candidate while a remote accelerator run may still be active.
 concurrency:
-  group: publish-${{ github.event.release.tag_name }}
+  group: publish-${{ github.event.release.tag_name || github.sha }}
   cancel-in-progress: false
 
 jobs:
@@ -19,6 +20,7 @@ jobs:
     outputs:
       head_sha: ${{ steps.freeze.outputs.head_sha }}
       lint_base: ${{ steps.baseline.outputs.sha }}
+      version: ${{ steps.version.outputs.version }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -28,7 +30,7 @@ jobs:
       - uses: actions/setup-python@v7
         with:
           python-version: "3.14"
-      - name: Freeze and validate the published release
+      - name: Freeze and validate the candidate
         id: freeze
         env:
           GH_TOKEN: ${{ github.token }}
@@ -44,9 +46,8 @@ jobs:
           else
             printf 'sha=%s\n' "$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
           fi
-      - name: Check release tag version
-        env:
-          RELEASE_TAG: ${{ github.event.release.tag_name }}
+      - name: Read package version
+        id: version
         run: |
           python - <<'PY'
           import os
@@ -54,6 +55,19 @@ jobs:
           from pathlib import Path
 
           version = tomllib.loads(Path("pyproject.toml").read_text())["project"]["version"]
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+              output.write(f"version={version}\n")
+          PY
+      - name: Check release tag version
+        if: github.event_name == 'release'
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          PACKAGE_VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          python - <<'PY'
+          import os
+
+          version = os.environ["PACKAGE_VERSION"]
           tag = os.environ["RELEASE_TAG"]
           if tag.removeprefix("v") != version:
               raise SystemExit(f"Release tag {tag!r} does not match project version {version!r}")
@@ -92,7 +106,7 @@ jobs:
         run: uv build
       - name: Smoke test built wheel
         env:
-          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          PACKAGE_VERSION: ${{ needs.prepare.outputs.version }}
         run: |
           set -euo pipefail
           smoke_venv="$(mktemp -d)"
@@ -108,7 +122,7 @@ jobs:
 
           import renderer
 
-          expected = os.environ["RELEASE_TAG"].removeprefix("v")
+          expected = os.environ["PACKAGE_VERSION"]
           actual = importlib.metadata.version("jaxrenderer")
           module_path = Path(renderer.__file__).resolve()
           site_packages = Path(importlib.metadata.distribution("jaxrenderer").locate_file("")).resolve()
@@ -138,6 +152,7 @@ jobs:
 
   publish:
     needs: [prepare, cpu, build, gpu, tpu]
+    if: ${{ success() && github.event_name == 'release' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     environment: PyPI
@@ -171,3 +186,40 @@ jobs:
         env:
           UV_PUBLISH_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
         run: uv publish
+
+  rehearsal:
+    needs: [prepare, cpu, build, gpu, tpu]
+    if: ${{ success() && github.event_name == 'workflow_dispatch' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.prepare.outputs.head_sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.14"
+      - uses: actions/download-artifact@v7
+        with:
+          name: release-binding-${{ github.run_attempt }}
+      - name: Recheck the frozen workflow attempt
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_COMMIT: ${{ needs.prepare.outputs.head_sha }}
+        run: |
+          python -m tools.release_tpu_gate prepare --commit "$RELEASE_COMMIT" \
+            --output rehearsal-binding.json --github-output "$GITHUB_OUTPUT"
+          cmp release-binding.json rehearsal-binding.json
+      - uses: actions/download-artifact@v7
+        with:
+          name: release-dist-${{ github.run_attempt }}
+          path: dist/
+      - name: Summarise the validated release rehearsal
+        env:
+          CANDIDATE_SHA: ${{ needs.prepare.outputs.head_sha }}
+          PACKAGE_VERSION: ${{ needs.prepare.outputs.version }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+        run: |
+          printf 'Release rehearsal passed for %s, package version %s, workflow attempt %s.\n' \
+            "$CANDIDATE_SHA" "$PACKAGE_VERSION" "$RUN_ATTEMPT" >> "$GITHUB_STEP_SUMMARY"
