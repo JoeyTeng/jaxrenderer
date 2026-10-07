@@ -12,7 +12,7 @@ The rehearsal freezes `github.sha`, builds and smoke-tests the package, then
 runs both provider tests afresh. It uses the configured Modal and Kaggle
 environments, so it consumes Modal compute credits and Kaggle accelerator quota;
 check the free-account limits in the
-[README account and environment setup](../../README.md#account-and-environment-setup)
+[CI account and environment setup](README.md#account-and-environment-setup)
 before dispatching. The rehearsal does not create a release or version bump,
 enter the `PyPI` environment, require a PyPI credential or approval, or upload
 a package. It cannot verify that a release tag exists or points to this commit,
