@@ -232,23 +232,8 @@ Its token is only provided to the upload step. Artefacts are scoped by attempt,
 so use **Re-run all jobs** after a failure to obtain a complete new confirmation.
 Neither release accelerator check writes a PR status.
 
-#### Rehearsing the publishing workflow
-
-To run the complete CPU, build, GPU and TPU gates from the current `master`
-commit without creating a release, dispatch the workflow with no candidate
-inputs:
-
-```sh
-gh workflow run pypi.yml --ref master
-```
-
-The rehearsal freezes `github.sha`, builds and smoke-tests the package, then
-runs both provider tests afresh. It uses the configured Modal and Kaggle
-environments, so it consumes Modal compute credits and Kaggle accelerator quota;
-check the free-account limits described above before dispatching. The rehearsal
-does not create a release or version bump, enter the `PyPI` environment, require
-a PyPI credential or approval, or upload a package. It cannot verify that a
-release tag exists or points to this commit, or test an actual PyPI upload.
+To rehearse the publishing gates without creating a release, see
+[Rehearsing the publishing workflow](docs/ci/release-rehearsal.md).
 
 #### Manually confirming a release candidate
 
