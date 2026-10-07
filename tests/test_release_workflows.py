@@ -50,6 +50,11 @@ def test_publish_waits_for_every_release_gate_and_cannot_skip_failed_needs() -> 
     assert publish["if"] == "${{ success() && github.event_name == 'release' }}"
     assert jobs["gpu"]["needs"] == ["prepare", "cpu", "build"]
     assert jobs["tpu"]["needs"] == ["prepare", "cpu", "build"]
+    assert jobs["gpu"]["secrets"] == "inherit"
+    assert jobs["tpu"]["secrets"] == "inherit"
+    assert {
+        job_name for job_name, job in jobs.items() if job.get("secrets") == "inherit"
+    } == {"gpu", "tpu"}
     assert_hard_gates_fail_closed(jobs, ("prepare", "cpu", "build", "gpu", "tpu"))
 
 
@@ -149,6 +154,25 @@ def test_release_checkouts_and_reusable_workflows_use_the_frozen_commit() -> Non
         child = load_workflow(workflow_name)["jobs"]
         provider_job_name = "gpu" if "gpu" in child else "tpu"
         assert_hard_gates_fail_closed(child, ("prepare", provider_job_name))
+        provider_job = child[provider_job_name]
+        if provider_job_name == "gpu":
+            assert provider_job["environment"] == "modal-gpu"
+            controller = step_named(
+                provider_job, "Confirm the release candidate on a Modal T4"
+            )
+            assert controller["env"] == {
+                "MODAL_TOKEN_ID": "${{ secrets.MODAL_TOKEN_ID }}",
+                "MODAL_TOKEN_SECRET": "${{ secrets.MODAL_TOKEN_SECRET }}",
+            }
+        else:
+            assert provider_job["environment"] == "kaggle-tpu"
+            controller = step_named(
+                provider_job, "Confirm the release candidate on a Kaggle TPU"
+            )
+            assert controller["env"] == {
+                "KAGGLE_API_TOKEN": "${{ secrets.KAGGLE_API_TOKEN }}",
+                "KAGGLE_USERNAME": "${{ vars.KAGGLE_USERNAME }}",
+            }
         prepare = child["prepare"]
         freeze = step_named(
             prepare, "Freeze the release candidate and workflow attempt"
