@@ -18,6 +18,15 @@ enter the `PyPI` environment, require a PyPI credential or approval, or upload
 a package. It cannot verify that a release tag exists or points to this commit,
 or test an actual PyPI upload.
 
+The reusable GPU and TPU calls inherit the caller's available secret context as
+a workaround described in [runner issue 4453](https://github.com/actions/runner/issues/4453),
+where environment secrets were reported empty without inheritance. This also
+makes repository and organisation secrets available to the called workflows;
+only the named Modal or Kaggle credentials are assigned to each controller
+step's environment. Those jobs retain their `modal-gpu` and `kaggle-tpu`
+environments. Only the release-only upload step assigns the PyPI token to its
+execution environment.
+
 Before dispatching again after a timeout, confirm that the previous Kaggle
 notebook has ended: an Actions timeout only stops waiting and does not prove the
 remote run stopped.

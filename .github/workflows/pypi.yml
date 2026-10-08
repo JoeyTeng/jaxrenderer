@@ -138,17 +138,21 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
+  # Work around reported environment-secret resolution failures in reusable workflows.
+  # See https://github.com/actions/runner/issues/4453.
   gpu:
     needs: [prepare, cpu, build]
     uses: ./.github/workflows/release-gpu.yml
     with:
       commit: ${{ needs.prepare.outputs.head_sha }}
+    secrets: inherit
 
   tpu:
     needs: [prepare, cpu, build]
     uses: ./.github/workflows/release-tpu.yml
     with:
       commit: ${{ needs.prepare.outputs.head_sha }}
+    secrets: inherit
 
   publish:
     needs: [prepare, cpu, build, gpu, tpu]
