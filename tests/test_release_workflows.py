@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from tools import kaggle_ci
 import yaml
 
 WORKFLOWS = Path(__file__).parents[1] / ".github" / "workflows"
@@ -181,6 +182,35 @@ def test_release_checkouts_and_reusable_workflows_use_the_frozen_commit() -> Non
         provider_checkouts = checkout_steps(child[provider_job_name])
         assert provider_checkouts[0]["with"]["ref"] == "${{ github.sha }}"
         assert binding_name in str(child)
+
+
+def test_release_tpu_wait_budgets_fit_the_hosted_job_and_keep_failure_reports() -> None:
+    workflow = load_workflow("release-tpu.yml")
+    jobs = workflow["jobs"]
+    tpu = jobs["tpu"]
+    provider = step_named(tpu, "Confirm the release candidate on a Kaggle TPU")
+
+    assert jobs["prepare"]["timeout-minutes"] == "5"
+    assert provider["timeout-minutes"] == "330"
+    assert tpu["timeout-minutes"] == "350"
+    assert 350 < 360  # GitHub-hosted job maximum.
+    provider_seconds = int(provider["timeout-minutes"]) * 60
+    job_seconds = int(tpu["timeout-minutes"]) * 60
+    phase_seconds = (
+        kaggle_ci.QUEUE_TIMEOUT_SECONDS + kaggle_ci.EXECUTION_TIMEOUT_SECONDS
+    )
+    # Leave time for bounded CLI calls, output collection and local validation.
+    assert provider_seconds - phase_seconds >= 45 * 60
+    # The job also needs time after the provider step for finish and artefact upload.
+    assert job_seconds - provider_seconds >= 20 * 60
+    assert ".venv/bin/python -u -m tools.kaggle_ci" in provider["run"]
+
+    finish = step_named(tpu, "Validate the bound TPU result")
+    upload = step_named(tpu, "Upload TPU release confirmation artefacts")
+    assert finish["if"] == "always()"
+    assert finish["run"].startswith("python -m tools.release_tpu_gate finish")
+    assert upload["if"] == "always()"
+    assert upload["uses"].startswith("actions/upload-artifact@")
 
 
 def test_cpu_reuse_includes_the_full_matrix_render_and_minimum_numpy_gates() -> None:

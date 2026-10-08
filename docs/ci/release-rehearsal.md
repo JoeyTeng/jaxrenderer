@@ -27,6 +27,23 @@ step's environment. Those jobs retain their `modal-gpu` and `kaggle-tpu`
 environments. Only the release-only upload step assigns the PyPI token to its
 execution environment.
 
-Before dispatching again after a timeout, confirm that the previous Kaggle
-notebook has ended: an Actions timeout only stops waiting and does not prove the
-remote run stopped.
+If the TPU wait times out while queued or running, the remote state is unknown.
+The workflow records controller state and does not automatically resubmit. To
+inspect the original notebook, download `tpu-release-binding-<attempt>` and
+`release-tpu-<sha>-<attempt>` from the same workflow run. With Kaggle credentials
+set in your local environment, make one bounded status-only query using those
+original files and a separate output directory:
+
+```sh
+python -u -m tools.kaggle_ci \
+  --binding tpu-release-binding.json \
+  --resume-state kaggle-controller-state.json \
+  --output-dir kaggle-status-check
+```
+
+This writes `kaggle-resume-report.json`; `version_verified` and `success` remain
+false because the query does not verify the remote version or collect results.
+It never resubmits. It cannot make the old failed workflow attempt pass or
+satisfy a new release attempt's TPU gate. Before another submission, confirm the
+previous notebook has ended: an Actions timeout only stops waiting and does not
+prove the remote run stopped.
