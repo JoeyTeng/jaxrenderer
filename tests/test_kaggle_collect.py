@@ -279,7 +279,11 @@ def test_collect_real_sdk_cancellation_enum_transitions(
 
 @pytest.mark.parametrize(
     ("kernel_id", "version"),
-    [("other/jaxr-invalid-0123456789", 1), (_kernel_id(), True)],
+    [
+        ("other/jaxr-invalid-0123456789", 1),
+        (_kernel_id(), True),
+        (_kernel_id(), None),
+    ],
 )
 def test_resume_state_identity_mismatch_fails_before_sdk(
     monkeypatch: pytest.MonkeyPatch,
@@ -289,6 +293,11 @@ def test_resume_state_identity_mismatch_fails_before_sdk(
 ) -> None:
     state, output = _prepare(monkeypatch, tmp_path)
     _resume_state(state, kernel_id=kernel_id, version=version)
+
+    def fail_if_sdk_load_is_attempted(token: str) -> Any:
+        pytest.fail("invalid resume identity must be rejected before loading the SDK")
+
+    monkeypatch.setattr(collector, "_load_sdk", fail_if_sdk_load_is_attempted)
 
     report = collector.collect(BINDING, state, output)
 

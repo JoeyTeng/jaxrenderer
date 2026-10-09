@@ -368,7 +368,7 @@ def test_discover_skips_valid_legacy_source_and_keeps_timeout_candidate(
             {
                 "binding": binding,
                 "kernel_id": legacy_kernel_id(binding),
-                "submitted_version": 1,
+                "submitted_version": None,
             }
             if run_id == 788
             else {

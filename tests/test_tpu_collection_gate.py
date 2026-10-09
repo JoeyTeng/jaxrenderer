@@ -44,13 +44,13 @@ def state() -> dict[str, object]:
     return value
 
 
-def legacy_state() -> dict[str, object]:
+def legacy_state(version: object = 1) -> dict[str, object]:
     identity = json.dumps(binding(), sort_keys=True, separators=(",", ":"))
     run_tag = hashlib.sha256(identity.encode()).hexdigest()[:16]
     return {
         "binding": binding(),
         "kernel_id": f"joeyteng/jaxr-{run_tag}-0123456789",
-        "submitted_version": 1,
+        "submitted_version": version,
     }
 
 
@@ -354,10 +354,11 @@ def test_preflight_without_submitted_version_is_ineligible(
         prepare(tmp_path)
 
 
+@pytest.mark.parametrize("version", [None, 1])
 def test_prepare_skips_valid_legacy_state_without_timeout_evidence(
-    source: dict[str, Any], tmp_path: Path
+    source: dict[str, Any], tmp_path: Path, version: object
 ) -> None:
-    source["controller_state"] = legacy_state()
+    source["controller_state"] = legacy_state(version)
 
     with pytest.raises(
         gate.IneligibleSource,
@@ -382,7 +383,14 @@ def test_prepare_skips_valid_legacy_state_without_timeout_evidence(
         (
             "submitted_version",
             True,
-            "source 789.3 legacy controller identity is invalid",
+            "source 789.3 legacy controller version is invalid",
+        ),
+        ("submitted_version", 0, "source 789.3 legacy controller version is invalid"),
+        ("submitted_version", 2, "source 789.3 legacy controller version is invalid"),
+        (
+            "submitted_version",
+            "1",
+            "source 789.3 legacy controller version is invalid",
         ),
     ],
 )

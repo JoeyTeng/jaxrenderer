@@ -314,19 +314,16 @@ def _validate_source_files(
             raise CollectionGateError(
                 f"source {source_identity} legacy controller binding is invalid"
             )
+        submitted_version = state.get("submitted_version")
+        if submitted_version is not None and (
+            type(submitted_version) is not int or submitted_version != 1
+        ):
+            raise CollectionGateError(
+                f"source {source_identity} legacy controller version is invalid"
+            )
         kernel_id = state.get("kernel_id")
-        if not isinstance(kernel_id, str):
-            raise CollectionGateError(
-                f"source {source_identity} legacy controller identity is invalid"
-            )
-        kernel_match = kaggle_collect.KERNEL_ID_RE.fullmatch(kernel_id)
-        if kernel_match is None:
-            raise CollectionGateError(
-                f"source {source_identity} legacy controller identity is invalid"
-            )
-        username = kernel_match.group("username")
         try:
-            kaggle_collect._controller_identity(binding, state_path, username)
+            kaggle_collect._kernel_identity(binding, kernel_id)
         except kaggle_collect.CollectionError as error:
             raise CollectionGateError(
                 f"source {source_identity} legacy controller identity is invalid"
