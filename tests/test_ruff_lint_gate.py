@@ -1,6 +1,9 @@
 """Contract tests for the repository's direct Ruff lint gate."""
 
 from pathlib import Path
+import re
+import subprocess
+import sys
 import tomllib
 
 import yaml
@@ -59,6 +62,9 @@ def test_ruff_gate_keeps_the_repository_rule_selection_and_ignores() -> None:
     ruff = pyproject["tool"]["ruff"]
     assert ruff["lint"]["select"] == ["E4", "E7", "E9", "F", "I"]
     assert ruff["lint"]["ignore"] == ["F722", "F821"]
+    assert ruff["include"] == [
+        f"{scope}/**/*.{suffix}" for scope in LINT_SCOPE for suffix in ("py", "pyi")
+    ]
 
 
 def test_pre_commit_runs_normal_ruff_check_with_existing_hooks_preserved() -> None:
@@ -73,3 +79,34 @@ def test_pre_commit_runs_normal_ruff_check_with_existing_hooks_preserved() -> No
     assert hooks_by_id["ruff-check"]["entry"] == "uv run --no-sync ruff check"
     assert hooks_by_id["ruff-imports"]["entry"].endswith("ruff check --select I --fix")
     assert hooks_by_id["ruff-format"]["entry"] == "uv run --no-sync ruff format"
+    for hook_id in ("ruff-imports", "ruff-check", "ruff-format"):
+        pattern = re.compile(hooks_by_id[hook_id]["files"])
+        assert pattern.fullmatch("renderer/module.py")
+        assert pattern.fullmatch("renderer/stubs/module.pyi")
+        assert not pattern.fullmatch("typings/module.pyi")
+
+
+def test_real_ruff_rejects_a_lint_violation_in_a_stub_file(tmp_path: Path) -> None:
+    ruff = Path(sys.executable).with_name("ruff")
+    assert ruff.is_file()
+    (tmp_path / "pyproject.toml").write_text(
+        (ROOT / "pyproject.toml").read_text(encoding="utf-8"), encoding="utf-8"
+    )
+    stub = tmp_path / "assets" / "lint_error.pyi"
+    stub.parent.mkdir()
+    stub.write_text(
+        "def duplicate() -> None: ...\ndef duplicate() -> None: ...\n",
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        [str(ruff), "check", "assets"],
+        cwd=tmp_path,
+        capture_output=True,
+        check=False,
+        text=True,
+    )
+
+    assert result.returncode == 1
+    assert "F811" in result.stdout
+    assert "lint_error.pyi" in result.stdout
