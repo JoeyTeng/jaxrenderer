@@ -1,8 +1,14 @@
 """Example: Batch rendering a 12-frame animation of a rotating capsule."""
 
+from typing import cast
+
 import jax
 import jax.numpy as jnp
 from jaxtyping import Array, Float
+import matplotlib.animation as animation
+import matplotlib.figure as figure
+import matplotlib.image as mimage
+import matplotlib.pyplot as plt
 
 from renderer import (
     GUID,
@@ -95,13 +101,6 @@ _, (images,) = jax.vmap(  # pyright: ignore[reportUnknownVariableType]
 )(batch_models(merged_models), buffers)
 
 # PROCESS: show
-
-from typing import cast
-
-import matplotlib.animation as animation
-import matplotlib.figure as figure
-import matplotlib.image as mimage
-import matplotlib.pyplot as plt
 
 fig: figure.Figure
 fig, ax = plt.subplots()  # pyright: ignore

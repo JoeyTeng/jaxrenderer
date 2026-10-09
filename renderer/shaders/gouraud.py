@@ -3,7 +3,6 @@ from __future__ import annotations  # tolerate "subscriptable 'type' for < 3.9
 from functools import partial
 from typing import NamedTuple, cast
 
-import jax
 import jax.numpy as jnp
 from jaxtyping import (
     Array,

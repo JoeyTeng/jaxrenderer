@@ -9,6 +9,7 @@ from jaxtyping import (
     Float,
     jaxtyped,  # pyright: ignore[reportUnknownVariableType]
 )
+import matplotlib.pyplot as plt
 
 from renderer import Tuple, jit
 from renderer.geometry import Camera, normalise, to_homogeneous
@@ -255,8 +256,6 @@ extra = ExtraInput(
 perspective_interpolation = render(camera, _Shader, buffers, face_indices, extra)
 
 # show
-
-import matplotlib.pyplot as plt
 
 fig, axs = plt.subplots(  # pyright: ignore
     ncols=2,
