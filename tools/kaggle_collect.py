@@ -32,7 +32,6 @@ MAX_REDIRECTS = 3
 MAX_REPORT_ERROR = 400
 REQUIRED_FILES = {
     "result.json",
-    "diagnostics.log",
     "setup.log",
     "device-probe.log",
     "full-tests.log",

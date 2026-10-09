@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 import json
 from pathlib import Path
 import subprocess
@@ -41,6 +42,16 @@ def state() -> dict[str, object]:
         outcome="queue_timeout",
     )
     return value
+
+
+def legacy_state() -> dict[str, object]:
+    identity = json.dumps(binding(), sort_keys=True, separators=(",", ":"))
+    run_tag = hashlib.sha256(identity.encode()).hexdigest()[:16]
+    return {
+        "binding": binding(),
+        "kernel_id": f"joeyteng/jaxr-{run_tag}-0123456789",
+        "submitted_version": 1,
+    }
 
 
 def result() -> dict[str, object]:
@@ -340,6 +351,65 @@ def test_preflight_without_submitted_version_is_ineligible(
     source["controller_state"].update(outcome="preflight_error", submitted_version=None)
 
     with pytest.raises(gate.IneligibleSource, match="not a timeout"):
+        prepare(tmp_path)
+
+
+def test_prepare_skips_valid_legacy_state_without_timeout_evidence(
+    source: dict[str, Any], tmp_path: Path
+) -> None:
+    source["controller_state"] = legacy_state()
+
+    with pytest.raises(
+        gate.IneligibleSource,
+        match=r"source 789\.3 legacy controller state has no timeout evidence",
+    ):
+        prepare(tmp_path)
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "message"),
+    [
+        (
+            "binding",
+            {**binding(), "run_id": "789.4"},
+            "source 789.3 legacy controller binding is invalid",
+        ),
+        (
+            "kernel_id",
+            "joeyteng/jaxr-wrong-0123456789",
+            "source 789.3 legacy controller identity is invalid",
+        ),
+        (
+            "submitted_version",
+            True,
+            "source 789.3 legacy controller identity is invalid",
+        ),
+    ],
+)
+def test_prepare_rejects_legacy_state_with_wrong_identity(
+    source: dict[str, Any],
+    tmp_path: Path,
+    field: str,
+    value: object,
+    message: str,
+) -> None:
+    legacy = legacy_state()
+    legacy[field] = value
+    source["controller_state"] = legacy
+
+    with pytest.raises(gate.CollectionGateError, match=message):
+        prepare(tmp_path)
+
+
+def test_prepare_rejects_unknown_controller_schema_with_source_identity(
+    source: dict[str, Any], tmp_path: Path
+) -> None:
+    source["controller_state"]["unrecognised"] = "value"
+
+    with pytest.raises(
+        gate.CollectionGateError,
+        match=r"source 789\.3 controller state schema is unsupported",
+    ):
         prepare(tmp_path)
 
 

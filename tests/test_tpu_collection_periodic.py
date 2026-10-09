@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+import hashlib
 import json
 from pathlib import Path
 from typing import Any
@@ -333,6 +334,88 @@ def test_discover_skips_only_explicitly_ineligible_sources(
         periodic.discover(
             tmp_path / "discovery-error", tmp_path / "github-output-error"
         )
+
+
+def test_discover_skips_valid_legacy_source_and_keeps_timeout_candidate(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _set_periodic_context(monkeypatch)
+    legacy_run = _run(run_id=788, attempt=1)
+    timeout_run = _run(run_id=int(SOURCE_RUN), attempt=int(SOURCE_ATTEMPT))
+    runs = {788: legacy_run, int(SOURCE_RUN): timeout_run}
+
+    def api(route: str, body: object = None) -> Any:
+        assert body is None
+        if "actions/workflows/pypi.yml/runs?" in route:
+            return {"total_count": 2, "workflow_runs": [legacy_run, timeout_run]}
+        for run_id, run in runs.items():
+            if route.endswith(f"/actions/runs/{run_id}"):
+                return run
+        if route.startswith(f"repos/{periodic.REPOSITORY}/actions/artifacts?"):
+            return {"total_count": 0, "artifacts": []}
+        raise AssertionError(route)
+
+    def prepare(
+        source_run: str,
+        source_attempt: str,
+        commit: str,
+        output: Path,
+        github_output: Path,
+    ) -> dict[str, object]:
+        run_id = int(source_run)
+        binding = _binding(source_run, source_attempt)
+        state: dict[str, object] = (
+            {
+                "binding": binding,
+                "kernel_id": legacy_kernel_id(binding),
+                "submitted_version": 1,
+            }
+            if run_id == 788
+            else {
+                **_controller_state(),
+                "binding": binding,
+            }
+        )
+        source: dict[str, object] = {
+            "source_run_id": run_id,
+            "source_attempt": int(source_attempt),
+            "head_sha": commit,
+            "collector_run_id": f"{COLLECTOR_RUN}.1",
+            "collector_sha": COLLECTOR_SHA,
+            "binding_artifact_id": 101,
+            "controller_artifact_id": 102,
+        }
+        output.mkdir(parents=True)
+        (output / "binding.json").write_text(json.dumps(binding), encoding="utf-8")
+        state_path = output / "kaggle-controller-state.json"
+        state_path.write_text(json.dumps(state), encoding="utf-8")
+        collection_gate._validate_source_files(output, source)
+        (output / "collection-source.json").write_text(
+            json.dumps(source), encoding="utf-8"
+        )
+        github_output.write_text("", encoding="utf-8")
+        return source
+
+    def legacy_kernel_id(binding: dict[str, object]) -> str:
+        encoded = json.dumps(binding, sort_keys=True, separators=(",", ":"))
+        run_tag = hashlib.sha256(encoded.encode()).hexdigest()[:16]
+        return f"joey/jaxr-{run_tag}-0123456789"
+
+    monkeypatch.setattr(accelerator_gate, "_gh_api", api)
+    monkeypatch.setattr(collection_gate, "prepare", prepare)
+    monkeypatch.setattr(periodic, "_source_expired", lambda *args: False)
+
+    report = periodic.discover(tmp_path / "discovery", tmp_path / "github-output")
+
+    assert report["matrix"] == {
+        "include": [
+            {
+                "source_run_id": SOURCE_RUN,
+                "source_attempt": SOURCE_ATTEMPT,
+                "commit": SOURCE_SHA,
+            }
+        ]
+    }
 
 
 @pytest.mark.parametrize(
