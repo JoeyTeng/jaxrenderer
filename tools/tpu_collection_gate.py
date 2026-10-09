@@ -274,7 +274,7 @@ def _validate_source_files(
         or type(state.get("submitted_version")) is not int
         or state["submitted_version"] != 1
         or state.get("outcome") not in {"queue_timeout", "execution_timeout"}
-        or state.get("status") not in kaggle_ci.IN_PROGRESS
+        or state.get("status") not in kaggle_ci.IN_PROGRESS | kaggle_ci.TERMINAL_SUCCESS
     ):
         raise CollectionGateError(
             "source controller does not prove an existing timed-out submission"

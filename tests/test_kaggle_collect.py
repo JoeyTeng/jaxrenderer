@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import builtins
 from collections.abc import Callable
 import hashlib
 import json
 from pathlib import Path
-from types import SimpleNamespace
+import runpy
+import sys
+from types import ModuleType, SimpleNamespace
 from typing import Any, cast
 
 import pytest
@@ -32,6 +35,32 @@ FILES = [
 
 def _helper(name: str) -> Callable[..., Any]:
     return cast(Callable[..., Any], getattr(collector, name))
+
+
+def _fake_requests_module(session_factory: Callable[[], Any]) -> ModuleType:
+    module = ModuleType("requests")
+    setattr(module, "Session", session_factory)
+    return module
+
+
+def test_module_import_does_not_require_requests_or_kagglesdk(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    original_import = builtins.__import__
+
+    def import_without_optional_dependencies(
+        name: str, *args: Any, **kwargs: Any
+    ) -> Any:
+        if name.split(".", maxsplit=1)[0] in {"requests", "kagglesdk"}:
+            raise AssertionError(f"unexpected optional dependency import: {name}")
+        return original_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", import_without_optional_dependencies)
+    namespace = runpy.run_path(
+        str(Path(collector.__file__)), run_name="collector_probe"
+    )
+
+    assert callable(namespace["collect"])
 
 
 def _kernel_id() -> str:
@@ -397,9 +426,7 @@ def test_download_size_limit_is_enforced_before_write(
         def close(self) -> None:
             pass
 
-    import requests
-
-    monkeypatch.setattr(requests, "Session", _Session)
+    monkeypatch.setitem(sys.modules, "requests", _fake_requests_module(_Session))
     destination = tmp_path / "oversized.log"
     with pytest.raises(collector.CollectionError, match="size limit"):
         _helper("_download_file")(
@@ -413,6 +440,7 @@ def test_download_size_limit_is_enforced_before_write(
 def test_sdk_uses_explicit_production_environment_and_serializes_version_label(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    pytest.importorskip("kagglesdk")
     monkeypatch.setenv("KAGGLE_API_ENVIRONMENT", "STAGING")
     client, get_type, status_type, output_type = _helper("_load_sdk")(TOKEN)
     http_client = client.http_client()
@@ -521,8 +549,6 @@ def test_sdk_rejects_unexpected_destination_before_network_call() -> None:
 def test_download_session_disables_environment_auth_and_closes_response(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    import requests
-
     class _Response:
         is_redirect = False
         headers = {"Content-Length": "4"}
@@ -553,7 +579,7 @@ def test_download_session_disables_environment_auth_and_closes_response(
             pass
 
     session = _Session()
-    monkeypatch.setattr(requests, "Session", lambda: session)
+    monkeypatch.setitem(sys.modules, "requests", _fake_requests_module(lambda: session))
     destination = tmp_path / "download.log"
 
     count = _helper("_download_file")(
@@ -573,8 +599,6 @@ def test_download_session_disables_environment_auth_and_closes_response(
 def test_download_redirect_is_validated_before_following(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import requests
-
     class _Response:
         is_redirect = True
         headers = {"Location": "https://evil.example/output"}
@@ -597,7 +621,7 @@ def test_download_redirect_is_validated_before_following(
             pass
 
     session = _Session()
-    monkeypatch.setattr(requests, "Session", lambda: session)
+    monkeypatch.setitem(sys.modules, "requests", _fake_requests_module(lambda: session))
     with pytest.raises(collector.CollectionError, match="untrusted host"):
         _helper("_download_file")(
             "https://storage.googleapis.com/file",

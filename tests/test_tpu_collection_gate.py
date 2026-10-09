@@ -113,6 +113,7 @@ def source(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
         "run": run,
         "jobs": {"total_count": len(jobs), "jobs": jobs},
         "artifacts": {"total_count": 2, "artifacts": artifacts},
+        "controller_state": state(),
     }
 
     def api(route: str, body: object = None) -> Any:
@@ -129,7 +130,11 @@ def source(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
 
     def download(artifact_id: int, member: str, path: Path) -> None:
         assert artifact_id in {1, 2}
-        value = binding() if member == "tpu-release-binding.json" else state()
+        value = (
+            binding()
+            if member == "tpu-release-binding.json"
+            else data["controller_state"]
+        )
         path.write_text(json.dumps(value), encoding="utf-8")
 
     monkeypatch.setattr(gate.accelerator_gate, "_gh_api", api)
@@ -145,7 +150,7 @@ def prepare(tmp_path: Path) -> Path:
 
 def collected(tmp_path: Path) -> Path:
     output = tmp_path / "collected"
-    output.mkdir()
+    output.mkdir(parents=True)
     (output / "result.json").write_text(json.dumps(result()), encoding="utf-8")
     (output / "kaggle-collection-report.json").write_text(
         json.dumps(
@@ -169,11 +174,14 @@ def test_prepare_retains_original_identity(
     source: dict[str, Any], tmp_path: Path
 ) -> None:
     path = prepare(tmp_path)
+    saved_state = json.loads((path / "kaggle-controller-state.json").read_text())
     saved = json.loads((path / "collection-source.json").read_text())
     assert saved["collector_run_id"] == "990.1"
     assert saved["collector_sha"] == COLLECTOR_HEAD
     assert saved["source_run_id"] == SOURCE_RUN
     assert json.loads((path / "binding.json").read_text()) == binding()
+    assert saved_state["outcome"] == "queue_timeout"
+    assert saved_state["status"] == "queued"
     assert (tmp_path / "github-output").read_text().splitlines() == [
         f"head_sha={HEAD}",
         "source_run_id=789",
@@ -274,6 +282,29 @@ def test_finish_separates_collection_from_release_credit(
     )
 
 
+@pytest.mark.parametrize("timeout_outcome", ["queue_timeout", "execution_timeout"])
+@pytest.mark.parametrize("remote_status", sorted(gate.kaggle_ci.TERMINAL_SUCCESS))
+def test_finish_accepts_terminal_success_after_timeout_as_validation_only(
+    source: dict[str, Any],
+    tmp_path: Path,
+    timeout_outcome: str,
+    remote_status: str,
+) -> None:
+    source["controller_state"].update(
+        outcome=timeout_outcome,
+        status=remote_status,
+    )
+    original, output = prepare(tmp_path), collected(tmp_path)
+
+    receipt = gate.finish(original, output, True)
+
+    assert receipt["success"] is True
+    assert receipt["validation_only"] is True
+    assert receipt["release_gate_credit"] is False
+    with pytest.raises(gate.CollectionGateError, match="provider did not collect"):
+        gate.finish(original, collected(tmp_path / "provider-failed"), False)
+
+
 @pytest.mark.parametrize(
     ("field", "value"),
     [
@@ -314,7 +345,7 @@ def test_finish_rechecks_original_artifact_ids(
     [
         ("submitted_version", True),
         ("outcome", "success"),
-        ("status", "complete"),
+        ("status", "failed"),
         ("binding", {**binding(), "run_id": "789.4"}),
     ],
 )
