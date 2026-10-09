@@ -401,6 +401,24 @@ def test_prepare_rejects_legacy_state_with_wrong_identity(
         prepare(tmp_path)
 
 
+@pytest.mark.parametrize("owner", ["", "bad user", "u" * 51, "joé"])
+def test_prepare_rejects_malformed_legacy_kernel_owner(
+    source: dict[str, Any], tmp_path: Path, owner: str
+) -> None:
+    legacy = legacy_state()
+    valid_slug = str(legacy["kernel_id"]).split("/", maxsplit=1)[1]
+    legacy["kernel_id"] = f"{owner}/{valid_slug}"
+    source["controller_state"] = legacy
+
+    with pytest.raises(
+        gate.CollectionGateError,
+        match="source 789.3 legacy controller identity is invalid",
+    ) as error:
+        prepare(tmp_path)
+
+    assert not isinstance(error.value, gate.IneligibleSource)
+
+
 def test_prepare_rejects_unknown_controller_schema_with_source_identity(
     source: dict[str, Any], tmp_path: Path
 ) -> None:
