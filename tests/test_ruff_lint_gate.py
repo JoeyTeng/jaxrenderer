@@ -119,7 +119,7 @@ def test_real_ruff_rejects_a_lint_violation_in_a_stub_file(tmp_path: Path) -> No
     assert "lint_error.pyi" in result.stdout
 
 
-def test_real_ruff_lints_tracked_python_files_even_when_gitignored(
+def test_real_ruff_checks_gitignored_python_files_with_override(
     tmp_path: Path,
 ) -> None:
     ruff = Path(sys.executable).with_name("ruff")
@@ -127,20 +127,11 @@ def test_real_ruff_lints_tracked_python_files_even_when_gitignored(
     (tmp_path / "pyproject.toml").write_text(
         (ROOT / "pyproject.toml").read_text(encoding="utf-8"), encoding="utf-8"
     )
-    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    (tmp_path / ".git").mkdir()
     (tmp_path / ".gitignore").write_text("assets/hidden.py\n", encoding="utf-8")
     source = tmp_path / "assets" / "hidden.py"
     source.parent.mkdir()
     source.write_text("import os\n", encoding="utf-8")
-    subprocess.run(["git", "add", "-f", "assets/hidden.py"], cwd=tmp_path, check=True)
-    subprocess.run(
-        ["git", "ls-files", "--error-unmatch", "assets/hidden.py"],
-        cwd=tmp_path,
-        capture_output=True,
-        check=True,
-        text=True,
-    )
-
     ignored = subprocess.run(
         [str(ruff), "check", "assets"],
         cwd=tmp_path,
@@ -157,6 +148,7 @@ def test_real_ruff_lints_tracked_python_files_even_when_gitignored(
     )
 
     assert ignored.returncode == 0
+    assert "No Python files found" in ignored.stdout + ignored.stderr
     assert checked.returncode == 1
     assert "F401" in checked.stdout
     assert "hidden.py" in checked.stdout
