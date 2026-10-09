@@ -9,10 +9,6 @@ on:
         description: Frozen commit SHA to test
         required: true
         type: string
-      lint-base:
-        description: Frozen parent commit for the Ruff comparison
-        required: true
-        type: string
   push:
     branches: [master]
   pull_request:
@@ -29,11 +25,6 @@ jobs:
         with:
           repository: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
           ref: ${{ inputs.commit || github.event.pull_request.head.sha || github.sha }}
-
-      - uses: actions/checkout@v7
-        with:
-          ref: ${{ inputs.lint-base || github.event.pull_request.base.sha || github.event.before }}
-          path: ruff-base
 
       - name: Set up Python 3.14
         uses: actions/setup-python@v7
@@ -56,8 +47,8 @@ jobs:
         # The checked-in Matplotlib stubs under typings/ follow upstream formatting.
         run: uv run --no-sync --python 3.14 ruff format --check assets renderer examples test_resources tests tools
 
-      - name: Check for new Ruff lint violations
-        run: uv run --no-sync --python 3.14 python tools/check_ruff_lint.py --base-root ruff-base --candidate-root . --paths assets renderer examples test_resources tests tools
+      - name: Check Ruff lint
+        run: uv run --no-sync --python 3.14 ruff check assets renderer examples test_resources tests tools
 
   check:
     runs-on: ubuntu-latest

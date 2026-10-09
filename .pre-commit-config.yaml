@@ -41,6 +41,13 @@ repos:
         types: [python]
         files: ^(assets/|renderer/|examples/|test_resources/|tests/|tools/).*[.]py$
 
+      - id: ruff-check
+        name: Ruff lint
+        entry: uv run --no-sync ruff check
+        language: system
+        types: [python]
+        files: ^(assets/|renderer/|examples/|test_resources/|tests/|tools/).*[.]py$
+
       - id: ruff-format
         name: Ruff format
         entry: uv run --no-sync ruff format
