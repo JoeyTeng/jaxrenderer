@@ -47,6 +47,10 @@ class CollectionGateError(RuntimeError):
     """A source or collection receipt failed validation."""
 
 
+class IneligibleSource(CollectionGateError):
+    """A complete source inventory proves this run is not a TPU-only timeout."""
+
+
 def _positive_id(value: str) -> int:
     if not re.fullmatch(r"[1-9][0-9]{0,19}", value):
         raise CollectionGateError("run ID and attempt must be positive integers")
@@ -74,7 +78,24 @@ def _write_json(path: Path, value: dict[str, object]) -> None:
 
 
 def _context() -> str:
-    accelerator_gate._require_dispatch_context()
+    event = os.environ.get("GITHUB_EVENT_NAME", "")
+    if event == "workflow_dispatch":
+        accelerator_gate._require_dispatch_context()
+    elif event == "schedule":
+        workflow_ref = (
+            f"{REPOSITORY}/.github/workflows/collect-tpu-periodic.yml@refs/heads/master"
+        )
+        if (
+            os.environ.get("GITHUB_REF") != "refs/heads/master"
+            or os.environ.get("GITHUB_REPOSITORY", "").casefold()
+            != REPOSITORY.casefold()
+            or os.environ.get("GITHUB_WORKFLOW_REF") != workflow_ref
+        ):
+            raise CollectionGateError(
+                "scheduled collection is restricted to the canonical master workflow"
+            )
+    else:
+        raise CollectionGateError("collection requires workflow_dispatch or schedule")
     sha = os.environ.get("GITHUB_SHA", "")
     if not accelerator_gate.SHA_RE.fullmatch(sha):
         raise CollectionGateError("collector GITHUB_SHA must be a full commit SHA")
@@ -127,18 +148,33 @@ def _source_snapshot(run_id: int, attempt: int, commit: str) -> dict[str, object
             raise CollectionGateError("source job identity is ambiguous")
         jobs[name] = job
     for name in REQUIRED_JOBS:
-        if (
-            name not in jobs
-            or jobs[name].get("status") != "completed"
-            or jobs[name].get("conclusion") != "success"
-        ):
+        if name not in jobs:
+            raise CollectionGateError(f"source required job is missing: {name}")
+        job = jobs[name]
+        if job.get("status") != "completed":
+            raise CollectionGateError(f"source required job is incomplete: {name}")
+        if job.get("conclusion") in {"failure", "cancelled", "skipped"}:
+            raise IneligibleSource(f"source required job did not pass: {name}")
+        if job.get("conclusion") != "success":
             raise CollectionGateError(f"source required job did not pass: {name}")
     tpu = jobs.get("tpu / tpu", {})
-    if tpu.get("status") != "completed" or tpu.get("conclusion") != "failure":
-        raise CollectionGateError("source TPU job must have failed before collection")
+    if not tpu:
+        raise CollectionGateError("source TPU job metadata is missing")
+    if tpu.get("status") != "completed":
+        raise CollectionGateError("source TPU job metadata is incomplete")
+    if tpu.get("conclusion") != "failure":
+        if tpu.get("conclusion") in {"success", "skipped", "cancelled"}:
+            raise IneligibleSource("source TPU job did not fail")
+        raise CollectionGateError("source TPU job conclusion is unrecognised")
     for name, job in jobs.items():
-        if name != "tpu / tpu" and job.get("conclusion") not in {"success", "skipped"}:
-            raise CollectionGateError("source has another failed or incomplete job")
+        if name == "tpu / tpu":
+            continue
+        if job.get("status") != "completed":
+            raise CollectionGateError("source contains incomplete job metadata")
+        if job.get("conclusion") in {"failure", "cancelled"}:
+            raise IneligibleSource("source has another failed job")
+        if job.get("conclusion") not in {"success", "skipped"}:
+            raise CollectionGateError("source has an unrecognised job conclusion")
     return run
 
 
@@ -271,14 +307,40 @@ def _validate_source_files(
     if (
         set(state) != kaggle_ci.CONTROLLER_STATE_FIELDS
         or state.get("binding") != binding
-        or type(state.get("submitted_version")) is not int
-        or state["submitted_version"] != 1
-        or state.get("outcome") not in {"queue_timeout", "execution_timeout"}
-        or state.get("status") not in kaggle_ci.IN_PROGRESS | kaggle_ci.TERMINAL_SUCCESS
     ):
-        raise CollectionGateError(
-            "source controller does not prove an existing timed-out submission"
-        )
+        raise CollectionGateError("source controller identity or schema is invalid")
+    outcome = state.get("outcome")
+    if outcome in {"queue_timeout", "execution_timeout"}:
+        if (
+            type(state.get("submitted_version")) is not int
+            or state["submitted_version"] != 1
+        ):
+            raise CollectionGateError(
+                "timed-out source controller did not submit version 1"
+            )
+        if (
+            state.get("status")
+            not in kaggle_ci.IN_PROGRESS | kaggle_ci.TERMINAL_SUCCESS
+        ):
+            raise CollectionGateError(
+                "timed-out source controller status is not eligible for collection"
+            )
+    elif outcome in {
+        "preflight_error",
+        "submission_error_unknown",
+        "submission_version_unknown",
+        "cli_error",
+        "unknown_api_status",
+        "remote_terminal_success",
+        "remote_terminal_failure",
+        "output_retrieval_error",
+        "result_validation_error",
+        "success",
+        "status_query_error",
+    }:
+        raise IneligibleSource("source controller outcome is not a timeout")
+    else:
+        raise CollectionGateError("source controller outcome is unknown")
     return binding
 
 
@@ -327,9 +389,10 @@ def prepare(
     return source
 
 
-def finish(
-    source_dir: Path, output_dir: Path, provider_success: bool
-) -> dict[str, object]:
+def revalidate(
+    source_dir: Path,
+) -> tuple[dict[str, object], dict[str, object], dict[str, object]]:
+    """Recheck the exact prepared source attempt and its original artefact IDs."""
     collector = _context()
     source = _read_json(source_dir / "collection-source.json")
     if (
@@ -353,8 +416,16 @@ def finish(
         if _artifact_metadata(run_id, name, commit)["id"] != source[field]:
             raise CollectionGateError("original source artefact identity changed")
     binding = _validate_source_files(source_dir, source)
-    report = _read_json(output_dir / "kaggle-collection-report.json")
     state = _read_json(source_dir / "kaggle-controller-state.json")
+    return source, binding, state
+
+
+def finish(
+    source_dir: Path, output_dir: Path, provider_success: bool
+) -> dict[str, object]:
+    source, binding, state = revalidate(source_dir)
+    collector = str(source["collector_run_id"])
+    report = _read_json(output_dir / "kaggle-collection-report.json")
     if (
         not provider_success
         or report.get("success") is not True
@@ -386,6 +457,7 @@ def finish(
     _write_json(output_dir / "collection-receipt.json", receipt)
     summary_path = os.environ.get("GITHUB_STEP_SUMMARY")
     if summary_path:
+        commit = str(source["head_sha"])
         with Path(summary_path).open("a", encoding="utf-8") as stream:
             stream.write(
                 "## Delayed TPU evidence collected\n\n"

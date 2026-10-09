@@ -1,5 +1,7 @@
 """Validate original TPU evidence independently of a new collection attempt."""
 
+# pyright: reportPrivateUsage=false
+
 from __future__ import annotations
 
 import copy
@@ -148,6 +150,53 @@ def prepare(tmp_path: Path) -> Path:
     return path
 
 
+def test_schedule_context_requires_the_exact_canonical_master_workflow(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("GITHUB_EVENT_NAME", "schedule")
+    monkeypatch.setenv("GITHUB_REF", "refs/heads/master")
+    monkeypatch.setenv("GITHUB_REPOSITORY", gate.REPOSITORY)
+    monkeypatch.setenv(
+        "GITHUB_WORKFLOW_REF",
+        f"{gate.REPOSITORY}/.github/workflows/collect-tpu-periodic.yml@refs/heads/master",
+    )
+    monkeypatch.setenv("GITHUB_SHA", COLLECTOR_HEAD)
+    monkeypatch.setenv("GITHUB_RUN_ID", "990")
+    monkeypatch.setenv("GITHUB_RUN_ATTEMPT", "1")
+
+    assert gate._context() == "990.1"
+
+    for name, value in (
+        ("GITHUB_REF", "refs/heads/feature"),
+        ("GITHUB_REPOSITORY", "someone/jaxrenderer"),
+        (
+            "GITHUB_WORKFLOW_REF",
+            f"{gate.REPOSITORY}/.github/workflows/release-tpu.yml@refs/heads/master",
+        ),
+    ):
+        monkeypatch.setenv(name, value)
+        with pytest.raises(gate.CollectionGateError, match="scheduled collection"):
+            gate._context()
+        monkeypatch.setenv(
+            name,
+            value
+            if name == "GITHUB_WORKFLOW_REF"
+            else (
+                f"{gate.REPOSITORY}/.github/workflows/collect-tpu-periodic.yml@refs/heads/master"
+                if name == "GITHUB_WORKFLOW_REF"
+                else "refs/heads/master"
+                if name == "GITHUB_REF"
+                else gate.REPOSITORY
+            ),
+        )
+
+
+def test_manual_context_remains_supported_without_workflow_ref(
+    source: dict[str, Any],
+) -> None:
+    assert gate._context() == "990.1"
+
+
 def collected(tmp_path: Path) -> Path:
     output = tmp_path / "collected"
     output.mkdir(parents=True)
@@ -266,9 +315,39 @@ def test_prepare_rejects_duplicate_artifacts(
         prepare(tmp_path)
 
 
-def test_finish_separates_collection_from_release_credit(
+@pytest.mark.parametrize(
+    "outcome",
+    [
+        "preflight_error",
+        "submission_error_unknown",
+        "submission_version_unknown",
+        "cli_error",
+        "remote_terminal_failure",
+        "result_validation_error",
+    ],
+)
+def test_prepare_classifies_known_non_timeout_controller_results_as_ineligible(
+    source: dict[str, Any], tmp_path: Path, outcome: str
+) -> None:
+    source["controller_state"]["outcome"] = outcome
+    with pytest.raises(gate.IneligibleSource, match="not a timeout"):
+        prepare(tmp_path)
+
+
+def test_preflight_without_submitted_version_is_ineligible(
     source: dict[str, Any], tmp_path: Path
 ) -> None:
+    source["controller_state"].update(outcome="preflight_error", submitted_version=None)
+
+    with pytest.raises(gate.IneligibleSource, match="not a timeout"):
+        prepare(tmp_path)
+
+
+def test_finish_separates_collection_from_release_credit(
+    source: dict[str, Any], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    summary = tmp_path / "step-summary.md"
+    monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary))
     original, output = prepare(tmp_path), collected(tmp_path)
     receipt = gate.finish(original, output, True)
     assert receipt["binding"] == binding()
@@ -276,6 +355,7 @@ def test_finish_separates_collection_from_release_credit(
     assert receipt["validation_only"] is True
     assert receipt["release_gate_credit"] is False
     assert receipt["source_conclusion"] == "failure"
+    assert f"Original commit: `{HEAD}`" in summary.read_text(encoding="utf-8")
     assert (
         gate.release_tpu_gate.finish(original / "binding.json", output, True)["state"]
         == "failure"
@@ -357,7 +437,7 @@ def test_finish_rejects_invalid_controller_state(
     value_dict = json.loads(path.read_text())
     value_dict[field] = value
     path.write_text(json.dumps(value_dict), encoding="utf-8")
-    with pytest.raises(gate.CollectionGateError, match="timed-out submission"):
+    with pytest.raises(gate.CollectionGateError):
         gate.finish(original, output, True)
 
 
