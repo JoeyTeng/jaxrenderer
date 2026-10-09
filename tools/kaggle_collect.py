@@ -32,7 +32,6 @@ MAX_REDIRECTS = 3
 MAX_REPORT_ERROR = 400
 REQUIRED_FILES = {
     "result.json",
-    "diagnostics.log",
     "setup.log",
     "device-probe.log",
     "full-tests.log",
@@ -161,22 +160,32 @@ def _controller_identity(
         raise CollectionError("resume state has an unsupported controller schema")
     if state["binding"] != binding:
         raise CollectionError("resume state binding does not exactly match --binding")
+    submitted_version = state.get("submitted_version")
+    if type(submitted_version) is not int or submitted_version != 1:
+        raise CollectionError("resume state kernel identity or version is invalid")
+    kernel_id = state.get("kernel_id")
+    if not isinstance(kernel_id, str):
+        raise CollectionError("resume state kernel identity is invalid")
+    owner, _ = _kernel_identity(binding, kernel_id)
+    if owner != username:
+        raise CollectionError("resume state kernel identity does not match credentials")
+    return kernel_id, submitted_version
+
+
+def _kernel_identity(binding: dict[str, object], kernel_id: object) -> tuple[str, str]:
+    """Validate the binding-derived kernel ID independently of submission state."""
+    if not isinstance(kernel_id, str):
+        raise CollectionError("resume state kernel identity is invalid")
+    match = KERNEL_ID_RE.fullmatch(kernel_id)
+    if match is None:
+        raise CollectionError("resume state kernel identity is invalid")
     run_tag = hashlib.sha256(
         json.dumps(binding, sort_keys=True, separators=(",", ":")).encode()
     ).hexdigest()[:16]
-    kernel_id = state.get("kernel_id")
-    submitted_version = state.get("submitted_version")
-    if (
-        type(submitted_version) is not int
-        or submitted_version != 1
-        or not isinstance(kernel_id, str)
-        or re.fullmatch(
-            rf"{re.escape(username)}/jaxr-{run_tag}-[0-9a-f]{{10}}", kernel_id
-        )
-        is None
-    ):
-        raise CollectionError("resume state kernel identity or version is invalid")
-    return kernel_id, submitted_version
+    slug = match.group("slug")
+    if re.fullmatch(rf"jaxr-{run_tag}-[0-9a-f]{{10}}", slug) is None:
+        raise CollectionError("resume state kernel identity is invalid")
+    return match.group("username"), slug
 
 
 def _versioned_metadata(api: Any, request_type: Any, username: str, slug: str) -> int:

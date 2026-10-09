@@ -12,7 +12,7 @@ import subprocess
 import sys
 import zipfile
 
-from tools import accelerator_gate, kaggle_ci, release_tpu_gate
+from tools import accelerator_gate, kaggle_ci, kaggle_collect, release_tpu_gate
 
 REPOSITORY = release_tpu_gate.REPOSITORY
 SOURCE_WORKFLOW = ".github/workflows/pypi.yml"
@@ -292,6 +292,7 @@ def _download_member(artifact_id: int, member_name: str, destination: Path) -> N
 def _validate_source_files(
     source_dir: Path, source: dict[str, object]
 ) -> dict[str, object]:
+    source_identity = f"{source['source_run_id']}.{source['source_attempt']}"
     binding = release_tpu_gate._validate_binding(
         _read_json(source_dir / "binding.json")
     )
@@ -302,13 +303,42 @@ def _validate_source_files(
         "run_id": f"{source['source_run_id']}.{source['source_attempt']}",
     }
     if binding != expected:
-        raise CollectionGateError("source binding does not match the original attempt")
-    state = _read_json(source_dir / "kaggle-controller-state.json")
-    if (
-        set(state) != kaggle_ci.CONTROLLER_STATE_FIELDS
-        or state.get("binding") != binding
-    ):
-        raise CollectionGateError("source controller identity or schema is invalid")
+        raise CollectionGateError(
+            f"source {source_identity} binding does not match the original attempt"
+        )
+    state_path = source_dir / "kaggle-controller-state.json"
+    state = _read_json(state_path)
+    state_fields = set(state)
+    if state_fields == kaggle_ci.LEGACY_CONTROLLER_STATE_FIELDS:
+        if state.get("binding") != binding:
+            raise CollectionGateError(
+                f"source {source_identity} legacy controller binding is invalid"
+            )
+        submitted_version = state.get("submitted_version")
+        if submitted_version is not None and (
+            type(submitted_version) is not int or submitted_version != 1
+        ):
+            raise CollectionGateError(
+                f"source {source_identity} legacy controller version is invalid"
+            )
+        kernel_id = state.get("kernel_id")
+        try:
+            kaggle_collect._kernel_identity(binding, kernel_id)
+        except kaggle_collect.CollectionError as error:
+            raise CollectionGateError(
+                f"source {source_identity} legacy controller identity is invalid"
+            ) from error
+        raise IneligibleSource(
+            f"source {source_identity} legacy controller state has no timeout evidence"
+        )
+    if state_fields != kaggle_ci.CONTROLLER_STATE_FIELDS:
+        raise CollectionGateError(
+            f"source {source_identity} controller state schema is unsupported"
+        )
+    if state.get("binding") != binding:
+        raise CollectionGateError(
+            f"source {source_identity} controller binding is invalid"
+        )
     outcome = state.get("outcome")
     if outcome in {"queue_timeout", "execution_timeout"}:
         if (
@@ -316,14 +346,14 @@ def _validate_source_files(
             or state["submitted_version"] != 1
         ):
             raise CollectionGateError(
-                "timed-out source controller did not submit version 1"
+                f"source {source_identity} timed-out controller did not submit version 1"
             )
         if (
             state.get("status")
             not in kaggle_ci.IN_PROGRESS | kaggle_ci.TERMINAL_SUCCESS
         ):
             raise CollectionGateError(
-                "timed-out source controller status is not eligible for collection"
+                f"source {source_identity} timed-out controller status is not eligible for collection"
             )
     elif outcome in {
         "preflight_error",
@@ -338,9 +368,13 @@ def _validate_source_files(
         "success",
         "status_query_error",
     }:
-        raise IneligibleSource("source controller outcome is not a timeout")
+        raise IneligibleSource(
+            f"source {source_identity} controller outcome is not a timeout"
+        )
     else:
-        raise CollectionGateError("source controller outcome is unknown")
+        raise CollectionGateError(
+            f"source {source_identity} controller outcome is unknown"
+        )
     return binding
 
 

@@ -23,7 +23,6 @@ BINDING: dict[str, object] = {
 TOKEN = "codex_synth_v1_api_key_a"
 FILES = [
     "result.json",
-    "diagnostics.log",
     "setup.log",
     "device-probe.log",
     "full-tests.log",
@@ -210,6 +209,19 @@ def test_collect_requests_version_one_and_keeps_frozen_result_binding(
     )
 
 
+def test_optional_diagnostics_log_is_collected_when_present(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _install_fake_api(monkeypatch, files=[*FILES, "diagnostics.log"])
+    _install_files(monkeypatch)
+    state, output = _prepare(monkeypatch, tmp_path)
+
+    report = collector.collect(BINDING, state, output)
+
+    assert report["success"] is True
+    assert (output / "diagnostics.log").is_file()
+
+
 @pytest.mark.parametrize(
     ("remote_status", "outcome"),
     [
@@ -267,7 +279,11 @@ def test_collect_real_sdk_cancellation_enum_transitions(
 
 @pytest.mark.parametrize(
     ("kernel_id", "version"),
-    [("other/jaxr-invalid-0123456789", 1), (_kernel_id(), True)],
+    [
+        ("other/jaxr-invalid-0123456789", 1),
+        (_kernel_id(), True),
+        (_kernel_id(), None),
+    ],
 )
 def test_resume_state_identity_mismatch_fails_before_sdk(
     monkeypatch: pytest.MonkeyPatch,
@@ -277,6 +293,11 @@ def test_resume_state_identity_mismatch_fails_before_sdk(
 ) -> None:
     state, output = _prepare(monkeypatch, tmp_path)
     _resume_state(state, kernel_id=kernel_id, version=version)
+
+    def fail_if_sdk_load_is_attempted(token: str) -> Any:
+        pytest.fail("invalid resume identity must be rejected before loading the SDK")
+
+    monkeypatch.setattr(collector, "_load_sdk", fail_if_sdk_load_is_attempted)
 
     report = collector.collect(BINDING, state, output)
 
@@ -363,6 +384,45 @@ def test_duplicate_and_missing_outputs_fail_closed(
     assert missing_report["success"] is False
     assert "missing required files" in missing_report["last_error"]
     assert api2.output_requests
+
+
+@pytest.mark.parametrize(
+    "missing",
+    [
+        "result.json",
+        "setup.log",
+        "device-probe.log",
+        "full-tests.log",
+        "render-gradient-tests.log",
+        "render-artifacts/numeric-report.json",
+    ],
+)
+def test_successful_output_still_requires_all_result_logs_and_report(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, missing: str
+) -> None:
+    _install_fake_api(monkeypatch, files=[name for name in FILES if name != missing])
+    state, output = _prepare(monkeypatch, tmp_path)
+
+    report = collector.collect(BINDING, state, output)
+
+    assert report["success"] is False
+    assert "missing required files" in report["last_error"]
+    assert missing in report["last_error"]
+
+
+def test_successful_output_still_requires_a_render_png(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _install_fake_api(
+        monkeypatch,
+        files=[name for name in FILES if not name.lower().endswith(".png")],
+    )
+    state, output = _prepare(monkeypatch, tmp_path)
+
+    report = collector.collect(BINDING, state, output)
+
+    assert report["success"] is False
+    assert report["last_error"] == "Kaggle output was missing render PNG files"
 
 
 def test_bad_kernel_metadata_version_fails_closed(
