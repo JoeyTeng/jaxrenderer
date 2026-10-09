@@ -61,6 +61,13 @@ repos:
         pass_filenames: false
         stages: [manual]
 
+      - id: pyright-core-types
+        name: Pyright core types
+        entry: uv run --no-sync --python 3.14 pyright --warnings renderer/types.py
+        language: system
+        files: ^(pyproject\.toml|renderer/types\.py)$
+        pass_filenames: false
+
       - id: cspell
         name: cspell
         entry: cspell-cli

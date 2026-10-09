@@ -97,6 +97,8 @@ order-by-type = true
 include = ["renderer", "examples", "test_resources", "tests"]
 exclude = ["typings/**", ".*/**", "**/node_modules", "**/__pycache__"]
 typeCheckingMode = "strict"
+venvPath = "."
+venv = ".venv"
 
 pythonVersion = "3.14"
 pythonPlatform = "All"
