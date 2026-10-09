@@ -326,7 +326,7 @@ def test_discover_skips_only_explicitly_ineligible_sources(
         collection_gate,
         "prepare",
         lambda *args, **kwargs: (_ for _ in ()).throw(
-            collection_gate.CollectionGateError("GitHub artifact lookup failed")
+            collection_gate.CollectionGateError("GitHub artefact lookup failed")
         ),
     )
     with pytest.raises(collection_gate.CollectionGateError, match="lookup failed"):

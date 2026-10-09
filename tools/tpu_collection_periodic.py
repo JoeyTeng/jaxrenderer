@@ -138,7 +138,7 @@ def _identity_run(run: object, *, source: bool) -> dict[str, object]:
         run.get("event") not in {"schedule", "workflow_dispatch"}
         or run.get("head_branch") != "master"
     ):
-        raise PeriodicError("terminal artifact owner is not a master collector run")
+        raise PeriodicError("terminal artefact owner is not a master collector run")
     return run
 
 
@@ -226,14 +226,14 @@ def _terminal_artifact(
         or not isinstance(page.get("artifacts"), list)
         or page["total_count"] != len(page["artifacts"])
     ):
-        raise PeriodicError("terminal artifact inventory is incomplete or too large")
+        raise PeriodicError("terminal artefact inventory is incomplete or too large")
     matches = [
         item
         for item in page["artifacts"]
         if isinstance(item, dict) and item.get("name") == artifact_name
     ]
     if len(matches) > 1:
-        raise PeriodicError("multiple terminal artifacts have the same source identity")
+        raise PeriodicError("multiple terminal artefacts have the same source identity")
     if not matches:
         return None
     item = matches[0]
@@ -251,7 +251,7 @@ def _terminal_artifact(
         or not accelerator_gate.SHA_RE.fullmatch(owner["head_sha"])
     ):
         raise PeriodicError(
-            "terminal artifact identity, size or availability is invalid"
+            "terminal artefact identity, size or availability is invalid"
         )
     return item
 
@@ -276,7 +276,7 @@ def _read_terminal(
         collection_gate._download_member(artifact["id"], "periodic-terminal.json", path)
         record = collection_gate._read_json(path)
     if set(record) != TERMINAL_FIELDS:
-        raise PeriodicError("terminal artifact has an unsupported schema")
+        raise PeriodicError("terminal artefact has an unsupported schema")
     collector_attempt = record.get("collector_attempt")
     if (
         not isinstance(collector_attempt, str)
@@ -285,7 +285,7 @@ def _read_terminal(
         or record.get("collector_sha") != collector_sha
     ):
         raise PeriodicError(
-            "terminal artifact collector identity does not match its owner"
+            "terminal artefact collector identity does not match its owner"
         )
     route = (
         f"repos/{REPOSITORY}/actions/runs/{collector_id}/attempts/{collector_attempt}"
@@ -299,7 +299,7 @@ def _read_terminal(
         or run.get("status") != "completed"
         or run.get("conclusion") not in {"success", "failure"}
     ):
-        raise PeriodicError("terminal artifact owner attempt is not complete and exact")
+        raise PeriodicError("terminal artefact owner attempt is not complete and exact")
     release_tpu_gate._verify_master_history(str(collector_sha))
     if (
         record.get("terminal") is not True
@@ -317,7 +317,7 @@ def _read_terminal(
         or artifact.get("name") != name
     ):
         raise PeriodicError(
-            "terminal artifact does not match its exact source and collector"
+            "terminal artefact does not match its exact source and collector"
         )
     outcome = record.get("outcome")
     remote_status = record.get("remote_status")
@@ -330,7 +330,7 @@ def _read_terminal(
         if remote_status not in kaggle_ci.TERMINAL_FAILURE:
             raise PeriodicError("failure terminal record has no failed remote status")
     else:
-        raise PeriodicError("terminal artifact outcome is not terminal")
+        raise PeriodicError("terminal artefact outcome is not terminal")
     return record
 
 
