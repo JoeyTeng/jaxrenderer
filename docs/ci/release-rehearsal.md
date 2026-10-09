@@ -47,3 +47,20 @@ It never resubmits. It cannot make the old failed workflow attempt pass or
 satisfy a new release attempt's TPU gate. Before another submission, confirm the
 previous notebook has ended: an Actions timeout only stops waiting and does not
 prove the remote run stopped.
+
+## Collecting delayed TPU results
+
+For a rehearsal whose CPU, build and GPU gates passed but whose TPU wait timed out, use the original publishing run ID and attempt with the full commit SHA to ask the manual collector to retrieve the saved Kaggle state and result:
+
+```sh
+gh workflow run collect-tpu.yml --ref master \
+  -f source_run_id=SOURCE_RUN_ID \
+  -f source_attempt=SOURCE_ATTEMPT \
+  -f commit=FULL_COMMIT_SHA
+```
+
+The collector revalidates the original run and its bound source artefacts, then makes a bounded status and result query. It does not push a notebook or consume new TPU submission quota. A pending result fails the collection job; dispatch it again later to check for the delayed result. The receipt is evidence for the original commit only: it does not change the original run's failed conclusion, complete a later release attempt or trigger publication. A later release still has to pass its own fresh gates.
+
+After `collect-tpu-periodic.yml` has reached `master`, it also checks eligible source runs every 30 minutes. GitHub Actions may delay scheduled runs, so the interval is not a guaranteed completion time. It scans only `pypi.yml` runs created in the previous seven days and examines each run's latest attempt. The original CPU, build and GPU gates must have passed, and the TPU result must be a proven timeout. The seven-day window limits automatic discovery; manual collection can still use a source run while its original binding and controller artefacts remain available (30 days).
+
+Pending remote work is normal, remains non-terminal and does not fail the periodic job, so a later scan can check it again. A verified success or explicit remote failure creates a terminal marker and is skipped by later scans. An explicit remote failure makes that collection job fail once; API, authentication or validation errors fail without creating a terminal marker. Discovery artefacts and each collection's full evidence are retained for 30 days. The workflow only checks an existing Kaggle run: it does not submit a notebook, spend new TPU quota, alter the original failed Actions attempt, satisfy a later release's gate or publish a package. The GitHub token is not placed in the notebook.

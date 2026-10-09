@@ -1,0 +1,89 @@
+name: Collect delayed TPU results
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_run_id:
+        description: Original publishing rehearsal run ID
+        required: true
+        type: string
+      source_attempt:
+        description: Original TPU source attempt
+        required: true
+        default: "1"
+        type: string
+      commit:
+        description: Full commit SHA validated by the original run
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: tpu-collection-${{ inputs.source_run_id }}-${{ inputs.source_attempt }}
+  cancel-in-progress: false
+
+jobs:
+  collect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: kaggle-tpu
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.14"
+      - name: Bind the original publishing run and retrieve its saved state
+        id: prepare
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_RUN_ID: ${{ inputs.source_run_id }}
+          SOURCE_ATTEMPT: ${{ inputs.source_attempt }}
+          SOURCE_COMMIT: ${{ inputs.commit }}
+        run: >-
+          python -m tools.tpu_collection_gate prepare
+          --source-run "$SOURCE_RUN_ID"
+          --source-attempt "$SOURCE_ATTEMPT"
+          --commit "$SOURCE_COMMIT"
+          --output-dir collection-source --github-output "$GITHUB_OUTPUT"
+      - uses: astral-sh/setup-uv@v10.2.0
+        with:
+          version: "0.12.20"
+          enable-cache: true
+      - name: Install the locked Kaggle controller
+        run: uv sync --locked --only-group ci-kaggle --python 3.14
+      - name: Collect the saved Kaggle TPU result
+        id: provider
+        timeout-minutes: 5
+        env:
+          KAGGLE_API_TOKEN: ${{ secrets.KAGGLE_API_TOKEN }}
+          KAGGLE_USERNAME: ${{ vars.KAGGLE_USERNAME }}
+        run: >-
+          .venv/bin/python -u -m tools.kaggle_collect
+          --binding collection-source/binding.json
+          --resume-state collection-source/kaggle-controller-state.json
+          --output-dir collection-artifacts
+      - name: Validate the collected result and write its receipt
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PROVIDER_SUCCESS: ${{ steps.provider.outcome == 'success' }}
+        run: >-
+          python -m tools.tpu_collection_gate finish
+          --source-dir collection-source --output-dir collection-artifacts
+          --provider-success "$PROVIDER_SUCCESS"
+      - name: Upload TPU collection evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: tpu-collection-${{ inputs.commit }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            collection-source/
+            collection-artifacts/
+          if-no-files-found: warn
+          retention-days: 30
