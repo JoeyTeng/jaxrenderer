@@ -41,14 +41,14 @@ jobs:
         run: uv sync --locked --all-groups --python 3.14
 
       - name: Check import sorting with Ruff
-        run: uv run --no-sync --python 3.14 ruff check --select I assets renderer examples test_resources tests tools
+        run: uv run --no-sync --python 3.14 ruff check --no-respect-gitignore --select I assets renderer examples test_resources tests tools
 
       - name: Check formatting with Ruff
         # The checked-in Matplotlib stubs under typings/ follow upstream formatting.
-        run: uv run --no-sync --python 3.14 ruff format --check assets renderer examples test_resources tests tools
+        run: uv run --no-sync --python 3.14 ruff format --no-respect-gitignore --check assets renderer examples test_resources tests tools
 
       - name: Check Ruff lint
-        run: uv run --no-sync --python 3.14 ruff check assets renderer examples test_resources tests tools
+        run: uv run --no-sync --python 3.14 ruff check --no-respect-gitignore assets renderer examples test_resources tests tools
 
   check:
     runs-on: ubuntu-latest

@@ -239,7 +239,7 @@ def test_cpu_reuse_includes_the_full_matrix_render_and_minimum_numpy_gates() -> 
         "lint-base" not in load_workflow("checks.yml")["on"]["workflow_call"]["inputs"]
     )
     assert step_named(lint, "Check Ruff lint")["run"].startswith(
-        "uv run --no-sync --python 3.14 ruff check "
+        "uv run --no-sync --python 3.14 ruff check --no-respect-gitignore "
     )
 
     matrix = checks["check"]
