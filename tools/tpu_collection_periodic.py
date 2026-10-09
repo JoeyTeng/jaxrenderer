@@ -297,7 +297,7 @@ def _read_terminal(
         or run["head_sha"] != collector_sha
         or run.get("run_attempt") != int(collector_attempt)
         or run.get("status") != "completed"
-        or run.get("conclusion") not in {"success", "failure"}
+        or run.get("conclusion") not in {"success", "failure", "cancelled", "timed_out"}
     ):
         raise PeriodicError("terminal artefact owner attempt is not complete and exact")
     release_tpu_gate._verify_master_history(str(collector_sha))

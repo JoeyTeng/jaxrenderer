@@ -361,11 +361,20 @@ def test_discover_rejects_foreign_or_wrong_workflow_inventory(
         periodic.discover(tmp_path / "discovery", tmp_path / "github-output")
 
 
-def test_terminal_marker_validates_exact_owner_attempt_and_allows_mixed_matrix_result(
+@pytest.mark.parametrize("owner_conclusion", ["cancelled", "timed_out"])
+@pytest.mark.parametrize(
+    ("outcome", "remote_status"),
+    [("success", "complete"), ("remote_failure", "failed")],
+)
+def test_terminal_marker_accepts_post_upload_owner_cancellation_and_timeout(
     monkeypatch: pytest.MonkeyPatch,
+    owner_conclusion: str,
+    outcome: str,
+    remote_status: str,
 ) -> None:
-    record = _terminal_record()
+    record = _terminal_record(outcome=outcome, remote_status=remote_status)
     exact_attempt = _collector_run(attempt=int(COLLECTOR_ATTEMPT))
+    exact_attempt["conclusion"] = owner_conclusion
 
     def api(route: str, body: object = None) -> Any:
         assert body is None
@@ -395,7 +404,51 @@ def test_terminal_marker_validates_exact_owner_attempt_and_allows_mixed_matrix_r
         kernel_id=str(_controller_state()["kernel_id"]),
         budget=periodic._Budget(),
     )
-    assert loaded["outcome"] == "success"
+    assert loaded["outcome"] == outcome
+
+
+@pytest.mark.parametrize(
+    "run_changes",
+    [
+        {"status": "in_progress", "conclusion": None},
+        {"repository": {"full_name": "someone/else"}},
+        {"run_attempt": int(COLLECTOR_ATTEMPT) + 1},
+        {"head_sha": "c" * 40},
+    ],
+)
+def test_terminal_marker_rejects_running_or_mismatched_owner_attempt(
+    monkeypatch: pytest.MonkeyPatch,
+    run_changes: dict[str, object],
+) -> None:
+    exact_attempt = _collector_run()
+    exact_attempt.update(run_changes)
+
+    def api(route: str, body: object = None) -> Any:
+        if route.endswith(
+            f"/actions/runs/{COLLECTOR_RUN}/attempts/{COLLECTOR_ATTEMPT}"
+        ):
+            return exact_attempt
+        raise AssertionError(f"unexpected API route: {route}")
+
+    monkeypatch.setattr(accelerator_gate, "_gh_api", api)
+    monkeypatch.setattr(
+        collection_gate,
+        "_download_member",
+        lambda artifact_id, member, destination: destination.write_text(
+            json.dumps(_terminal_record()), encoding="utf-8"
+        ),
+    )
+    monkeypatch.setattr(release_tpu_gate, "_verify_master_history", lambda commit: None)
+    with pytest.raises(periodic.PeriodicError):
+        periodic._read_terminal(
+            _terminal_artifact(),
+            source_run_id=SOURCE_RUN,
+            source_attempt=SOURCE_ATTEMPT,
+            commit=SOURCE_SHA,
+            binding=_binding(),
+            kernel_id=str(_controller_state()["kernel_id"]),
+            budget=periodic._Budget(),
+        )
 
 
 def test_terminal_marker_uses_recorded_attempt_after_owner_was_rerun(
@@ -651,13 +704,45 @@ def test_collect_source_collection_error_writes_no_terminal_and_can_retry(
     assert attempts == 2
 
 
-def test_collect_source_is_idempotent_when_terminal_is_already_valid(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+@pytest.mark.parametrize(
+    ("outcome", "remote_status"),
+    [("success", "complete"), ("remote_failure", "failed")],
+)
+def test_collect_source_skips_provider_when_terminal_marker_exists(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    outcome: str,
+    remote_status: str,
 ) -> None:
     _set_periodic_context(monkeypatch)
     _patch_prepare(monkeypatch)
-    terminal = _terminal_record()
-    monkeypatch.setattr(periodic, "_has_terminal", lambda *args: terminal)
+    terminal = _terminal_record(outcome=outcome, remote_status=remote_status)
+    owner_attempt = _collector_run()
+    owner_attempt["conclusion"] = "cancelled"
+
+    def api(route: str, body: object = None) -> Any:
+        if route.endswith(
+            f"/actions/runs/{COLLECTOR_RUN}/attempts/{COLLECTOR_ATTEMPT}"
+        ):
+            return owner_attempt
+        if route.endswith(f"/compare/{COLLECTOR_SHA}...master"):
+            return {"status": "ahead", "base_commit": {"sha": COLLECTOR_SHA}}
+        raise AssertionError(f"unexpected API route: {route}")
+
+    monkeypatch.setattr(accelerator_gate, "_gh_api", api)
+    monkeypatch.setattr(
+        periodic,
+        "_terminal_artifact",
+        lambda source_run, name, budget: _terminal_artifact(),
+    )
+    monkeypatch.setattr(
+        collection_gate,
+        "_download_member",
+        lambda artifact_id, member, destination: destination.write_text(
+            json.dumps(terminal), encoding="utf-8"
+        ),
+    )
+    monkeypatch.setattr(release_tpu_gate, "_verify_master_history", lambda commit: None)
     monkeypatch.setattr(
         kaggle_collect,
         "collect",

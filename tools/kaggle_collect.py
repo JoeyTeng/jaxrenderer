@@ -21,7 +21,7 @@ from tools.kaggle_ci import (
     _validate_downloaded_result,
 )
 
-VERSION = "1"
+VERSION = "v1"
 REQUEST_TIMEOUT = (8, 25)
 MAX_API_RESPONSE_BYTES = 8 * 1024 * 1024
 MAX_FILE_BYTES = 20 * 1024 * 1024
@@ -208,12 +208,15 @@ def _remote_status(api: Any, request_type: Any, username: str, slug: str) -> str
     raw = raw.rsplit(".", maxsplit=1)[-1].strip().casefold()
     if raw.startswith("kernelworkerstatus_"):
         raw = raw.removeprefix("kernelworkerstatus_")
+    if raw == "cancel_acknowledged":
+        raw = "cancelled"
     if raw not in {
         "queued",
         "running",
         "starting",
         "compiling",
         "initializing",
+        "cancel_requested",
         "complete",
         "completed",
         "success",
@@ -378,7 +381,7 @@ def collect(
         "requested_version": 1,
         "version_verified": False,
         "version_verification_rationale": (
-            "Status and output requests explicitly specify versionLabel=1; Kaggle "
+            "Status and output requests explicitly specify versionLabel=v1; Kaggle "
             "responses do not echo a session or version identity. Metadata current_version_number "
             "is checked before status and after output collection."
         ),
@@ -417,7 +420,14 @@ def collect(
         _versioned_metadata(api, get_request, username, slug)
         status = _remote_status(api, status_request, username, slug)
         report.update(status=status, remote_status=status, version_verified=True)
-        if status in {"queued", "running", "starting", "compiling", "initializing"}:
+        if status in {
+            "queued",
+            "running",
+            "starting",
+            "compiling",
+            "initializing",
+            "cancel_requested",
+        }:
             report.update(outcome="pending", success=False)
         elif status in {
             "error",

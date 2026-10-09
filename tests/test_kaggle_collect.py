@@ -95,7 +95,7 @@ class _Request:
 
 
 class _Api:
-    def __init__(self, files: list[str], status: str = "COMPLETE") -> None:
+    def __init__(self, files: list[str], status: Any = "COMPLETE") -> None:
         self.files = files
         self.status = status
         self.metadata_requests: list[_Request] = []
@@ -139,7 +139,7 @@ def _success_result() -> dict[str, Any]:
 def _install_fake_api(
     monkeypatch: pytest.MonkeyPatch,
     files: list[str] | None = None,
-    status: str = "COMPLETE",
+    status: Any = "COMPLETE",
 ) -> _Api:
     api = _Api(FILES if files is None else files, status)
     client = SimpleNamespace(kernels=SimpleNamespace(kernels_api_client=api))
@@ -197,11 +197,11 @@ def test_collect_requests_version_one_and_keeps_frozen_result_binding(
     assert report["version_verified"] is True
     assert report["outcome"] == "success"
     assert len(api.metadata_requests) == 2
-    assert all(request.version_label == "1" for request in api.metadata_requests)
+    assert all(request.version_label == "v1" for request in api.metadata_requests)
     assert len(api.status_requests) == 1
-    assert api.status_requests[0].version_label == "1"
+    assert api.status_requests[0].version_label == "v1"
     assert len(api.output_requests) == 1
-    assert api.output_requests[0].version_label == "1"
+    assert api.output_requests[0].version_label == "v1"
     result = json.loads((output / "result.json").read_text(encoding="utf-8"))
     assert result["head_sha"] == BINDING["head_sha"]
     assert (
@@ -212,7 +212,13 @@ def test_collect_requests_version_one_and_keeps_frozen_result_binding(
 
 @pytest.mark.parametrize(
     ("remote_status", "outcome"),
-    [("QUEUED", "pending"), ("RUNNING", "pending"), ("ERROR", "remote_failure")],
+    [
+        ("QUEUED", "pending"),
+        ("RUNNING", "pending"),
+        ("ERROR", "remote_failure"),
+        ("CANCEL_REQUESTED", "pending"),
+        ("CANCEL_ACKNOWLEDGED", "remote_failure"),
+    ],
 )
 def test_collect_pending_and_remote_failure_do_not_fetch_outputs(
     monkeypatch: pytest.MonkeyPatch,
@@ -229,6 +235,34 @@ def test_collect_pending_and_remote_failure_do_not_fetch_outputs(
     assert report["success"] is False
     assert api.output_requests == []
     assert (output / "kaggle-collection-report.json").is_file()
+
+
+@pytest.mark.parametrize(
+    ("member", "expected_remote_status", "expected_outcome"),
+    [
+        ("CANCEL_REQUESTED", "cancel_requested", "pending"),
+        ("CANCEL_ACKNOWLEDGED", "cancelled", "remote_failure"),
+    ],
+)
+def test_collect_real_sdk_cancellation_enum_transitions(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    member: str,
+    expected_remote_status: str,
+    expected_outcome: str,
+) -> None:
+    enum_module = pytest.importorskip("kagglesdk.kernels.types.kernels_enums")
+    status = getattr(enum_module.KernelWorkerStatus, member)
+    api = _install_fake_api(monkeypatch, status=status)
+    state, output = _prepare(monkeypatch, tmp_path)
+
+    report = collector.collect(BINDING, state, output)
+
+    assert report["remote_status"] == expected_remote_status
+    assert report["outcome"] == expected_outcome
+    assert report["success"] is False
+    assert api.output_requests == []
+    assert api.status_requests[0].version_label == "v1"
 
 
 @pytest.mark.parametrize(
@@ -317,7 +351,7 @@ def test_duplicate_and_missing_outputs_fail_closed(
 
     assert duplicate_report["success"] is False
     assert "duplicate file names" in duplicate_report["last_error"]
-    assert api.output_requests[0].version_label == "1"
+    assert api.output_requests[0].version_label == "v1"
 
     state2 = tmp_path / "resume-2.json"
     _resume_state(state2)
@@ -451,9 +485,9 @@ def test_sdk_uses_explicit_production_environment_and_serializes_version_label(
         request = request_type()
         request.user_name = "joey"
         request.kernel_slug = "jaxr-test-0123456789"
-        request.version_label = "1"
+        request.version_label = "v1"
         serialized = request_type.to_dict(request)
-        assert serialized["versionLabel"] == "1"
+        assert serialized["versionLabel"] == "v1"
     client.__exit__(None, None, None)
 
 
