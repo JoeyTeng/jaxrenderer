@@ -47,3 +47,18 @@ It never resubmits. It cannot make the old failed workflow attempt pass or
 satisfy a new release attempt's TPU gate. Before another submission, confirm the
 previous notebook has ended: an Actions timeout only stops waiting and does not
 prove the remote run stopped.
+
+## Collecting delayed TPU results
+
+For a rehearsal whose CPU, build and GPU gates passed but whose TPU wait timed out, use the original publishing run ID and attempt with the full commit SHA to ask the manual collector to retrieve the saved Kaggle state and result:
+
+```sh
+gh workflow run collect-tpu.yml --ref master \
+  -f source_run_id=SOURCE_RUN_ID \
+  -f source_attempt=SOURCE_ATTEMPT \
+  -f commit=FULL_COMMIT_SHA
+```
+
+The collector revalidates the original run and its bound source artefacts, then makes a bounded status and result query. It does not push a notebook or consume new TPU submission quota. A pending result fails the collection job; dispatch it again later to check for the delayed result. The receipt is evidence for the original commit only: it does not change the original run's failed conclusion, complete a later release attempt or trigger publication. A later release still has to pass its own fresh gates.
+
+The original binding and controller artefacts are retained for 30 days, so collect while they are available. The collector retains its evidence artefacts for 30 days as well.

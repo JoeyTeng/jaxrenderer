@@ -65,9 +65,13 @@ gh workflow run release-gpu.yml --ref master -f commit=FULL_COMMIT_SHA
 
 These manual entries help diagnose account and device problems before a release. Inspect their device reports, numerical metrics and test logs. They do not publish packages or replace the automatic checks in the publishing run. A changed candidate SHA requires a new confirmation. No `accelerator/tpu` PR check is created.
 
+### Collecting delayed TPU results
+
+When a publishing rehearsal passed its CPU, build and GPU gates but its TPU wait timed out, dispatch [Collect delayed TPU results](release-rehearsal.md#collecting-delayed-tpu-results) from `master` with the original workflow run ID, TPU source attempt and full candidate SHA. The collector validates the original run evidence and checks that run's saved Kaggle state. It never submits another notebook, changes the old run's conclusion or publishes a package. A pending result fails closed; dispatch the collector again later to check for the delayed result.
+
 Kaggle documents TPU selection via its CLI, but an [open upstream issue](https://github.com/Kaggle/kaggle-cli/issues/1197) reports submissions that receive the wrong runtime. A real TPU run is required to confirm a release. Account configuration and mocked controller tests alone do not establish accelerator compatibility.
 
-The initial provider validation passed on a Modal Tesla T4 with Python 3.14.7, JAX 0.11.2 and NumPy 2.5.3, including the full test suite and all four render and gradient regressions. The Kaggle submission installed its dependencies but failed TPU initialisation with `No jellyfish device found`; its tests did not start. A successful live Kaggle run proving TPU allocation and passing the regressions remains outstanding.
+In [publishing rehearsal run 37848608473, attempt 1](https://github.com/JoeyTeng/jaxrenderer/actions/runs/37848608473/attempts/1), the CPU, build and Modal T4 gates passed, but the Actions TPU queue wait timed out. The saved Kaggle notebook later completed on a genuine v5e-8 TPU: all 149 tests and four render and gradient regressions passed, cube and head image errors were zero, and the gradient relative error was `0.00012450704850647037` (163.5 seconds on the remote run). The remote Kaggle result was inspected in the browser. The original Actions attempt remains failed and no package was published. A later release still requires its own fresh gates.
 
 ## Render regression
 
