@@ -4,7 +4,7 @@ The GitHub Actions workflow tests Python 3.12–3.14 on Linux using the locked d
 
 Run `uv run ruff check assets renderer examples test_resources tests tools` to run the same zero-violation lint gate locally. Ruff uses the rules and ignores in `pyproject.toml`.
 
-The Linux job runs strict Pyright from the uv lockfile on Python 3.14. Its diagnostics remain visible, but the check is advisory until the existing JAX typing issues are resolved. A dedicated `linux-render-regression` job also runs the CPU render and gradient regressions on Python 3.14 with the locked dependencies.
+The required Python 3.14 lint job also runs strict Pyright with warnings enabled on `renderer/types.py`; this core module must have no errors or warnings. The full-repository strict Pyright run remains advisory, with its diagnostics visible while broader JAX typing issues are addressed. A dedicated `linux-render-regression` job also runs the CPU render and gradient regressions on Python 3.14 with the locked dependencies.
 
 ## Provider checks
 
@@ -41,7 +41,7 @@ gh workflow run accelerators.yml --ref master -f pr=PR_NUMBER
 
 ### Publishing a release
 
-Publishing a GitHub Release starts `Build, validate and publish`. The workflow freezes the tag's full commit SHA, requires that commit to be in `master` history, and checks that the tag matches the package version. It reuses the ordinary CI gates: Ruff, Python 3.12–3.14 tests, Linux/macOS render and gradient regressions, and the isolated NumPy `2.1.3` compatibility check. Ruff checks the frozen candidate directly; Pyright remains advisory.
+Publishing a GitHub Release starts `Build, validate and publish`. The workflow freezes the tag's full commit SHA, requires that commit to be in `master` history, and checks that the tag matches the package version. It reuses the ordinary CI gates: Ruff, strict Pyright on `renderer/types.py`, Python 3.12–3.14 tests, Linux/macOS render and gradient regressions, and the isolated NumPy `2.1.3` compatibility check. Ruff and the core type gate check the frozen candidate directly; full-repository Pyright remains advisory.
 
 The package is built once and its installed wheel is smoke-tested. Only after CPU CI and the build pass do Modal GPU and Kaggle TPU confirmation run in parallel. Each validates the same frozen SHA and workflow attempt, genuine devices and the existing numerical tolerances. Failure, cancellation, timeout, missing reports or insufficient free quota block PyPI publication; there is no paid fallback or automatic retry.
 

@@ -1,4 +1,4 @@
-from typing import Any, Generic, TypeVar, Union, cast
+from typing import Any, Generic, Protocol, TypeVar, Union, cast
 
 import jax
 import jax.lax as lax
@@ -57,9 +57,9 @@ NumV: TypeAlias = Num[Array, ""]
 """JAX Array with single num value.""" ""
 
 
-TRUE_ARRAY: BoolV = lax.full((), True, dtype=jnp.bool_)  # pyright: ignore
-FALSE_ARRAY: BoolV = lax.full((), False, dtype=jnp.bool_)  # pyright: ignore
-INF_ARRAY: FloatV = lax.full((), jnp.inf)  # pyright: ignore
+TRUE_ARRAY: BoolV = lax.full((), True, dtype=jnp.bool_)
+FALSE_ARRAY: BoolV = lax.full((), False, dtype=jnp.bool_)
+INF_ARRAY: FloatV = lax.full((), jnp.inf)
 
 Index: TypeAlias = Integer[Array, ""]
 
@@ -95,6 +95,22 @@ SpecularMap: TypeAlias = Float[Array, "textureWidth textureHeight"]
 NormalMap: TypeAlias = Float[Array, "textureWidth textureHeight 3"]
 
 _DtypeT = TypeVar("_DtypeT", bound=Union[JaxFloating, JaxInteger, int])
+_DtypeInfoT_co = TypeVar(
+    "_DtypeInfoT_co", bound=Union[JaxFloating, JaxInteger, int], covariant=True
+)
+
+
+# JAX exposes an ml_dtypes-backed finfo, so describe its fields structurally
+# instead of relying on an incompletely typed concrete class.
+class _DtypeInfoLike(Protocol[_DtypeInfoT_co]):
+    @property
+    def min(self) -> _DtypeInfoT_co: ...
+
+    @property
+    def max(self) -> _DtypeInfoT_co: ...
+
+    @property
+    def bits(self) -> int: ...
 
 
 class DtypeInfo(NamedTuple, Generic[_DtypeT]):
@@ -108,22 +124,16 @@ class DtypeInfo(NamedTuple, Generic[_DtypeT]):
     # cannot be jitted as `dtype` will not be a valid JAX type
     def create(cls, dtype: Type[_DtypeT]) -> "DtypeInfo[_DtypeT]":
         with jax.ensure_compile_time_eval():
-            if jnp.issubdtype(dtype, jnp.floating):  # pyright: ignore
-                finfo = jnp.finfo(dtype)
+            if jnp.issubdtype(dtype, jnp.floating):
+                finfo = cast(_DtypeInfoLike[_DtypeT], jnp.finfo(dtype))
 
                 return cls(
-                    min=cast(
-                        _DtypeT,
-                        finfo.min,  # pyright: ignore[reportUnknownMemberType]
-                    ),
-                    max=cast(
-                        _DtypeT,
-                        finfo.max,  # pyright: ignore[reportUnknownMemberType]
-                    ),
+                    min=finfo.min,
+                    max=finfo.max,
                     bits=finfo.bits,
                     dtype=dtype,
                 )
-            if jnp.issubdtype(dtype, jnp.integer):  # pyright: ignore
+            if jnp.issubdtype(dtype, jnp.integer):
                 iinfo = jnp.iinfo(dtype)
 
                 return cls(
