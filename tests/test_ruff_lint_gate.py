@@ -52,6 +52,7 @@ def test_ci_runs_direct_ruff_check_on_the_full_candidate_scope() -> None:
         "3.14",
         "ruff",
         "check",
+        "--no-respect-gitignore",
         *LINT_SCOPE,
     ]
     assert not any("baseline" in str(step).lower() for step in lint["steps"])
@@ -76,9 +77,15 @@ def test_pre_commit_runs_normal_ruff_check_with_existing_hooks_preserved() -> No
     )
     hooks_by_id = {hook["id"]: hook for hook in local_hooks}
 
-    assert hooks_by_id["ruff-check"]["entry"] == "uv run --no-sync ruff check"
-    assert hooks_by_id["ruff-imports"]["entry"].endswith("ruff check --select I --fix")
-    assert hooks_by_id["ruff-format"]["entry"] == "uv run --no-sync ruff format"
+    assert hooks_by_id["ruff-check"]["entry"] == (
+        "uv run --no-sync ruff check --no-respect-gitignore"
+    )
+    assert hooks_by_id["ruff-imports"]["entry"].endswith(
+        "ruff check --no-respect-gitignore --select I --fix"
+    )
+    assert hooks_by_id["ruff-format"]["entry"] == (
+        "uv run --no-sync ruff format --no-respect-gitignore"
+    )
     for hook_id in ("ruff-imports", "ruff-check", "ruff-format"):
         pattern = re.compile(hooks_by_id[hook_id]["files"])
         assert pattern.fullmatch("renderer/module.py")
@@ -100,7 +107,7 @@ def test_real_ruff_rejects_a_lint_violation_in_a_stub_file(tmp_path: Path) -> No
     )
 
     result = subprocess.run(
-        [str(ruff), "check", "assets"],
+        [str(ruff), "check", "--no-respect-gitignore", "assets"],
         cwd=tmp_path,
         capture_output=True,
         check=False,
@@ -110,3 +117,46 @@ def test_real_ruff_rejects_a_lint_violation_in_a_stub_file(tmp_path: Path) -> No
     assert result.returncode == 1
     assert "F811" in result.stdout
     assert "lint_error.pyi" in result.stdout
+
+
+def test_real_ruff_lints_tracked_python_files_even_when_gitignored(
+    tmp_path: Path,
+) -> None:
+    ruff = Path(sys.executable).with_name("ruff")
+    assert ruff.is_file()
+    (tmp_path / "pyproject.toml").write_text(
+        (ROOT / "pyproject.toml").read_text(encoding="utf-8"), encoding="utf-8"
+    )
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    (tmp_path / ".gitignore").write_text("assets/hidden.py\n", encoding="utf-8")
+    source = tmp_path / "assets" / "hidden.py"
+    source.parent.mkdir()
+    source.write_text("import os\n", encoding="utf-8")
+    subprocess.run(["git", "add", "-f", "assets/hidden.py"], cwd=tmp_path, check=True)
+    subprocess.run(
+        ["git", "ls-files", "--error-unmatch", "assets/hidden.py"],
+        cwd=tmp_path,
+        capture_output=True,
+        check=True,
+        text=True,
+    )
+
+    ignored = subprocess.run(
+        [str(ruff), "check", "assets"],
+        cwd=tmp_path,
+        capture_output=True,
+        check=False,
+        text=True,
+    )
+    checked = subprocess.run(
+        [str(ruff), "check", "--no-respect-gitignore", "assets"],
+        cwd=tmp_path,
+        capture_output=True,
+        check=False,
+        text=True,
+    )
+
+    assert ignored.returncode == 0
+    assert checked.returncode == 1
+    assert "F401" in checked.stdout
+    assert "hidden.py" in checked.stdout
