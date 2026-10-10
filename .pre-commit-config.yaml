@@ -36,17 +36,21 @@ repos:
     hooks:
       - id: ruff-imports
         name: Ruff import sorting
-        entry: uv run --no-sync ruff check --select I --fix
+        entry: uv run --no-sync ruff check --no-respect-gitignore --select I --fix
         language: system
-        types: [python]
-        files: ^(assets/|renderer/|examples/|test_resources/|tests/|tools/).*[.]py$
+        files: ^(assets/|renderer/|examples/|test_resources/|tests/|tools/).*[.]pyi?$
+
+      - id: ruff-check
+        name: Ruff lint
+        entry: uv run --no-sync ruff check --no-respect-gitignore
+        language: system
+        files: ^(assets/|renderer/|examples/|test_resources/|tests/|tools/).*[.]pyi?$
 
       - id: ruff-format
         name: Ruff format
-        entry: uv run --no-sync ruff format
+        entry: uv run --no-sync ruff format --no-respect-gitignore
         language: system
-        types: [python]
-        files: ^(assets/|renderer/|examples/|test_resources/|tests/|tools/).*[.]py$
+        files: ^(assets/|renderer/|examples/|test_resources/|tests/|tools/).*[.]pyi?$
 
       - id: pyright
         name: pyright

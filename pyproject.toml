@@ -70,11 +70,17 @@ line-length = 88
 src = ["assets", "renderer", "examples", "test_resources", "tests", "tools"]
 include = [
     "assets/**/*.py",
+    "assets/**/*.pyi",
     "renderer/**/*.py",
+    "renderer/**/*.pyi",
     "examples/**/*.py",
+    "examples/**/*.pyi",
     "test_resources/**/*.py",
+    "test_resources/**/*.pyi",
     "tests/**/*.py",
+    "tests/**/*.pyi",
     "tools/**/*.py",
+    "tools/**/*.pyi",
 ]
 
 [tool.ruff.lint]

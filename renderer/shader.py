@@ -4,7 +4,6 @@ from abc import ABC, abstractmethod
 from functools import partial
 from typing import Generic, NamedTuple, TypeVar, Union
 
-import jax
 import jax.lax as lax
 import jax.numpy as jnp
 from jax.tree_util import Partial, tree_map

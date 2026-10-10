@@ -135,7 +135,12 @@ def test_release_tag_check_is_release_only_and_smoke_uses_frozen_version() -> No
 
 
 def test_release_checkouts_and_reusable_workflows_use_the_frozen_commit() -> None:
-    release = load_workflow("pypi.yml")["jobs"]
+    workflow = load_workflow("pypi.yml")
+    release = workflow["jobs"]
+    prepare = release["prepare"]
+
+    assert "lint_base" not in prepare.get("outputs", {})
+    assert not any("baseline" in str(step).lower() for step in prepare["steps"])
 
     for checkout in checkout_steps(release["prepare"]):
         assert checkout["with"]["ref"] == "${{ github.sha }}"
@@ -144,9 +149,7 @@ def test_release_checkouts_and_reusable_workflows_use_the_frozen_commit() -> Non
 
     for job_name in ("cpu", "gpu", "tpu"):
         assert release[job_name]["with"]["commit"] == FROZEN_SHA
-    assert (
-        release["cpu"]["with"]["lint-base"] == "${{ needs.prepare.outputs.lint_base }}"
-    )
+    assert "lint-base" not in release["cpu"].get("with", {})
 
     for workflow_name, binding_name in (
         ("release-gpu.yml", "gpu-release-binding.json"),
@@ -228,11 +231,16 @@ def test_cpu_reuse_includes_the_full_matrix_render_and_minimum_numpy_gates() -> 
 
     for job_name, job in checks.items():
         refs = [step["with"]["ref"] for step in checkout_steps(job)]
-        if job_name == "lint":
-            assert refs[0].startswith("${{ inputs.commit || ")
-            assert refs[1].startswith("${{ inputs.lint-base || ")
-        else:
-            assert refs and all(ref.startswith("${{ inputs.commit || ") for ref in refs)
+        assert refs and all(ref.startswith("${{ inputs.commit || ") for ref in refs)
+
+    lint = checks["lint"]
+    assert len(checkout_steps(lint)) == 1
+    assert (
+        "lint-base" not in load_workflow("checks.yml")["on"]["workflow_call"]["inputs"]
+    )
+    assert step_named(lint, "Check Ruff lint")["run"].startswith(
+        "uv run --no-sync --python 3.14 ruff check --no-respect-gitignore "
+    )
 
     matrix = checks["check"]
     assert matrix["strategy"]["matrix"]["python-version"] == ["3.12", "3.13", "3.14"]

@@ -19,7 +19,6 @@ jobs:
     timeout-minutes: 5
     outputs:
       head_sha: ${{ steps.freeze.outputs.head_sha }}
-      lint_base: ${{ steps.baseline.outputs.sha }}
       version: ${{ steps.version.outputs.version }}
     steps:
       - uses: actions/checkout@v7
@@ -38,14 +37,6 @@ jobs:
         run: >-
           python -m tools.release_tpu_gate prepare --commit "$RELEASE_COMMIT"
           --output release-binding.json --github-output "$GITHUB_OUTPUT"
-      - name: Freeze the Ruff baseline
-        id: baseline
-        run: |
-          if baseline_sha="$(git rev-parse --verify HEAD^)"; then
-            printf 'sha=%s\n' "$baseline_sha" >> "$GITHUB_OUTPUT"
-          else
-            printf 'sha=%s\n' "$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
-          fi
       - name: Read package version
         id: version
         run: |
@@ -84,7 +75,6 @@ jobs:
     uses: ./.github/workflows/checks.yml
     with:
       commit: ${{ needs.prepare.outputs.head_sha }}
-      lint-base: ${{ needs.prepare.outputs.lint_base }}
 
   build:
     needs: prepare

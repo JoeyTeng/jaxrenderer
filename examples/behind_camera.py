@@ -1,6 +1,12 @@
+from typing import cast
+
 import jax.lax as lax
 import jax.numpy as jnp
 from jaxtyping import Array, UInt8
+import matplotlib.animation as animation
+import matplotlib.figure as figure
+import matplotlib.image as mimage
+import matplotlib.pyplot as plt
 
 from renderer import (
     CameraParameters,
@@ -94,13 +100,6 @@ rgb_array = lax.clamp(  # pyright: ignore[reportUnknownMemberType]
 images.append(rgb_array)
 
 # PROCESS: show
-
-from typing import cast
-
-import matplotlib.animation as animation
-import matplotlib.figure as figure
-import matplotlib.image as mimage
-import matplotlib.pyplot as plt
 
 fig: figure.Figure
 fig, ax = plt.subplots()  # pyright: ignore
