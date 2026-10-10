@@ -4,7 +4,7 @@ from functools import partial
 from typing import Any, NamedTuple, TypeVar, cast
 
 import jax
-from jax import lax
+import jax.lax as lax
 import jax.numpy as jnp
 from jax.tree_util import tree_map
 from jaxtyping import (
