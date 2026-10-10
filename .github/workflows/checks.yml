@@ -215,6 +215,9 @@ jobs:
           uv pip check --python .venv-numpy-minimum/bin/python
           .venv-numpy-minimum/bin/python -c 'import numpy; assert numpy.__version__ == "2.1.3", numpy.__version__'
 
+      - name: Check installed package typing
+        run: .venv-numpy-minimum/bin/python tools/check_installed_typing.py dist/*.whl
+
       - name: Run full test suite
         run: .venv-numpy-minimum/bin/python -m pytest tests/ --import-mode importlib
 
