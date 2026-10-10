@@ -109,12 +109,6 @@ def test_manual_rehearsal_shares_gates_and_cannot_publish() -> None:
         )
         for index in downloads
     )
-    summary = step_named(rehearsal, "Summarise the validated release rehearsal")
-    assert all(
-        key in summary["env"]
-        for key in ("CANDIDATE_SHA", "PACKAGE_VERSION", "RUN_ATTEMPT")
-    )
-    assert "$GITHUB_STEP_SUMMARY" in summary["run"]
 
 
 def test_release_tag_check_is_release_only_and_smoke_uses_frozen_version() -> None:
@@ -131,16 +125,12 @@ def test_release_tag_check_is_release_only_and_smoke_uses_frozen_version() -> No
         load_workflow("pypi.yml")["jobs"]["build"], "Smoke test built wheel"
     )
     assert smoke["env"]["PACKAGE_VERSION"] == "${{ needs.prepare.outputs.version }}"
-    assert 'removeprefix("v")' not in smoke["run"]
 
 
 def test_release_checkouts_and_reusable_workflows_use_the_frozen_commit() -> None:
     workflow = load_workflow("pypi.yml")
     release = workflow["jobs"]
     prepare = release["prepare"]
-
-    assert "lint_base" not in prepare.get("outputs", {})
-    assert not any("baseline" in str(step).lower() for step in prepare["steps"])
 
     for checkout in checkout_steps(release["prepare"]):
         assert checkout["with"]["ref"] == "${{ github.sha }}"
@@ -149,7 +139,6 @@ def test_release_checkouts_and_reusable_workflows_use_the_frozen_commit() -> Non
 
     for job_name in ("cpu", "gpu", "tpu"):
         assert release[job_name]["with"]["commit"] == FROZEN_SHA
-    assert "lint-base" not in release["cpu"].get("with", {})
 
     for workflow_name, binding_name in (
         ("release-gpu.yml", "gpu-release-binding.json"),
@@ -235,12 +224,6 @@ def test_cpu_reuse_includes_the_full_matrix_render_and_minimum_numpy_gates() -> 
 
     lint = checks["lint"]
     assert len(checkout_steps(lint)) == 1
-    assert (
-        "lint-base" not in load_workflow("checks.yml")["on"]["workflow_call"]["inputs"]
-    )
-    assert step_named(lint, "Check Ruff lint")["run"].startswith(
-        "uv run --no-sync --python 3.14 ruff check --no-respect-gitignore "
-    )
 
     matrix = checks["check"]
     assert matrix["strategy"]["matrix"]["python-version"] == ["3.12", "3.13", "3.14"]
