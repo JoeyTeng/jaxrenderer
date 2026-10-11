@@ -10,9 +10,12 @@ class TestTransposeForDisplay:
         ("matrix", "flip_vertical", "expected"),
         [
             (
-                [[1, 2, 3], [4, 5, 6]],
+                np.asarray(
+                    [[1.25, 2.5, 3.75], [4.5, 5.25, 6.125]],
+                    dtype=np.float32,
+                ),
                 False,
-                [[1, 4], [2, 5], [3, 6]],
+                [[1.25, 4.5], [2.5, 5.25], [3.75, 6.125]],
             ),
             (
                 [[1, 2, 3], [4, 5, 6]],
@@ -79,8 +82,8 @@ class TestTransposeForDisplay:
         flip_vertical: bool,
         expected: list,
     ):
-        input_array = jnp.asarray(matrix, dtype=jnp.int16)
-        expected_array = np.asarray(expected, dtype=np.int16)
+        input_array = jnp.asarray(matrix)
+        expected_array = np.asarray(expected, dtype=input_array.dtype)
 
         actual = transpose_for_display(input_array, flip_vertical=flip_vertical)
 

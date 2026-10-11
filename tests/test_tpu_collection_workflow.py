@@ -50,7 +50,17 @@ def assert_locked_controller_sync(job: dict[str, Any]) -> None:
     ]
     assert len(python_indexes) == 1 and python_indexes[0] + 1 < len(options)
     python_index = python_indexes[0]
-    assert re.fullmatch(r"\d+\.\d+(?:\.\d+)?", options[python_index + 1])
+    python_version = options[python_index + 1]
+    assert re.fullmatch(r"\d+\.\d+(?:\.\d+)?", python_version)
+    version_parts = tuple(int(part) for part in python_version.split("."))
+    assert version_parts[0] == 3 and 12 <= version_parts[1] <= 14
+    setup_python = next(
+        step
+        for step in job["steps"]
+        if step.get("uses", "").startswith("actions/setup-python@")
+    )["with"]["python-version"]
+    setup_version = tuple(int(part) for part in setup_python.split("."))
+    assert version_parts[:2] == setup_version[:2]
     remaining = options[:python_index] + options[python_index + 2 :]
     assert Counter(remaining) == Counter(
         {"--locked": 1, "--only-group": 1, "ci-kaggle": 1}
