@@ -1,4 +1,4 @@
-from __future__ import annotations  # tolerate "subscriptable 'type' for < 3.9
+from __future__ import annotations
 
 from functools import partial
 from typing import Any, NamedTuple, TypeVar, cast
@@ -16,7 +16,6 @@ from jaxtyping import (
     jaxtyped,  # pyright: ignore[reportUnknownVariableType]
 )
 
-from ._backport import Tuple
 from ._meta_utils import add_tracing_name
 from ._meta_utils import typed_jit as jit
 from .geometry import Camera, Interpolation, Viewport, interpolate
@@ -116,7 +115,7 @@ class PerPrimitive(NamedTuple):
         )
 
 
-T = TypeVar("T", bound=Tuple[Any, ...])
+T = TypeVar("T", bound=tuple[Any, ...])
 
 
 @jaxtyped
@@ -130,7 +129,7 @@ T = TypeVar("T", bound=Tuple[Any, ...])
 def _postprocessing(
     shader: type[Shader[ShaderExtraInputT, VaryingT, MixedExtraT]],
     buffers: Buffers[T],
-    per_primitive: Tuple[Any, ...],  # Batch PerPrimitive
+    per_primitive: tuple[Any, ...],  # Batch PerPrimitive
     varyings: VaryingT,
     extra: ShaderExtraInputT,
     viewport: Viewport,
@@ -147,10 +146,10 @@ def _postprocessing(
     @jaxtyped
     @partial(jit, inline=True)
     @add_tracing_name
-    def _per_pixel(coord: Vec2i) -> Tuple[MixerOutput, MixedExtraT]:
+    def _per_pixel(coord: Vec2i) -> tuple[MixerOutput, MixedExtraT]:
         assert isinstance(coord, Vec2i), f"expected Vec2i, got {coord}"
 
-        ReturnT = Tuple[  #
+        ReturnT = tuple[  #
             Float[Array, "kept_primitives 4"],  #
             Bool[Array, "kept_primitives"],  #
             Float[Array, "kept_primitives 2"],  #
@@ -172,7 +171,7 @@ def _postprocessing(
             # For early exit when not keep primitive / determinant is 0
             @partial(jit, inline=True)
             @add_tracing_name
-            def _when_keep_primitive() -> Tuple[Vec3f, FloatV]:
+            def _when_keep_primitive() -> tuple[Vec3f, FloatV]:
                 """Returns clip_coef, w_reciprocal."""
                 # x/w, y/w, with x, y, w in clip space.
                 _idx: Integer[Array, "2"]
@@ -205,7 +204,7 @@ def _postprocessing(
             def _when_in_triangle(
                 clip_coef: Vec3f,
                 w_reciprocal: FloatV,
-            ) -> Tuple[  #
+            ) -> tuple[  #
                 Float[Array, "kept_primitives 4"],  # gl_FragCoord
                 Bool[Array, "kept_primitives"],  # gl_FrontFacing
                 Float[Array, "kept_primitives 2"],  # gl_PointCoord
@@ -293,7 +292,7 @@ def _postprocessing(
             values: VaryingT,
             barycentric_screen: Vec3f,
             barycentric_clip: Vec3f,
-        ) -> Tuple[PerFragment, VaryingT]:
+        ) -> tuple[PerFragment, VaryingT]:
             # PROCESS: Interpolation
             varying: VaryingT = shader.interpolate(
                 values=values,
@@ -353,7 +352,7 @@ def _postprocessing(
         mixed_output: MixerOutput
         attachments: MixedExtraT
         mixed_output, attachments = cast(
-            Tuple[MixerOutput, MixedExtraT],
+            tuple[MixerOutput, MixedExtraT],
             shader.mix(gl_Depths, keeps, extra_outputs),
         )
         assert isinstance(mixed_output, MixerOutput)
@@ -368,7 +367,7 @@ def _postprocessing(
     @add_tracing_name
     def _per_row(
         i: IntV,
-    ) -> Tuple[MixerOutput, MixedExtraT]:
+    ) -> tuple[MixerOutput, MixedExtraT]:
         """Render one row.
 
         Parameters:
@@ -402,7 +401,7 @@ def _postprocessing(
     @partial(jit, donate_argnums=(1,), inline=True)
     @add_tracing_name
     def merge_buffers(
-        mixer_outputs: Tuple[MixerOutput, MixedExtraT],
+        mixer_outputs: tuple[MixerOutput, MixedExtraT],
         old_buffers: Buffers[T],
     ) -> Buffers[T]:
         """Merge the rendered row into the buffers.
@@ -499,7 +498,7 @@ def render(
     @jaxtyped
     @partial(jit, inline=True)
     @add_tracing_name
-    def vertex_processing(gl_VertexID: IntV) -> Tuple[PerVertex, VaryingT]:
+    def vertex_processing(gl_VertexID: IntV) -> tuple[PerVertex, VaryingT]:
         """Process one vertex into screen space, and keep varying values."""
         per_vertex: PerVertex
         varying: VaryingT

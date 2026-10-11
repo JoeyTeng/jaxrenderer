@@ -1,8 +1,8 @@
-from __future__ import annotations  # tolerate "subscriptable 'type' for < 3.9
+from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from functools import partial
-from typing import Generic, NamedTuple, TypeVar, Union
+from typing import Generic, NamedTuple, TypeAlias, TypeVar, Union
 
 import jax.lax as lax
 import jax.numpy as jnp
@@ -16,7 +16,6 @@ from jaxtyping import (
     jaxtyped,  # pyright: ignore[reportUnknownVariableType]
 )
 
-from ._backport import Tuple, TypeAlias
 from ._meta_utils import add_tracing_name
 from ._meta_utils import typed_jit as jit
 from .geometry import Camera, Interpolation, interpolate
@@ -68,13 +67,13 @@ class PerFragment(NamedTuple):
 
 VaryingT = TypeVar(
     "VaryingT",
-    bound=Tuple[Shaped[Array, "..."], ...],
+    bound=tuple[Shaped[Array, "..."], ...],
 )
 """The user-defined input and second (extra) output of fragment shader."""
 
 MixedExtraT = TypeVar(
     "MixedExtraT",
-    bound=Tuple[Shaped[Array, "..."], ...],
+    bound=tuple[Shaped[Array, "..."], ...],
 )
 """The user-defined second (extra) output of mix shader."""
 
@@ -107,7 +106,7 @@ class Shader(ABC, Generic[ShaderExtraInputT, VaryingT, MixedExtraT]):
         gl_InstanceID: ID,
         camera: Camera,
         extra: ShaderExtraInputT,
-    ) -> Tuple[PerVertex, VaryingT]:
+    ) -> tuple[PerVertex, VaryingT]:
         """Override this to implement the vertex shader as defined by OpenGL.
 
         The meaning of the inputs follows the definitions in OpenGL. Additional
@@ -166,7 +165,7 @@ class Shader(ABC, Generic[ShaderExtraInputT, VaryingT, MixedExtraT]):
         values: VaryingT,
         barycentric_screen: Float[Array, "primitives 3"],
         barycentric_clip: Float[Array, "primitives 3"],
-    ) -> Tuple[  #
+    ) -> tuple[  #
         Float[Array, "kept_primitives 4"],  # gl_FragCoord
         Bool[Array, "kept_primitives"],  # gl_FrontFacing
         Float[Array, "kept_primitives 2"],  # gl_PointCoord
@@ -301,7 +300,7 @@ class Shader(ABC, Generic[ShaderExtraInputT, VaryingT, MixedExtraT]):
         gl_PointCoord: Vec2f,
         varying: VaryingT,
         extra: ShaderExtraInputT,
-    ) -> Tuple[PerFragment, VaryingT]:
+    ) -> tuple[PerFragment, VaryingT]:
         """Override this to implement the vertex shader as defined by OpenGL.
 
         This is optional. The default implementation writes nothing and thus
@@ -342,7 +341,7 @@ class Shader(ABC, Generic[ShaderExtraInputT, VaryingT, MixedExtraT]):
         gl_FragDepth: Float[Array, "kept_primitives"],
         keeps: Bool[Array, "kept_primitives"],
         extra: VaryingT,
-    ) -> Tuple[MixerOutput, Union[VaryingT, MixedExtraT]]:
+    ) -> tuple[MixerOutput, Union[VaryingT, MixedExtraT]]:
         """Override this to customise the mixing behaviour per fragment over
             different primitives (triangles).
 

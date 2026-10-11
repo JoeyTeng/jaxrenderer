@@ -1,4 +1,4 @@
-from __future__ import annotations  # tolerate "subscriptable 'type' for < 3.9
+from __future__ import annotations
 
 from functools import partial
 from typing import NamedTuple
@@ -9,7 +9,6 @@ from jaxtyping import (
     jaxtyped,  # pyright: ignore[reportUnknownVariableType]
 )
 
-from .._backport import Tuple
 from .._meta_utils import add_tracing_name
 from .._meta_utils import typed_jit as jit
 from ..geometry import Camera, to_homogeneous
@@ -49,7 +48,7 @@ class DepthShader(
         gl_InstanceID: ID,
         camera: Camera,
         extra: DepthExtraInput,
-    ) -> Tuple[PerVertex, DepthExtraFragmentData]:
+    ) -> tuple[PerVertex, DepthExtraFragmentData]:
         # Use gl_VertexID to index in `extra` buffer.
         position: Vec4f = to_homogeneous(extra.position[gl_VertexID])
         gl_Position: Vec4f = camera.to_clip(position)

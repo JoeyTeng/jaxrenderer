@@ -1,11 +1,9 @@
 import functools
 import inspect
 import sys
-from typing import Any, Callable, Protocol, TypeVar, cast
+from typing import Any, Callable, ParamSpec, Protocol, TypeVar, cast
 
 import jax
-
-from ._backport import DictT, ParamSpec
 
 __all__ = ["add_tracing_name", "export", "typed_jit"]
 
@@ -16,7 +14,7 @@ RetT = TypeVar("RetT")
 def add_tracing_name(func: Callable[ArgT, RetT]) -> Callable[ArgT, RetT]:
     """Add tracing name to function."""
 
-    members: DictT[str, str]
+    members: dict[str, str]
     members = dict(inspect.getmembers(func, lambda v: isinstance(v, str)))
     annotation: str = (
         f"{members.get('__module__', '')}:{members.get('__qualname__', '')}"
