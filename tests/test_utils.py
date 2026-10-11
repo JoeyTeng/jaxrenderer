@@ -1,3 +1,4 @@
+from jax import Array
 import jax.numpy as jnp
 import numpy as np
 import pytest
@@ -101,5 +102,6 @@ class TestTransposeForDisplay:
 
         actual = transpose_for_display(input_array, flip_vertical=flip_vertical)
 
+        assert isinstance(actual, Array)
         np.testing.assert_array_equal(actual, expected_array)
         assert actual.dtype == input_array.dtype

@@ -72,6 +72,13 @@ def test_ci_runs_direct_ruff_check_on_the_full_candidate_scope() -> None:
         and "--no-respect-gitignore" in tokens
         and "--select" not in tokens
     )
+    pyright_step_index = next(
+        index
+        for index, step in enumerate(lint_steps)
+        if "pyright" in shlex.split(step.get("run", ""))
+        and "renderer/types.py" in shlex.split(step.get("run", ""))
+    )
+    assert lint_step_index < pyright_step_index
 
     checkout_steps = [
         step
@@ -88,7 +95,9 @@ def test_ci_runs_direct_ruff_check_on_the_full_candidate_scope() -> None:
         if step.get("uses", "").startswith("actions/setup-python@")
     )["with"]["python-version"]
 
-    for step in lint_steps[:lint_step_index]:
+    for index, step in enumerate(lint_steps[:pyright_step_index]):
+        if index == lint_step_index:
+            continue
         action = step.get("uses", "")
         if action:
             assert action.startswith(
