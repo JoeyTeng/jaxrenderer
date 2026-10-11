@@ -1,7 +1,7 @@
-from __future__ import annotations
+from __future__ import annotations  # tolerate "subscriptable 'type' for < 3.9
 
 from functools import partial
-from typing import NamedTuple, cast, override
+from typing import NamedTuple, cast
 
 import jax.lax as lax
 import jax.numpy as jnp
@@ -12,7 +12,9 @@ from jaxtyping import (
     Integer,
     jaxtyped,  # pyright: ignore[reportUnknownVariableType]
 )
+from typing_extensions import override
 
+from .._backport import Tuple
 from .._meta_utils import add_tracing_name
 from .._meta_utils import typed_jit as jit
 from ..geometry import Camera, normalise, normalise_homogeneous, to_homogeneous
@@ -117,7 +119,7 @@ class PhongReflectionShadowTextureShader(
         gl_InstanceID: ID,
         camera: Camera,
         extra: PhongReflectionShadowTextureExtraInput,
-    ) -> tuple[PerVertex, PhongReflectionShadowTextureExtraFragmentData]:
+    ) -> Tuple[PerVertex, PhongReflectionShadowTextureExtraFragmentData]:
         # Use gl_VertexID to index in `extra` buffer.
         position: Vec4f = to_homogeneous(extra.position[gl_VertexID])
         gl_Position: Vec4f = camera.to_clip(position)
@@ -181,7 +183,7 @@ class PhongReflectionShadowTextureShader(
         gl_PointCoord: Vec2f,
         varying: PhongReflectionShadowTextureExtraFragmentData,
         extra: PhongReflectionShadowTextureExtraInput,
-    ) -> tuple[PerFragment, PhongReflectionShadowTextureExtraFragmentData]:
+    ) -> Tuple[PerFragment, PhongReflectionShadowTextureExtraFragmentData]:
         built_in: PerFragment = Shader.fragment(
             gl_FragCoord,
             gl_FrontFacing,
@@ -275,11 +277,11 @@ class PhongReflectionShadowTextureShader(
         gl_FragDepth: Float[Array, "primitives"],
         keeps: Bool[Array, "primitives"],
         extra: PhongReflectionShadowTextureExtraFragmentData,
-    ) -> tuple[MixerOutput, PhongReflectionShadowTextureExtraMixerOutput]:
+    ) -> Tuple[MixerOutput, PhongReflectionShadowTextureExtraMixerOutput]:
         mixer_output: MixerOutput
         extra_output: PhongReflectionShadowTextureExtraFragmentData
         mixer_output, extra_output = cast(
-            tuple[MixerOutput, PhongReflectionShadowTextureExtraFragmentData],
+            Tuple[MixerOutput, PhongReflectionShadowTextureExtraFragmentData],
             Shader.mix(gl_FragDepth, keeps, extra),
         )
         assert isinstance(mixer_output, MixerOutput)

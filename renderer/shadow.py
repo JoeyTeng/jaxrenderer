@@ -6,6 +6,7 @@ import jax.lax as lax
 import jax.numpy as jnp
 from jaxtyping import jaxtyped  # pyright: ignore[reportUnknownVariableType]
 
+from ._backport import Tuple
 from ._meta_utils import add_tracing_name
 from .geometry import Camera, View, Viewport
 from .pipeline import render
@@ -102,7 +103,7 @@ class Shadow(NamedTuple):
         )
         assert isinstance(_camera, Camera)
 
-        buffers: Buffers[tuple[()]] = Buffers(zbuffer=shadow_map, targets=tuple())
+        buffers: Buffers[Tuple[()]] = Buffers(zbuffer=shadow_map, targets=tuple())
         extra = DepthExtraInput(position=verts)
         shadow_map, _ = render(
             _camera,

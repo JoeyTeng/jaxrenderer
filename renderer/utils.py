@@ -1,7 +1,7 @@
-from __future__ import annotations
+from __future__ import annotations  # tolerate "subscriptable 'type' for < 3.9
 
 from functools import partial
-from typing import Sequence, TypeVar, Union, cast
+from typing import Sequence, Union, cast
 
 import jax
 from jax import lax
@@ -14,17 +14,10 @@ from jaxtyping import (
     jaxtyped,  # pyright: ignore[reportUnknownVariableType]
 )
 
+from ._backport import Tuple
 from ._meta_utils import add_tracing_name
 from ._meta_utils import typed_jit as jit
 from .types import Canvas, IntV, Texture, ZBuffer
-
-_K = TypeVar("_K")
-_V = TypeVar("_V")
-
-
-def replace_dict(base: dict[_K, _V], new: dict[_K, _V]) -> dict[_K, _V]:
-    """Return a copy of ``base`` with entries from ``new`` applied."""
-    return base | new
 
 
 @jaxtyped
@@ -51,7 +44,7 @@ def get_value_from_index(
 def merge_canvases(
     zbuffers: Num[Array, "batch width height"],
     canvases: Shaped[Array, "batch width height channel"],
-) -> tuple[ZBuffer, Canvas]:
+) -> Tuple[ZBuffer, Canvas]:
     """Merge canvases by selecting each pixel with max z value in zbuffer,
     then merge zbuffer as well.
     """

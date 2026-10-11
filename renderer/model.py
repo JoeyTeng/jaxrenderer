@@ -1,8 +1,7 @@
-from __future__ import annotations
+from __future__ import annotations  # tolerate "subscriptable 'type' for < 3.9
 
-from collections.abc import Sequence
 from functools import partial
-from typing import NamedTuple, Optional, TypeAlias, Union, cast
+from typing import Optional, Union, cast
 
 import jax
 import jax.experimental.checkify as checkify
@@ -19,6 +18,7 @@ from jaxtyping import (
     jaxtyped,  # pyright: ignore[reportUnknownVariableType]
 )
 
+from ._backport import List, NamedTuple, Sequence, Tuple, TypeAlias
 from ._meta_utils import add_tracing_name
 from ._meta_utils import typed_jit as jit
 from .geometry import Camera, transform_matrix_from_rotation
@@ -225,7 +225,7 @@ class MergedModel(NamedTuple):
     def merge_verts(
         vs: VertsT,
         fs: FaceIndicessT,
-    ) -> tuple[VertT, FaceIndicesT]:
+    ) -> Tuple[VertT, FaceIndicesT]:
         """"""
         counts = [v.shape[0] for v in vs[:-1]]
         cumsum = [0]
@@ -251,7 +251,7 @@ class MergedModel(NamedTuple):
     @jaxtyped
     @partial(jit, inline=True)
     @add_tracing_name
-    def merge_maps(maps: MapsT) -> tuple[MapT, tuple[int, int]]:
+    def merge_maps(maps: MapsT) -> Tuple[MapT, Tuple[int, int]]:
         """Merge maps by concatenating them along the first axis.
 
         All maps must have the same number of dimensions, i.e., `len(m.shape)`
@@ -272,11 +272,11 @@ class MergedModel(NamedTuple):
         # TODO: find a better way to merge maps
         with jax.ensure_compile_time_eval():
             dims: int = len(maps[0].shape)
-            shapes: Sequence[tuple[int, ...]]
+            shapes: Sequence[Tuple[int, ...]]
             shapes = tree_map(lambda m: m.shape, maps)
             # pick the largest shape for each dimension
-            single_shape: tuple[int, ...] = cast(
-                tuple[int, ...],
+            single_shape: Tuple[int, ...] = cast(
+                Tuple[int, ...],
                 tuple(
                     (
                         max((shape[i] for shape in shapes))  # pyright: ignore
@@ -461,7 +461,7 @@ def merge_objects(objects: Sequence[ModelObject]) -> MergedModel:
         models = [obj.model for obj in objects]
 
         # broadcasted per vertex info
-        counts: list[int] = [len(m.verts) for m in models]
+        counts: List[int] = [len(m.verts) for m in models]
 
         map_indices: Integer[Array, "vertices"]
         map_indices = MergedModel.generate_object_vert_info(

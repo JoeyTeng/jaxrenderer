@@ -8,8 +8,6 @@ The required Python 3.14 lint job also runs strict Pyright with warnings enabled
 
 These modules use the public `jax.Array` type, following the [JAX typing guidance](https://docs.jax.dev/en/latest/jax.typing.html), alongside jaxtyping's dtype and shape specifications. Geometry checks retain their runtime validation of shared dimensions, including during JIT tracing; passing Pyright alone does not verify these constraints. The `typed_jit` wrapper preserves callable signatures for Pyright.
 
-Internal annotations use standard-library types and built-in generics on Python 3.12–3.14. The package-level type aliases and `replace_dict` helper remain available after removing the legacy Python backports.
-
 ## Provider checks
 
 The `Manual GPU regression` workflow runs the same test suite and render and gradient regressions on a Modal T4 GPU. A maintainer dispatches it from `master` once before merging, specifying a pull request number. The workflow freezes its head and base revisions and records `accelerator/gpu` on the PR head. New commits need new checks; results from a changed head or base are rejected.

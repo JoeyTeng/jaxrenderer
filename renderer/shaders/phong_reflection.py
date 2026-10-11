@@ -1,4 +1,4 @@
-from __future__ import annotations
+from __future__ import annotations  # tolerate "subscriptable 'type' for < 3.9
 
 from functools import partial
 from typing import NamedTuple, cast
@@ -13,6 +13,7 @@ from jaxtyping import (
     jaxtyped,  # pyright: ignore[reportUnknownVariableType]
 )
 
+from .._backport import Tuple
 from .._meta_utils import add_tracing_name
 from .._meta_utils import typed_jit as jit
 from ..geometry import Camera, normalise, to_homogeneous
@@ -107,7 +108,7 @@ class PhongReflectionTextureShader(
         gl_InstanceID: ID,
         camera: Camera,
         extra: PhongReflectionTextureExtraInput,
-    ) -> tuple[PerVertex, PhongReflectionTextureExtraFragmentData]:
+    ) -> Tuple[PerVertex, PhongReflectionTextureExtraFragmentData]:
         # Use gl_VertexID to index in `extra` buffer.
         position: Vec4f = to_homogeneous(extra.position[gl_VertexID])
         gl_Position: Vec4f = camera.to_clip(position)
@@ -162,7 +163,7 @@ class PhongReflectionTextureShader(
         gl_PointCoord: Vec2f,
         varying: PhongReflectionTextureExtraFragmentData,
         extra: PhongReflectionTextureExtraInput,
-    ) -> tuple[PerFragment, PhongReflectionTextureExtraFragmentData]:
+    ) -> Tuple[PerFragment, PhongReflectionTextureExtraFragmentData]:
         built_in: PerFragment = Shader.fragment(
             gl_FragCoord,
             gl_FrontFacing,
@@ -243,11 +244,11 @@ class PhongReflectionTextureShader(
         gl_FragDepth: Float[Array, "primitives"],
         keeps: Bool[Array, "primitives"],
         extra: PhongReflectionTextureExtraFragmentData,
-    ) -> tuple[MixerOutput, PhongReflectionTextureExtraMixerOutput]:
+    ) -> Tuple[MixerOutput, PhongReflectionTextureExtraMixerOutput]:
         mixer_output: MixerOutput
         extra_output: PhongReflectionTextureExtraFragmentData
         mixer_output, extra_output = cast(
-            tuple[MixerOutput, PhongReflectionTextureExtraFragmentData],
+            Tuple[MixerOutput, PhongReflectionTextureExtraFragmentData],
             Shader.mix(gl_FragDepth, keeps, extra),
         )
         assert isinstance(mixer_output, MixerOutput)

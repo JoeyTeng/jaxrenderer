@@ -3,25 +3,7 @@ import jax.numpy as jnp
 import numpy as np
 import pytest
 
-from renderer import replace_dict
 from renderer.utils import transpose_for_display
-
-
-def test_replace_dict_gives_new_values_precedence_without_mutating_inputs() -> None:
-    base = {"shared": "base", "base-only": "base"}
-    new = {"shared": "new", "new-only": "new"}
-
-    result = replace_dict(base, new)
-
-    assert result == {
-        "shared": "new",
-        "base-only": "base",
-        "new-only": "new",
-    }
-    assert result is not base
-    assert result is not new
-    assert base == {"shared": "base", "base-only": "base"}
-    assert new == {"shared": "new", "new-only": "new"}
 
 
 class TestTransposeForDisplay:

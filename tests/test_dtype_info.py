@@ -3,11 +3,12 @@ from typing import cast
 import jax.numpy as jnp
 import pytest
 
-from renderer.types import DtypeInfo, JaxFloating, JaxInteger
+from renderer._backport import JaxFloating, JaxInteger, Type
+from renderer.types import DtypeInfo
 
 
 def _assert_float_info(
-    dtype: type[JaxFloating], bits: int, minimum: float, maximum: float
+    dtype: Type[JaxFloating], bits: int, minimum: float, maximum: float
 ) -> None:
     info = DtypeInfo[JaxFloating].create(dtype)
 
@@ -30,7 +31,7 @@ def test_dtype_info_reports_bfloat16_limits() -> None:
 
 
 def _assert_integer_info(
-    dtype: type[JaxInteger], bits: int, minimum: int, maximum: int
+    dtype: Type[JaxInteger], bits: int, minimum: int, maximum: int
 ) -> None:
     info = DtypeInfo[JaxInteger].create(dtype)
 
@@ -60,4 +61,4 @@ def test_dtype_info_accepts_python_int() -> None:
 @pytest.mark.parametrize("dtype", [jnp.bool_, jnp.complex64])
 def test_dtype_info_rejects_unsupported_types(dtype: object) -> None:
     with pytest.raises(ValueError, match="Unexpected dtype"):
-        _ = DtypeInfo[int].create(cast(type[int], dtype))
+        _ = DtypeInfo[int].create(cast(Type[int], dtype))
