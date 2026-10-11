@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
+import subprocess
+import sys
 from typing import Any
 
 from tools import kaggle_ci
@@ -111,7 +114,9 @@ def test_manual_rehearsal_shares_gates_and_cannot_publish() -> None:
     )
 
 
-def test_release_tag_check_is_release_only_and_smoke_uses_frozen_version() -> None:
+def test_release_tag_check_is_release_only_and_smoke_uses_frozen_version(
+    tmp_path: Path,
+) -> None:
     prepare = load_workflow("pypi.yml")["jobs"]["prepare"]
     assert prepare["outputs"]["version"] == "${{ steps.version.outputs.version }}"
 
@@ -125,6 +130,37 @@ def test_release_tag_check_is_release_only_and_smoke_uses_frozen_version() -> No
         load_workflow("pypi.yml")["jobs"]["build"], "Smoke test built wheel"
     )
     assert smoke["env"]["PACKAGE_VERSION"] == "${{ needs.prepare.outputs.version }}"
+
+    marker = "./bin/python - <<'PY'\n"
+    smoke_script = smoke["run"].split(marker, 1)[1].split("\nPY\n", 1)[0]
+    site_packages = tmp_path / "site-packages"
+    renderer = site_packages / "renderer"
+    renderer.mkdir(parents=True)
+    (renderer / "__init__.py").write_text("", encoding="utf-8")
+    distribution = site_packages / "jaxrenderer-1.2.3.dist-info"
+    distribution.mkdir()
+    (distribution / "METADATA").write_text(
+        "Metadata-Version: 2.1\nName: jaxrenderer\nVersion: 1.2.3\n",
+        encoding="utf-8",
+    )
+
+    environment = os.environ.copy()
+    environment["PYTHONPATH"] = str(site_packages)
+    environment["RELEASE_TAG"] = ""
+    for expected, returncode in (("1.2.3", 0), ("9.9.9", 1)):
+        environment["PACKAGE_VERSION"] = expected
+        result = subprocess.run(
+            [sys.executable, "-c", smoke_script],
+            cwd=tmp_path,
+            env=environment,
+            capture_output=True,
+            check=False,
+            text=True,
+            timeout=30,
+        )
+        assert result.returncode == returncode, result.stderr
+        if returncode:
+            assert "AssertionError" in result.stderr
 
 
 def test_release_checkouts_and_reusable_workflows_use_the_frozen_commit() -> None:

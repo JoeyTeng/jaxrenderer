@@ -82,6 +82,46 @@ def test_ruff_configuration_keeps_required_rules_and_intentional_ignores() -> No
     assert set(ruff["ignore"]) == {"F722", "F821"}
 
 
+def test_ruff_includes_python_and_stub_files_in_every_lint_scope(
+    tmp_path: Path,
+) -> None:
+    ruff = Path(sys.executable).with_name("ruff")
+    assert ruff.is_file()
+    (tmp_path / "pyproject.toml").write_text(
+        (ROOT / "pyproject.toml").read_text(encoding="utf-8"), encoding="utf-8"
+    )
+    expected: set[str] = set()
+    for scope in LINT_SCOPE:
+        for relative in (
+            "module.py",
+            "module.pyi",
+            "nested/module.py",
+            "nested/module.pyi",
+        ):
+            path = tmp_path / scope / relative
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("", encoding="utf-8")
+            expected.add(str(path.resolve()))
+
+    result = subprocess.run(
+        [
+            str(ruff),
+            "check",
+            "--show-files",
+            "--no-respect-gitignore",
+            *LINT_SCOPE,
+        ],
+        cwd=tmp_path,
+        capture_output=True,
+        check=False,
+        text=True,
+        timeout=30,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert expected.issubset(set(result.stdout.splitlines()))
+
+
 def test_pre_commit_runs_normal_ruff_check_with_existing_hooks_preserved() -> None:
     config = yaml.safe_load(
         (ROOT / ".pre-commit-config.yaml").read_text(encoding="utf-8")
@@ -112,8 +152,14 @@ def test_pre_commit_runs_normal_ruff_check_with_existing_hooks_preserved() -> No
 
     for hook_id in ("ruff-imports", "ruff-check", "ruff-format"):
         pattern = re.compile(hooks_by_id[hook_id]["files"])
-        assert pattern.fullmatch("renderer/module.py")
-        assert pattern.fullmatch("renderer/stubs/module.pyi")
+        for scope in LINT_SCOPE:
+            for relative in (
+                "module.py",
+                "module.pyi",
+                "nested/module.py",
+                "nested/module.pyi",
+            ):
+                assert pattern.fullmatch(f"{scope}/{relative}")
         assert not pattern.fullmatch("typings/module.pyi")
 
 
