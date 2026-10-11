@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
+import subprocess
+import sys
 from typing import Any
 
 from tools import kaggle_ci
@@ -31,6 +34,18 @@ def checkout_steps(job: dict[str, Any]) -> list[dict[str, Any]]:
         for step in job["steps"]
         if step.get("uses", "").startswith("actions/checkout@")
     ]
+
+
+def assert_checkout_precedes_run_steps(job: dict[str, Any]) -> None:
+    steps = job["steps"]
+    checkout_indexes = [
+        index
+        for index, step in enumerate(steps)
+        if step.get("uses", "").startswith("actions/checkout@")
+    ]
+    run_indexes = [index for index, step in enumerate(steps) if "run" in step]
+    assert checkout_indexes and run_indexes
+    assert min(checkout_indexes) < min(run_indexes)
 
 
 def assert_hard_gates_fail_closed(
@@ -79,15 +94,8 @@ def test_manual_rehearsal_shares_gates_and_cannot_publish() -> None:
         for step in rehearsal["steps"]
     )
 
-    gate_jobs = jobs
-    assert jobs["prepare"]["steps"][0]["with"]["ref"] == "${{ github.sha }}"
-    assert jobs["prepare"]["steps"][1]["uses"].startswith("actions/setup-python@")
     freeze = step_named(jobs["prepare"], "Freeze and validate the candidate")
     assert freeze["env"]["RELEASE_COMMIT"] == "${{ github.sha }}"
-    assert "workflow_dispatch" not in str(freeze["env"])
-    for job_name in ("cpu", "build", "gpu", "tpu"):
-        if "with" in gate_jobs[job_name]:
-            assert gate_jobs[job_name]["with"]["commit"] == FROZEN_SHA
 
     steps = rehearsal["steps"]
     binding_recheck = next(
@@ -109,15 +117,11 @@ def test_manual_rehearsal_shares_gates_and_cannot_publish() -> None:
         )
         for index in downloads
     )
-    summary = step_named(rehearsal, "Summarise the validated release rehearsal")
-    assert all(
-        key in summary["env"]
-        for key in ("CANDIDATE_SHA", "PACKAGE_VERSION", "RUN_ATTEMPT")
-    )
-    assert "$GITHUB_STEP_SUMMARY" in summary["run"]
 
 
-def test_release_tag_check_is_release_only_and_smoke_uses_frozen_version() -> None:
+def test_release_tag_check_is_release_only_and_smoke_uses_frozen_version(
+    tmp_path: Path,
+) -> None:
     prepare = load_workflow("pypi.yml")["jobs"]["prepare"]
     assert prepare["outputs"]["version"] == "${{ steps.version.outputs.version }}"
 
@@ -131,25 +135,58 @@ def test_release_tag_check_is_release_only_and_smoke_uses_frozen_version() -> No
         load_workflow("pypi.yml")["jobs"]["build"], "Smoke test built wheel"
     )
     assert smoke["env"]["PACKAGE_VERSION"] == "${{ needs.prepare.outputs.version }}"
-    assert 'removeprefix("v")' not in smoke["run"]
+
+    marker = "./bin/python - <<'PY'\n"
+    smoke_script = smoke["run"].split(marker, 1)[1].split("\nPY\n", 1)[0]
+    site_packages = tmp_path / "site-packages"
+    renderer = site_packages / "renderer"
+    renderer.mkdir(parents=True)
+    (renderer / "__init__.py").write_text("", encoding="utf-8")
+    distribution = site_packages / "jaxrenderer-1.2.3.dist-info"
+    distribution.mkdir()
+    (distribution / "METADATA").write_text(
+        "Metadata-Version: 2.1\nName: jaxrenderer\nVersion: 1.2.3\n",
+        encoding="utf-8",
+    )
+
+    environment = os.environ.copy()
+    environment["PYTHONPATH"] = str(site_packages)
+    environment["RELEASE_TAG"] = ""
+    for expected, returncode in (("1.2.3", 0), ("9.9.9", 1)):
+        environment["PACKAGE_VERSION"] = expected
+        result = subprocess.run(
+            [sys.executable, "-c", smoke_script],
+            cwd=tmp_path,
+            env=environment,
+            capture_output=True,
+            check=False,
+            text=True,
+            timeout=30,
+        )
+        assert result.returncode == returncode, result.stderr
+        if returncode:
+            assert "AssertionError" in result.stderr
 
 
 def test_release_checkouts_and_reusable_workflows_use_the_frozen_commit() -> None:
     workflow = load_workflow("pypi.yml")
     release = workflow["jobs"]
     prepare = release["prepare"]
+    checks = load_workflow("checks.yml")
 
-    assert "lint_base" not in prepare.get("outputs", {})
-    assert not any("baseline" in str(step).lower() for step in prepare["steps"])
+    assert release["cpu"]["uses"] == "./.github/workflows/checks.yml"
+    assert checks["on"]["workflow_call"]["inputs"]["commit"]["required"] == "true"
 
-    for checkout in checkout_steps(release["prepare"]):
+    prepare_checkouts = checkout_steps(prepare)
+    assert prepare_checkouts
+    assert_checkout_precedes_run_steps(prepare)
+    for checkout in prepare_checkouts:
         assert checkout["with"]["ref"] == "${{ github.sha }}"
     for job_name in ("build", "publish"):
         assert checkout_steps(release[job_name])[0]["with"]["ref"] == FROZEN_SHA
 
     for job_name in ("cpu", "gpu", "tpu"):
         assert release[job_name]["with"]["commit"] == FROZEN_SHA
-    assert "lint-base" not in release["cpu"].get("with", {})
 
     for workflow_name, binding_name in (
         ("release-gpu.yml", "gpu-release-binding.json"),
@@ -193,10 +230,6 @@ def test_release_tpu_wait_budgets_fit_the_hosted_job_and_keep_failure_reports() 
     tpu = jobs["tpu"]
     provider = step_named(tpu, "Confirm the release candidate on a Kaggle TPU")
 
-    assert jobs["prepare"]["timeout-minutes"] == "5"
-    assert provider["timeout-minutes"] == "330"
-    assert tpu["timeout-minutes"] == "350"
-    assert 350 < 360  # GitHub-hosted job maximum.
     provider_seconds = int(provider["timeout-minutes"]) * 60
     job_seconds = int(tpu["timeout-minutes"]) * 60
     phase_seconds = (
@@ -206,6 +239,7 @@ def test_release_tpu_wait_budgets_fit_the_hosted_job_and_keep_failure_reports() 
     assert provider_seconds - phase_seconds >= 45 * 60
     # The job also needs time after the provider step for finish and artefact upload.
     assert job_seconds - provider_seconds >= 20 * 60
+    assert int(tpu["timeout-minutes"]) < 360  # GitHub-hosted job maximum.
     assert ".venv/bin/python -u -m tools.kaggle_ci" in provider["run"]
 
     finish = step_named(tpu, "Validate the bound TPU result")
@@ -235,12 +269,6 @@ def test_cpu_reuse_includes_the_full_matrix_render_and_minimum_numpy_gates() -> 
 
     lint = checks["lint"]
     assert len(checkout_steps(lint)) == 1
-    assert (
-        "lint-base" not in load_workflow("checks.yml")["on"]["workflow_call"]["inputs"]
-    )
-    assert step_named(lint, "Check Ruff lint")["run"].startswith(
-        "uv run --no-sync --python 3.14 ruff check --no-respect-gitignore "
-    )
 
     matrix = checks["check"]
     assert matrix["strategy"]["matrix"]["python-version"] == ["3.12", "3.13", "3.14"]

@@ -442,16 +442,20 @@ def test_prepare_rejects_unknown_controller_schema_with_source_identity(
 def test_finish_separates_collection_from_release_credit(
     source: dict[str, Any], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    summary = tmp_path / "step-summary.md"
-    monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary))
+    summary_path = tmp_path / "step-summary.md"
+    monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary_path))
     original, output = prepare(tmp_path), collected(tmp_path)
     receipt = gate.finish(original, output, True)
+    summary = summary_path.read_text(encoding="utf-8")
+
+    assert HEAD in summary
+    assert "789.3" in summary
+    assert "990.1" in summary
     assert receipt["binding"] == binding()
     assert receipt["collector_run_id"] == "990.1"
     assert receipt["validation_only"] is True
     assert receipt["release_gate_credit"] is False
     assert receipt["source_conclusion"] == "failure"
-    assert f"Original commit: `{HEAD}`" in summary.read_text(encoding="utf-8")
     assert (
         gate.release_tpu_gate.finish(original / "binding.json", output, True)["state"]
         == "failure"
