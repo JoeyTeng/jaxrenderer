@@ -31,6 +31,28 @@ def step_running_module(job: dict[str, Any], module: str) -> dict[str, Any]:
     return next(step for step in job["steps"] if f"-m {module}" in step.get("run", ""))
 
 
+def assert_finish_invocation(step: dict[str, Any]) -> None:
+    command = step["run"].strip()
+    assert "\n" not in command and "\r" not in command
+    arguments = shlex.split(command)
+    assert arguments[:4] == [
+        "python",
+        "-m",
+        "tools.tpu_collection_gate",
+        "finish",
+    ]
+    options = arguments[4:]
+    assert len(options) == 6
+    assert Counter(zip(options[::2], options[1::2], strict=True)) == Counter(
+        {
+            ("--source-dir", "collection-source"): 1,
+            ("--output-dir", "collection-artifacts"): 1,
+            ("--provider-success", "$PROVIDER_SUCCESS"): 1,
+        }
+    )
+    assert "continue-on-error" not in step
+
+
 def locked_controller_install(job: dict[str, Any]) -> dict[str, Any]:
     return next(
         step
@@ -147,7 +169,7 @@ def test_collector_binds_original_evidence_before_provider_status_query() -> Non
     assert "GH_TOKEN" not in provider["env"]
 
     assert finish["if"] == "always()"
-    assert "tools.tpu_collection_gate finish" in finish["run"]
+    assert_finish_invocation(finish)
     assert finish["env"] == {
         "GH_TOKEN": "${{ github.token }}",
         "PROVIDER_SUCCESS": "${{ steps.provider.outcome == 'success' }}",

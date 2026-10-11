@@ -15,18 +15,37 @@ WORKFLOWS = ROOT / ".github" / "workflows"
 LINT_SCOPE = ["assets", "renderer", "examples", "test_resources", "tests", "tools"]
 
 
-def direct_command_tokens(command: str, tool: str) -> list[str]:
+def direct_command_tokens(
+    command: str, tool: str, expected_python: str | None = None
+) -> list[str]:
     """Return argv for a simple uv invocation of the expected tool."""
     assert "\n" not in command and "\r" not in command
     assert not re.search(r"[|;&<>`]|\$\(", command)
     tokens = shlex.split(command)
     assert tokens[:2] == ["uv", "run"]
     tokens = tokens[2:]
+    python_options = 0
     while tokens and tokens[0] in {"--no-sync", "--python"}:
         option = tokens.pop(0)
         if option == "--python":
+            python_options += 1
             assert tokens
-            tokens.pop(0)
+            python_version = tokens.pop(0)
+            matrix_version = "${{ matrix.python-version }}"
+            if python_version == matrix_version:
+                assert expected_python == matrix_version
+            else:
+                assert re.fullmatch(r"3\.(?:12|13|14)(?:\.\d+)?", python_version)
+            if expected_python is not None:
+                if expected_python == matrix_version:
+                    assert python_version == matrix_version
+                else:
+                    expected_parts = expected_python.split(".")
+                    actual_parts = python_version.split(".")
+                    assert actual_parts[:2] == expected_parts[:2]
+    assert python_options <= 1
+    if expected_python is not None:
+        assert python_options == 1
     assert tokens and tokens[0] == tool
     return tokens
 
@@ -53,7 +72,12 @@ def test_ci_runs_direct_ruff_check_on_the_full_candidate_scope() -> None:
         and "--select" not in tokens
     )
 
-    tokens = direct_command_tokens(lint_step["run"], "ruff")
+    lint_python = next(
+        step
+        for step in lint["steps"]
+        if step.get("uses", "").startswith("actions/setup-python@")
+    )["with"]["python-version"]
+    tokens = direct_command_tokens(lint_step["run"], "ruff", lint_python)
     assert tokens[1] == "check"
     assert Counter(tokens[2:]) == Counter(["--no-respect-gitignore", *LINT_SCOPE])
 

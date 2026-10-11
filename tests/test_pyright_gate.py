@@ -19,18 +19,37 @@ def load_yaml(path: Path) -> dict[str, Any]:
     return cast(dict[str, Any], value)
 
 
-def direct_command_tokens(command: str, tool: str) -> list[str]:
+def direct_command_tokens(
+    command: str, tool: str, expected_python: str | None = None
+) -> list[str]:
     """Return argv for a simple uv invocation of the expected tool."""
     assert "\n" not in command and "\r" not in command
     assert not re.search(r"[|;&<>`]|\$\(", command)
     tokens = shlex.split(command)
     assert tokens[:2] == ["uv", "run"]
     tokens = tokens[2:]
+    python_options = 0
     while tokens and tokens[0] in {"--no-sync", "--python"}:
         option = tokens.pop(0)
         if option == "--python":
+            python_options += 1
             assert tokens
-            tokens.pop(0)
+            python_version = tokens.pop(0)
+            matrix_version = "${{ matrix.python-version }}"
+            if python_version == matrix_version:
+                assert expected_python == matrix_version
+            else:
+                assert re.fullmatch(r"3\.(?:12|13|14)(?:\.\d+)?", python_version)
+            if expected_python is not None:
+                if expected_python == matrix_version:
+                    assert python_version == matrix_version
+                else:
+                    expected_parts = expected_python.split(".")
+                    actual_parts = python_version.split(".")
+                    assert actual_parts[:2] == expected_parts[:2]
+    assert python_options <= 1
+    if expected_python is not None:
+        assert python_options == 1
     assert tokens and tokens[0] == tool
     return tokens
 
@@ -49,7 +68,12 @@ def test_core_pyright_gate_is_strict_required_and_candidate_scoped() -> None:
         if "pyright" in shlex.split(step.get("run", ""))
         and "renderer/types.py" in shlex.split(step.get("run", ""))
     )
-    command = direct_command_tokens(gate["run"], "pyright")
+    lint_python = next(
+        step
+        for step in lint["steps"]
+        if step.get("uses", "").startswith("actions/setup-python@")
+    )["with"]["python-version"]
+    command = direct_command_tokens(gate["run"], "pyright", lint_python)
 
     assert len(checkouts) == 1
     assert checkouts[0]["with"]["ref"] == (
@@ -59,13 +83,27 @@ def test_core_pyright_gate_is_strict_required_and_candidate_scoped() -> None:
     assert gate.get("continue-on-error", "false") == "false"
     assert lint.get("continue-on-error", "false") == "false"
 
+    check = checks["check"]
+    matrix_python_versions = check["strategy"]["matrix"]["python-version"]
+    assert matrix_python_versions
+    assert all(
+        re.fullmatch(r"3\.(?:12|13|14)(?:\.\d+)?", version)
+        for version in matrix_python_versions
+    )
+    check_python = next(
+        step
+        for step in check["steps"]
+        if step.get("uses", "").startswith("actions/setup-python@")
+    )["with"]["python-version"]
     full_pyright = next(
         step
-        for step in checks["check"]["steps"]
+        for step in check["steps"]
         if "pyright" in shlex.split(step.get("run", ""))
         and "renderer/types.py" not in shlex.split(step.get("run", ""))
     )
-    assert direct_command_tokens(full_pyright["run"], "pyright") == ["pyright"]
+    assert direct_command_tokens(full_pyright["run"], "pyright", check_python) == [
+        "pyright"
+    ]
     assert re.fullmatch(
         r"\s*matrix\.python-version\s*==\s*'3\.14'\s*",
         full_pyright["if"],
