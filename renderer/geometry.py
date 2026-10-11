@@ -5,10 +5,10 @@ from functools import partial
 from typing import NamedTuple, Optional, Union, cast
 
 import jax
+from jax import Array
 import jax.lax as lax
 import jax.numpy as jnp
 from jaxtyping import (
-    Array,
     Float,
     Integer,
     Num,

@@ -6,6 +6,8 @@ Run `uv run ruff check --no-respect-gitignore assets renderer examples test_reso
 
 The required Python 3.14 lint job also runs strict Pyright with warnings enabled on `renderer/types.py` and `renderer/geometry.py`; both modules must have no errors or warnings. Matching pre-commit hooks run these checks when their target files or configuration change. The full-repository strict Pyright run remains advisory, with its diagnostics visible while broader JAX typing issues are addressed. A dedicated `linux-render-regression` job also runs the CPU render and gradient regressions on Python 3.14 with the locked dependencies.
 
+These modules use the public `jax.Array` type, following the [JAX typing guidance](https://docs.jax.dev/en/latest/jax.typing.html), alongside jaxtyping's dtype and shape specifications. Geometry checks retain their runtime validation of shared dimensions, including during JIT tracing; passing Pyright alone does not verify these constraints. The `typed_jit` wrapper preserves callable signatures for Pyright.
+
 ## Provider checks
 
 The `Manual GPU regression` workflow runs the same test suite and render and gradient regressions on a Modal T4 GPU. A maintainer dispatches it from `master` once before merging, specifying a pull request number. The workflow freezes its head and base revisions and records `accelerator/gpu` on the PR head. New commits need new checks; results from a changed head or base are rejected.

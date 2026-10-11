@@ -5,9 +5,9 @@ from __future__ import annotations
 from typing import Any
 
 import jax
+from jax import Array
 import jax.numpy as jnp
 from jaxtyping import (
-    Array,
     Float,
     jaxtyped,  # pyright: ignore[reportUnknownVariableType]
 )
