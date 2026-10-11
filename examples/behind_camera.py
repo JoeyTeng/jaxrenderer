@@ -11,7 +11,6 @@ import matplotlib.pyplot as plt
 from renderer import (
     CameraParameters,
     LightParameters,
-    List,
     Renderer,
     Scene,
     ShadowParameters,
@@ -71,7 +70,7 @@ shadow_param = ShadowParameters()
 
 # PROCESS: Render
 
-images: List[UInt8[Array, "width height channels"]] = []
+images: list[UInt8[Array, "width height channels"]] = []
 
 img = Renderer.get_camera_image(
     objects=[scene.objects[cube_1]],
@@ -107,7 +106,7 @@ fig, ax = plt.subplots()  # pyright: ignore
 # ims is a list of lists, each row is a list of artists to draw in the
 # current frame; here we are just animating one artist, the image, in
 # each frame
-ims: List[List[mimage.AxesImage]] = []
+ims: list[list[mimage.AxesImage]] = []
 for i, img in enumerate(images):
     im = cast(
         mimage.AxesImage,

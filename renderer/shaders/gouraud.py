@@ -1,5 +1,3 @@
-from __future__ import annotations  # tolerate "subscriptable 'type' for < 3.9
-
 from functools import partial
 from typing import NamedTuple, cast
 
@@ -10,7 +8,6 @@ from jaxtyping import (
     jaxtyped,  # pyright: ignore[reportUnknownVariableType]
 )
 
-from .._backport import Tuple
 from .._meta_utils import add_tracing_name
 from .._meta_utils import typed_jit as jit
 from ..geometry import Camera, normalise, to_homogeneous
@@ -60,7 +57,7 @@ class GouraudShader(
         gl_InstanceID: ID,
         camera: Camera,
         extra: GouraudExtraInput,
-    ) -> Tuple[PerVertex, GouraudExtraFragmentData]:
+    ) -> tuple[PerVertex, GouraudExtraFragmentData]:
         # Use gl_VertexID to index in `extra` buffer.
         position: Vec4f = to_homogeneous(extra.position[gl_VertexID])
         gl_Position: Vec4f = camera.to_clip(position)
@@ -97,7 +94,7 @@ class GouraudShader(
         gl_PointCoord: Vec2f,
         varying: GouraudExtraFragmentData,
         extra: GouraudExtraInput,
-    ) -> Tuple[PerFragment, GouraudExtraFragmentData]:
+    ) -> tuple[PerFragment, GouraudExtraFragmentData]:
         built_in: PerFragment = Shader.fragment(
             gl_FragCoord,
             gl_FrontFacing,

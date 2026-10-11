@@ -10,7 +10,7 @@ from jaxtyping import (
     jaxtyped,  # pyright: ignore[reportUnknownVariableType]
 )
 
-from renderer import Tuple, jit
+from renderer import jit
 from renderer.geometry import Camera, normalise, to_homogeneous
 from renderer.pipeline import render
 from renderer.shader import ID, MixerOutput, PerFragment, PerVertex, Shader
@@ -168,7 +168,7 @@ class _Shader(Shader[ExtraInput, ExtraFragmentData, ExtraMixerOutput]):
         gl_InstanceID: ID,
         camera: Camera,
         extra: ExtraInput,
-    ) -> Tuple[PerVertex, ExtraFragmentData]:
+    ) -> tuple[PerVertex, ExtraFragmentData]:
         # Use gl_VertexID to index in `extra` buffer.
         position: Vec4f = to_homogeneous(extra.position[gl_VertexID])
         gl_Position: Vec4f = camera.to_clip(position)
@@ -201,7 +201,7 @@ class _Shader(Shader[ExtraInput, ExtraFragmentData, ExtraMixerOutput]):
         gl_PointCoord: Vec2f,
         varying: ExtraFragmentData,
         extra: ExtraInput,
-    ) -> Tuple[PerFragment, ExtraFragmentData]:
+    ) -> tuple[PerFragment, ExtraFragmentData]:
         built_in: PerFragment = Shader.fragment(
             gl_FragCoord,
             gl_FrontFacing,
@@ -229,7 +229,7 @@ class _Shader(Shader[ExtraInput, ExtraFragmentData, ExtraMixerOutput]):
         gl_FragDepth: Float[Array, "primitives"],
         keeps: Bool[Array, "primitives"],
         extra: ExtraFragmentData,
-    ) -> Tuple[MixerOutput, ExtraMixerOutput]:
+    ) -> tuple[MixerOutput, ExtraMixerOutput]:
         mixer_output, extra_output = Shader.mix(gl_FragDepth, keeps, extra)
         assert isinstance(extra_output, ExtraFragmentData)
 

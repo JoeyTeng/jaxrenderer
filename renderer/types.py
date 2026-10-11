@@ -1,4 +1,4 @@
-from typing import Any, Generic, Protocol, TypeVar, Union, cast
+from typing import Any, Generic, NamedTuple, Protocol, TypeAlias, TypeVar, Union, cast
 
 import jax
 from jax import Array
@@ -12,7 +12,8 @@ from jaxtyping import (
     jaxtyped,  # pyright: ignore[reportUnknownVariableType]
 )
 
-from ._backport import JaxFloating, JaxInteger, NamedTuple, Tuple, Type, TypeAlias
+JaxFloating: TypeAlias = jnp.floating[Any]
+JaxInteger: TypeAlias = jnp.integer[Any]
 
 __all__ = [
     "JaxFloating",
@@ -117,12 +118,12 @@ class DtypeInfo(NamedTuple, Generic[_DtypeT]):
     min: _DtypeT
     max: _DtypeT
     bits: int
-    dtype: Type
+    dtype: type
 
     @classmethod
     @jaxtyped
     # cannot be jitted as `dtype` will not be a valid JAX type
-    def create(cls, dtype: Type[_DtypeT]) -> "DtypeInfo[_DtypeT]":
+    def create(cls, dtype: type[_DtypeT]) -> "DtypeInfo[_DtypeT]":
         with jax.ensure_compile_time_eval():
             if jnp.issubdtype(dtype, jnp.floating):
                 finfo = cast(_DtypeInfoLike[_DtypeT], jnp.finfo(dtype))
@@ -156,7 +157,7 @@ class LightSource(NamedTuple):
     colour: Colour = jax.numpy.ones(3)  # pyright: ignore[reportUnknownMemberType]
 
 
-_TargetsT = TypeVar("_TargetsT", bound=Tuple[Any, ...])
+_TargetsT = TypeVar("_TargetsT", bound=tuple[Any, ...])
 """Extra target buffers, must be in shape of (width, height, ...)."""
 
 
