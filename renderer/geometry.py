@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import enum
 from functools import partial
 from typing import NamedTuple, Optional, TypeAlias, Union, cast

@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 from collections.abc import Sequence
 from functools import partial
 from typing import Any, NamedTuple, Optional, TypeAlias, TypeVar, Union, cast
