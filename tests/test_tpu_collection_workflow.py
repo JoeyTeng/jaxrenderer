@@ -40,7 +40,19 @@ def locked_controller_install(job: dict[str, Any]) -> dict[str, Any]:
 
 
 def assert_locked_controller_sync(job: dict[str, Any]) -> None:
-    command = locked_controller_install(job)["run"].strip()
+    steps = job["steps"]
+    setup_python_step = next(
+        step
+        for step in steps
+        if step.get("uses", "").startswith("actions/setup-python@")
+    )
+    setup_uv_step = next(
+        step for step in steps if step.get("uses", "").startswith("astral-sh/setup-uv@")
+    )
+    install_step = locked_controller_install(job)
+    assert steps.index(setup_python_step) < steps.index(install_step)
+    assert steps.index(setup_uv_step) < steps.index(install_step)
+    command = install_step["run"].strip()
     assert "\n" not in command and "\r" not in command
     arguments = shlex.split(command)
     assert arguments[:2] == ["uv", "sync"]
@@ -56,7 +68,7 @@ def assert_locked_controller_sync(job: dict[str, Any]) -> None:
     assert version_parts[0] == 3 and 12 <= version_parts[1] <= 14
     setup_python = next(
         step
-        for step in job["steps"]
+        for step in steps
         if step.get("uses", "").startswith("actions/setup-python@")
     )["with"]["python-version"]
     setup_version = tuple(int(part) for part in setup_python.split("."))
