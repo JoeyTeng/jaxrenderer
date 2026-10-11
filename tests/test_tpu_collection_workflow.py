@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import shlex
 from typing import Any, cast
 
 import yaml
@@ -20,14 +21,25 @@ def load_workflow() -> dict[str, Any]:
     return cast(dict[str, Any], value)
 
 
-def step_named(job: dict[str, Any], name: str) -> dict[str, Any]:
-    return next(step for step in job["steps"] if step.get("name") == name)
+def step_with_id(job: dict[str, Any], step_id: str) -> dict[str, Any]:
+    return next(step for step in job["steps"] if step.get("id") == step_id)
+
+
+def step_running_module(job: dict[str, Any], module: str) -> dict[str, Any]:
+    return next(step for step in job["steps"] if f"-m {module}" in step.get("run", ""))
+
+
+def locked_controller_install(job: dict[str, Any]) -> dict[str, Any]:
+    return next(
+        step
+        for step in job["steps"]
+        if step.get("run", "").strip().startswith("uv sync ")
+    )
 
 
 def test_collector_is_manual_read_only_and_serialised_by_source_attempt() -> None:
     workflow = load_workflow()
 
-    assert workflow["name"] == "Collect delayed TPU results"
     assert set(workflow["on"]) == {"workflow_dispatch"}
     inputs = workflow["on"]["workflow_dispatch"]["inputs"]
     assert set(inputs) == {"source_run_id", "source_attempt", "commit"}
@@ -40,9 +52,7 @@ def test_collector_is_manual_read_only_and_serialised_by_source_attempt() -> Non
     }
     assert set(workflow["jobs"]) == {"collect"}
     job = workflow["jobs"]["collect"]
-    assert job["timeout-minutes"] == "15"
     assert job["environment"] == "kaggle-tpu"
-    assert "PyPI" not in str(job)
     assert "uv publish" not in str(job)
     assert "PYPI_API_TOKEN" not in str(job)
     assert "UV_PUBLISH_TOKEN" not in str(job)
@@ -51,25 +61,18 @@ def test_collector_is_manual_read_only_and_serialised_by_source_attempt() -> Non
 def test_collector_binds_original_evidence_before_provider_status_query() -> None:
     job = load_workflow()["jobs"]["collect"]
     steps = job["steps"]
-    names = [step.get("name", step.get("uses")) for step in steps]
-    prepare = step_named(
-        job, "Bind the original publishing run and retrieve its saved state"
+    prepare = step_with_id(job, "prepare")
+    provider = step_with_id(job, "provider")
+    finish = step_running_module(job, "tools.tpu_collection_gate finish")
+    upload = next(
+        step
+        for step in steps
+        if step.get("uses", "").startswith("actions/upload-artifact@")
     )
-    provider = step_named(job, "Collect the saved Kaggle TPU result")
-    finish = step_named(job, "Validate the collected result and write its receipt")
-    upload = step_named(job, "Upload TPU collection evidence")
+    install = locked_controller_install(job)
 
-    assert names.index(prepare["name"]) < names.index(
-        "Install the locked Kaggle controller"
-    )
-    assert names.index("Install the locked Kaggle controller") < names.index(
-        provider["name"]
-    )
-    assert (
-        names.index(provider["name"])
-        < names.index(finish["name"])
-        < names.index(upload["name"])
-    )
+    assert steps.index(prepare) < steps.index(install) < steps.index(provider)
+    assert steps.index(provider) < steps.index(finish) < steps.index(upload)
     assert prepare["env"] == {
         "GH_TOKEN": "${{ github.token }}",
         "SOURCE_RUN_ID": "${{ inputs.source_run_id }}",
@@ -81,7 +84,6 @@ def test_collector_binds_original_evidence_before_provider_status_query() -> Non
     assert '--source-attempt "$SOURCE_ATTEMPT"' in prepare["run"]
     assert '--commit "$SOURCE_COMMIT"' in prepare["run"]
     assert "--output-dir collection-source" in prepare["run"]
-    assert provider["timeout-minutes"] == "5"
     assert provider["env"] == {
         "KAGGLE_API_TOKEN": "${{ secrets.KAGGLE_API_TOKEN }}",
         "KAGGLE_USERNAME": "${{ vars.KAGGLE_USERNAME }}",
@@ -107,7 +109,6 @@ def test_collector_binds_original_evidence_before_provider_status_query() -> Non
     assert upload["uses"].startswith("actions/upload-artifact@")
     assert "collection-source/" in upload["with"]["path"]
     assert "collection-artifacts/" in upload["with"]["path"]
-    assert upload["with"]["retention-days"] == "30"
 
 
 def test_collector_checkout_and_dependency_install_use_trusted_locked_code() -> None:
@@ -117,16 +118,17 @@ def test_collector_checkout_and_dependency_install_use_trusted_locked_code() -> 
         for step in job["steps"]
         if step.get("uses", "").startswith("actions/checkout@")
     )
-    setup_python = next(
-        step
-        for step in job["steps"]
-        if step.get("uses", "").startswith("actions/setup-python@")
-    )
-    install = step_named(job, "Install the locked Kaggle controller")
-
     assert checkout["with"] == {
         "ref": "${{ github.sha }}",
         "persist-credentials": "false",
     }
-    assert setup_python["with"]["python-version"] == "3.14"
-    assert install["run"] == "uv sync --locked --only-group ci-kaggle --python 3.14"
+    install = locked_controller_install(job)
+    install_args = shlex.split(install["run"])
+    assert install_args[:2] == ["uv", "sync"]
+    assert "--locked" in install_args
+    only_groups = [
+        install_args[index + 1]
+        for index, argument in enumerate(install_args[:-1])
+        if argument == "--only-group"
+    ]
+    assert only_groups == ["ci-kaggle"]

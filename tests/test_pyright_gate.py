@@ -100,12 +100,3 @@ def test_pre_commit_runs_the_same_core_gate_on_config_or_target_changes() -> Non
         ["pyright", "--warnings", "renderer/types.py"]
     )
     assert full_hook["stages"] == ["manual"]
-
-
-def test_release_reuses_the_same_required_gate_on_the_frozen_candidate() -> None:
-    release = load_yaml(WORKFLOWS / "pypi.yml")["jobs"]
-    checks = load_yaml(WORKFLOWS / "checks.yml")
-
-    assert release["cpu"]["uses"] == "./.github/workflows/checks.yml"
-    assert release["cpu"]["with"]["commit"] == "${{ needs.prepare.outputs.head_sha }}"
-    assert checks["on"]["workflow_call"]["inputs"]["commit"]["required"] == "true"

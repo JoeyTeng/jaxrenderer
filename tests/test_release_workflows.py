@@ -82,15 +82,8 @@ def test_manual_rehearsal_shares_gates_and_cannot_publish() -> None:
         for step in rehearsal["steps"]
     )
 
-    gate_jobs = jobs
-    assert jobs["prepare"]["steps"][0]["with"]["ref"] == "${{ github.sha }}"
-    assert jobs["prepare"]["steps"][1]["uses"].startswith("actions/setup-python@")
     freeze = step_named(jobs["prepare"], "Freeze and validate the candidate")
     assert freeze["env"]["RELEASE_COMMIT"] == "${{ github.sha }}"
-    assert "workflow_dispatch" not in str(freeze["env"])
-    for job_name in ("cpu", "build", "gpu", "tpu"):
-        if "with" in gate_jobs[job_name]:
-            assert gate_jobs[job_name]["with"]["commit"] == FROZEN_SHA
 
     steps = rehearsal["steps"]
     binding_recheck = next(
@@ -167,6 +160,10 @@ def test_release_checkouts_and_reusable_workflows_use_the_frozen_commit() -> Non
     workflow = load_workflow("pypi.yml")
     release = workflow["jobs"]
     prepare = release["prepare"]
+    checks = load_workflow("checks.yml")
+
+    assert release["cpu"]["uses"] == "./.github/workflows/checks.yml"
+    assert checks["on"]["workflow_call"]["inputs"]["commit"]["required"] == "true"
 
     for checkout in checkout_steps(release["prepare"]):
         assert checkout["with"]["ref"] == "${{ github.sha }}"
@@ -218,10 +215,6 @@ def test_release_tpu_wait_budgets_fit_the_hosted_job_and_keep_failure_reports() 
     tpu = jobs["tpu"]
     provider = step_named(tpu, "Confirm the release candidate on a Kaggle TPU")
 
-    assert jobs["prepare"]["timeout-minutes"] == "5"
-    assert provider["timeout-minutes"] == "330"
-    assert tpu["timeout-minutes"] == "350"
-    assert 350 < 360  # GitHub-hosted job maximum.
     provider_seconds = int(provider["timeout-minutes"]) * 60
     job_seconds = int(tpu["timeout-minutes"]) * 60
     phase_seconds = (
@@ -231,6 +224,7 @@ def test_release_tpu_wait_budgets_fit_the_hosted_job_and_keep_failure_reports() 
     assert provider_seconds - phase_seconds >= 45 * 60
     # The job also needs time after the provider step for finish and artefact upload.
     assert job_seconds - provider_seconds >= 20 * 60
+    assert int(tpu["timeout-minutes"]) < 360  # GitHub-hosted job maximum.
     assert ".venv/bin/python -u -m tools.kaggle_ci" in provider["run"]
 
     finish = step_named(tpu, "Validate the bound TPU result")

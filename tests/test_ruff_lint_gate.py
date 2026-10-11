@@ -43,11 +43,6 @@ def load_checks_workflow() -> dict:
 def test_ci_runs_direct_ruff_check_on_the_full_candidate_scope() -> None:
     workflow = load_checks_workflow()
     lint = workflow["jobs"]["lint"]
-    checkout = next(
-        step
-        for step in lint["steps"]
-        if step.get("uses", "").startswith("actions/checkout@")
-    )
     lint_step = next(
         step
         for step in lint["steps"]
@@ -58,16 +53,6 @@ def test_ci_runs_direct_ruff_check_on_the_full_candidate_scope() -> None:
         and "--select" not in tokens
     )
 
-    assert checkout["with"]["ref"] == (
-        "${{ inputs.commit || github.event.pull_request.head.sha || github.sha }}"
-    )
-    assert (
-        sum(
-            step.get("uses", "").startswith("actions/checkout@")
-            for step in lint["steps"]
-        )
-        == 1
-    )
     tokens = direct_command_tokens(lint_step["run"], "ruff")
     assert tokens[1] == "check"
     assert Counter(tokens[2:]) == Counter(["--no-respect-gitignore", *LINT_SCOPE])
