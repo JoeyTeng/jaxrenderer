@@ -1,5 +1,6 @@
 """Contract tests for the repository's direct Ruff lint gate."""
 
+from collections import Counter
 from pathlib import Path
 import re
 import shlex
@@ -68,11 +69,8 @@ def test_ci_runs_direct_ruff_check_on_the_full_candidate_scope() -> None:
         == 1
     )
     tokens = direct_command_tokens(lint_step["run"], "ruff")
-    assert "--no-respect-gitignore" in tokens
-    assert {token for token in tokens if token in LINT_SCOPE} == set(LINT_SCOPE)
-    assert not any(
-        token == "--exit-zero" or token.startswith("--exit-zero=") for token in tokens
-    )
+    assert tokens[1] == "check"
+    assert Counter(tokens[2:]) == Counter(["--no-respect-gitignore", *LINT_SCOPE])
 
 
 def test_ruff_configuration_keeps_required_rules_and_intentional_ignores() -> None:
@@ -98,19 +96,19 @@ def test_pre_commit_runs_normal_ruff_check_with_existing_hooks_preserved() -> No
     format_tokens = direct_command_tokens(hooks_by_id["ruff-format"]["entry"], "ruff")
 
     assert import_tokens[1] == "check"
-    assert "--no-respect-gitignore" in import_tokens
-    assert import_tokens[import_tokens.index("--select") + 1] == "I"
-    assert "--fix" in import_tokens
+    select_index = import_tokens.index("--select")
+    assert import_tokens[select_index + 1] == "I"
+    assert Counter(
+        token
+        for index, token in enumerate(import_tokens[2:], start=2)
+        if index not in (select_index, select_index + 1)
+    ) == Counter(["--no-respect-gitignore", "--fix"])
 
     assert lint_tokens[1] == "check"
-    assert "--no-respect-gitignore" in lint_tokens
-    assert "--select" not in lint_tokens
-    assert not any(token.startswith("--exit-zero") for token in lint_tokens)
+    assert Counter(lint_tokens[2:]) == Counter(["--no-respect-gitignore"])
 
     assert format_tokens[1] == "format"
-    assert "--no-respect-gitignore" in format_tokens
-    assert not any(token.startswith("--exit-zero") for token in import_tokens)
-    assert not any(token.startswith("--exit-zero") for token in format_tokens)
+    assert Counter(format_tokens[2:]) == Counter(["--no-respect-gitignore"])
 
     for hook_id in ("ruff-imports", "ruff-check", "ruff-format"):
         pattern = re.compile(hooks_by_id[hook_id]["files"])

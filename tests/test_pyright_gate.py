@@ -1,5 +1,6 @@
 """Contract tests for the blocking core Pyright gate."""
 
+from collections import Counter
 from pathlib import Path
 import re
 import shlex
@@ -54,8 +55,7 @@ def test_core_pyright_gate_is_strict_required_and_candidate_scoped() -> None:
     assert checkouts[0]["with"]["ref"] == (
         "${{ inputs.commit || github.event.pull_request.head.sha || github.sha }}"
     )
-    assert "--warnings" in command
-    assert "renderer/types.py" in command[1:]
+    assert Counter(command) == Counter(["pyright", "--warnings", "renderer/types.py"])
     assert gate.get("continue-on-error", "false") == "false"
     assert lint.get("continue-on-error", "false") == "false"
 
@@ -65,9 +65,9 @@ def test_core_pyright_gate_is_strict_required_and_candidate_scoped() -> None:
         if "pyright" in shlex.split(step.get("run", ""))
         and "renderer/types.py" not in shlex.split(step.get("run", ""))
     )
-    direct_command_tokens(full_pyright["run"], "pyright")
-    assert re.search(
-        r"matrix\.python-version\s*==\s*['\"]3\.14['\"]",
+    assert direct_command_tokens(full_pyright["run"], "pyright") == ["pyright"]
+    assert re.fullmatch(
+        r"\s*matrix\.python-version\s*==\s*'3\.14'\s*",
         full_pyright["if"],
     )
     assert full_pyright["continue-on-error"] == "true"
@@ -96,8 +96,9 @@ def test_pre_commit_runs_the_same_core_gate_on_config_or_target_changes() -> Non
     assert pattern.search("renderer/types.py")
     assert not pattern.search("tests/unrelated.py")
     assert core_hook["pass_filenames"] is False
-    assert "--warnings" in core_command[1:]
-    assert "renderer/types.py" in core_command[1:]
+    assert Counter(core_command) == Counter(
+        ["pyright", "--warnings", "renderer/types.py"]
+    )
     assert full_hook["stages"] == ["manual"]
 
 
