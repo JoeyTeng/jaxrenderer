@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+from collections import Counter
 from pathlib import Path
+import re
 import shlex
 from typing import Any, cast
 
@@ -46,10 +48,46 @@ def locked_controller_install(job: dict[str, Any]) -> dict[str, Any]:
     )
 
 
+def assert_half_hour_schedule(workflow: dict[str, Any]) -> None:
+    schedules = workflow["on"]["schedule"]
+    assert len(schedules) == 1
+    fields = schedules[0]["cron"].split()
+    assert len(fields) == 5
+    assert fields[1:] == ["*"] * 4
+
+    minute = fields[0]
+    if minute == "*/30":
+        return
+    values = minute.split(",")
+    assert len(values) == 2
+    first, second = (int(value) for value in values)
+    assert 0 <= first < 30
+    assert second == first + 30
+
+
+def assert_locked_controller_sync(job: dict[str, Any]) -> None:
+    command = locked_controller_install(job)["run"].strip()
+    assert "\n" not in command and "\r" not in command
+    arguments = shlex.split(command)
+    assert arguments[:2] == ["uv", "sync"]
+    options = arguments[2:]
+    python_indexes = [
+        index for index, value in enumerate(options) if value == "--python"
+    ]
+    assert len(python_indexes) == 1 and python_indexes[0] + 1 < len(options)
+    python_index = python_indexes[0]
+    assert re.fullmatch(r"\d+\.\d+(?:\.\d+)?", options[python_index + 1])
+    remaining = options[:python_index] + options[python_index + 2 :]
+    assert Counter(remaining) == Counter(
+        {"--locked": 1, "--only-group": 1, "ci-kaggle": 1}
+    )
+    assert remaining[remaining.index("--only-group") + 1] == "ci-kaggle"
+
+
 def test_periodic_workflow_is_master_only_read_only_and_serialised() -> None:
     workflow = load_workflow()
 
-    assert workflow["on"]["schedule"]
+    assert_half_hour_schedule(workflow)
     assert "workflow_dispatch" in workflow["on"]
     assert workflow["permissions"] == {"contents": "read", "actions": "read"}
     assert workflow["concurrency"] == {
@@ -83,6 +121,7 @@ def test_discovery_is_read_only_no_source_job_and_retains_its_evidence() -> None
     assert "secrets." not in str(discover)
     assert upload["if"] == "always()"
     assert upload["with"]["path"] == "periodic-discovery/"
+    assert int(upload["with"]["retention-days"]) >= 30
 
     collect = workflow["jobs"]["collect"]
     assert collect["needs"] == "discover"
@@ -113,16 +152,7 @@ def test_collection_uses_original_attempt_lock_and_trusted_locked_controller() -
         "ref": "${{ github.sha }}",
         "persist-credentials": "false",
     }
-    install = locked_controller_install(collect)
-    install_args = shlex.split(install["run"])
-    assert install_args[:2] == ["uv", "sync"]
-    assert "--locked" in install_args
-    only_groups = [
-        install_args[index + 1]
-        for index, argument in enumerate(install_args[:-1])
-        if argument == "--only-group"
-    ]
-    assert only_groups == ["ci-kaggle"]
+    assert_locked_controller_sync(collect)
 
 
 def test_collection_uploads_all_evidence_and_only_terminal_outcomes_get_marker() -> (
@@ -158,6 +188,7 @@ def test_collection_uploads_all_evidence_and_only_terminal_outcomes_get_marker()
     assert "${{ matrix.source_run_id }}" in evidence_name
     assert "${{ matrix.source_attempt }}" in evidence_name
     assert evidence["with"]["path"] == "periodic-artifacts/"
+    assert int(evidence["with"]["retention-days"]) >= 30
 
     assert terminal["if"] == "always() && steps.collect.outputs.terminal == 'true'"
     assert terminal["with"]["name"] == (
@@ -165,6 +196,7 @@ def test_collection_uploads_all_evidence_and_only_terminal_outcomes_get_marker()
         "${{ matrix.source_attempt }}-${{ matrix.commit }}"
     )
     assert terminal["with"]["path"] == "periodic-artifacts/periodic-terminal.json"
+    assert int(terminal["with"]["retention-days"]) >= 30
     assert "PYPI_API_TOKEN" not in str(workflow)
     assert "uv publish" not in str(workflow)
     assert "release-tpu.yml" not in str(workflow)

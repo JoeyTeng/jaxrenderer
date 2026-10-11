@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+from collections import Counter
 from pathlib import Path
+import re
 import shlex
 from typing import Any, cast
 
@@ -35,6 +37,25 @@ def locked_controller_install(job: dict[str, Any]) -> dict[str, Any]:
         for step in job["steps"]
         if step.get("run", "").strip().startswith("uv sync ")
     )
+
+
+def assert_locked_controller_sync(job: dict[str, Any]) -> None:
+    command = locked_controller_install(job)["run"].strip()
+    assert "\n" not in command and "\r" not in command
+    arguments = shlex.split(command)
+    assert arguments[:2] == ["uv", "sync"]
+    options = arguments[2:]
+    python_indexes = [
+        index for index, value in enumerate(options) if value == "--python"
+    ]
+    assert len(python_indexes) == 1 and python_indexes[0] + 1 < len(options)
+    python_index = python_indexes[0]
+    assert re.fullmatch(r"\d+\.\d+(?:\.\d+)?", options[python_index + 1])
+    remaining = options[:python_index] + options[python_index + 2 :]
+    assert Counter(remaining) == Counter(
+        {"--locked": 1, "--only-group": 1, "ci-kaggle": 1}
+    )
+    assert remaining[remaining.index("--only-group") + 1] == "ci-kaggle"
 
 
 def test_collector_is_manual_read_only_and_serialised_by_source_attempt() -> None:
@@ -73,6 +94,11 @@ def test_collector_binds_original_evidence_before_provider_status_query() -> Non
 
     assert steps.index(prepare) < steps.index(install) < steps.index(provider)
     assert steps.index(provider) < steps.index(finish) < steps.index(upload)
+    job_timeout = int(job["timeout-minutes"])
+    provider_timeout = int(provider["timeout-minutes"])
+    assert 0 < provider_timeout <= 5
+    assert job_timeout <= 15
+    assert job_timeout - provider_timeout >= 10
     assert prepare["env"] == {
         "GH_TOKEN": "${{ github.token }}",
         "SOURCE_RUN_ID": "${{ inputs.source_run_id }}",
@@ -109,6 +135,7 @@ def test_collector_binds_original_evidence_before_provider_status_query() -> Non
     assert upload["uses"].startswith("actions/upload-artifact@")
     assert "collection-source/" in upload["with"]["path"]
     assert "collection-artifacts/" in upload["with"]["path"]
+    assert int(upload["with"]["retention-days"]) >= 30
 
 
 def test_collector_checkout_and_dependency_install_use_trusted_locked_code() -> None:
@@ -122,13 +149,4 @@ def test_collector_checkout_and_dependency_install_use_trusted_locked_code() -> 
         "ref": "${{ github.sha }}",
         "persist-credentials": "false",
     }
-    install = locked_controller_install(job)
-    install_args = shlex.split(install["run"])
-    assert install_args[:2] == ["uv", "sync"]
-    assert "--locked" in install_args
-    only_groups = [
-        install_args[index + 1]
-        for index, argument in enumerate(install_args[:-1])
-        if argument == "--only-group"
-    ]
-    assert only_groups == ["ci-kaggle"]
+    assert_locked_controller_sync(job)

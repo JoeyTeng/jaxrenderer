@@ -165,7 +165,9 @@ def test_release_checkouts_and_reusable_workflows_use_the_frozen_commit() -> Non
     assert release["cpu"]["uses"] == "./.github/workflows/checks.yml"
     assert checks["on"]["workflow_call"]["inputs"]["commit"]["required"] == "true"
 
-    for checkout in checkout_steps(release["prepare"]):
+    prepare_checkouts = checkout_steps(prepare)
+    assert prepare_checkouts
+    for checkout in prepare_checkouts:
         assert checkout["with"]["ref"] == "${{ github.sha }}"
     for job_name in ("build", "publish"):
         assert checkout_steps(release[job_name])[0]["with"]["ref"] == FROZEN_SHA
