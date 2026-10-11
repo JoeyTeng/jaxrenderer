@@ -14,7 +14,6 @@ from renderer import (
     GUID,
     CameraParameters,
     LightParameters,
-    List,
     Renderer,
     Scene,
     ShadowParameters,
@@ -49,7 +48,7 @@ scene, capsule_id = scene.add_capsule(
     diffuse_map=texture,
 )
 
-capsule_obj_ids: List[GUID] = []
+capsule_obj_ids: list[GUID] = []
 for i in range(12):
     scene, capsule_obj_id = scene.add_object_instance(capsule_id)
     capsule_obj_ids.append(capsule_obj_id)
@@ -108,7 +107,7 @@ fig, ax = plt.subplots()  # pyright: ignore
 # ims is a list of lists, each row is a list of artists to draw in the
 # current frame; here we are just animating one artist, the image, in
 # each frame
-ims: List[List[mimage.AxesImage]] = []
+ims: list[list[mimage.AxesImage]] = []
 for i in range(cast(Float[Array, "_b _w _h _c"], images).shape[0]):
     img = cast(Float[Array, "_w _h _c"], images[i])
     im = cast(
