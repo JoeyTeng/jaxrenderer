@@ -8,6 +8,7 @@ import re
 import shlex
 from typing import Any, cast
 
+from tools.tpu_collection_periodic import MAX_RUNTIME_SECONDS
 import yaml
 
 WORKFLOWS = Path(__file__).parents[1] / ".github" / "workflows"
@@ -148,6 +149,7 @@ def test_discovery_is_read_only_no_source_job_and_retains_its_evidence() -> None
     collect = workflow["jobs"]["collect"]
     assert collect["needs"] == "discover"
     assert collect["if"] == "needs.discover.outputs.has_sources == 'true'"
+    assert int(collect["timeout-minutes"]) * 60 - MAX_RUNTIME_SECONDS >= 5 * 60
     assert collect["strategy"] == {
         "fail-fast": "false",
         "max-parallel": "1",
@@ -209,6 +211,7 @@ def test_collection_uploads_all_evidence_and_only_terminal_outcomes_get_marker()
     evidence_name = evidence["with"]["name"]
     assert "${{ matrix.source_run_id }}" in evidence_name
     assert "${{ matrix.source_attempt }}" in evidence_name
+    assert not evidence_name.startswith("tpu-periodic-terminal-")
     assert evidence["with"]["path"] == "periodic-artifacts/"
     assert int(evidence["with"]["retention-days"]) >= 30
 
