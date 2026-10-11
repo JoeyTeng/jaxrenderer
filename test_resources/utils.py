@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 import re
-from typing import List
+from typing import TypeAlias
 
 from PIL import Image
 import jax
@@ -8,13 +8,12 @@ import jax.numpy as jnp
 from jaxtyping import jaxtyped  # pyright: ignore[reportUnknownVariableType]
 import numpy as np
 
-from renderer import Tuple, TypeAlias
 from renderer.types import FaceIndices, Normals, Texture, UVCoordinates, Vertices
 
 jax.config.update("jax_array", True)  # pyright: ignore[reportUnknownMemberType]
 
-T2f: TypeAlias = Tuple[float, float]
-T3f: TypeAlias = Tuple[float, float, float]
+T2f: TypeAlias = tuple[float, float]
+T3f: TypeAlias = tuple[float, float, float]
 
 
 @dataclass(frozen=True)
@@ -44,13 +43,13 @@ class Model:
         return self.faces.shape[0]
 
 
-def make_model(fileContent: List[str]) -> Model:
-    verts: List[T3f] = []
-    norms: List[T3f] = []
-    uv: List[T2f] = []
-    faces: List[List[int]] = []
-    faces_norm: List[List[int]] = []
-    faces_uv: List[List[int]] = []
+def make_model(fileContent: list[str]) -> Model:
+    verts: list[T3f] = []
+    norms: list[T3f] = []
+    uv: list[T2f] = []
+    faces: list[list[int]] = []
+    faces_norm: list[list[int]] = []
+    faces_uv: list[list[int]] = []
 
     _float = re.compile(r"(-?\d+\.?\d*(?:e[+-]\d+)?)")
     _integer = re.compile(r"\d+")
@@ -66,14 +65,14 @@ def make_model(fileContent: List[str]) -> Model:
             uv_coord: T2f = tuple(map(float, _float.findall(line, 2)[:2]))
             uv.append(uv_coord)
         elif line.startswith("f "):
-            face: List[int] = []
-            face_norm: List[int] = []
-            face_uv: List[int] = []
+            face: list[int] = []
+            face_norm: list[int] = []
+            face_uv: list[int] = []
 
-            vertices: List[str] = _one_vertex.findall(line)
+            vertices: list[str] = _one_vertex.findall(line)
             assert len(vertices) == 3, f"Expected 3 vertices, (got {len(vertices)}"
             for vertex in _one_vertex.findall(line):
-                indices: List[int] = list(map(int, _integer.findall(vertex)))
+                indices: list[int] = list(map(int, _integer.findall(vertex)))
                 assert len(indices) == 3, (
                     f"Expected 3 indices (v/vt/vn), got {len(indices)}"
                 )
