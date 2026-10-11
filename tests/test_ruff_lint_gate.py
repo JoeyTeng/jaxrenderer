@@ -62,9 +62,10 @@ def load_checks_workflow() -> dict:
 def test_ci_runs_direct_ruff_check_on_the_full_candidate_scope() -> None:
     workflow = load_checks_workflow()
     lint = workflow["jobs"]["lint"]
-    lint_step = next(
-        step
-        for step in lint["steps"]
+    lint_steps = lint["steps"]
+    lint_step_index, lint_step = next(
+        (index, step)
+        for index, step in enumerate(lint_steps)
         if (tokens := shlex.split(step.get("run", "")))
         and "ruff" in tokens
         and tokens[tokens.index("ruff") + 1] == "check"
@@ -72,11 +73,56 @@ def test_ci_runs_direct_ruff_check_on_the_full_candidate_scope() -> None:
         and "--select" not in tokens
     )
 
+    checkout_steps = [
+        step
+        for step in lint_steps[:lint_step_index]
+        if step.get("uses", "").startswith("actions/checkout@")
+    ]
+    assert checkout_steps
+    checkout_options = checkout_steps[0]["with"]
+    assert (ROOT / checkout_options.get("path", ".")).resolve() == ROOT.resolve()
+    assert not checkout_options.get("sparse-checkout")
     lint_python = next(
         step
-        for step in lint["steps"]
+        for step in lint_steps
         if step.get("uses", "").startswith("actions/setup-python@")
     )["with"]["python-version"]
+
+    for step in lint_steps[:lint_step_index]:
+        action = step.get("uses", "")
+        if action:
+            assert action.startswith(
+                ("actions/checkout@", "actions/setup-python@", "astral-sh/setup-uv@")
+            )
+            assert "run" not in step
+            continue
+
+        command = step["run"].strip()
+        assert "\n" not in command and "\r" not in command
+        assert not re.search(r"[|;&<>`]|\$\(", command)
+        tokens = shlex.split(command)
+        if tokens[:2] == ["uv", "sync"]:
+            assert tokens[tokens.index("--python") + 1] == lint_python
+            assert Counter(tokens[2:]) == Counter(
+                ["--locked", "--all-groups", "--python", lint_python]
+            )
+            continue
+
+        tokens = direct_command_tokens(command, "ruff", lint_python)
+        if tokens[1] == "check" and "--select" in tokens[2:]:
+            select_index = tokens.index("--select")
+            assert tokens[select_index + 1] == "I"
+            assert Counter(
+                token
+                for index, token in enumerate(tokens[2:], start=2)
+                if index not in (select_index, select_index + 1)
+            ) == Counter(["--no-respect-gitignore", *LINT_SCOPE])
+        else:
+            assert tokens[1] == "format"
+            assert Counter(tokens[2:]) == Counter(
+                ["--no-respect-gitignore", "--check", *LINT_SCOPE]
+            )
+
     tokens = direct_command_tokens(lint_step["run"], "ruff", lint_python)
     assert tokens[1] == "check"
     assert Counter(tokens[2:]) == Counter(["--no-respect-gitignore", *LINT_SCOPE])

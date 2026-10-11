@@ -80,6 +80,9 @@ def test_core_pyright_gate_is_strict_required_and_candidate_scoped() -> None:
     command = direct_command_tokens(gate["run"], "pyright", lint_python)
 
     assert len(checkouts) == 1
+    assert checkouts[0]["with"]["repository"] == (
+        "${{ github.event.pull_request.head.repo.full_name || github.repository }}"
+    )
     assert checkouts[0]["with"]["ref"] == (
         "${{ inputs.commit || github.event.pull_request.head.sha || github.sha }}"
     )
@@ -157,6 +160,10 @@ def test_pyright_configuration_is_strict() -> None:
     ]["pyright"]
 
     assert pyright["typeCheckingMode"] == "strict"
+    assert "venvPath" in pyright and "venv" in pyright
+    assert (ROOT / pyright["venvPath"] / pyright["venv"]).resolve() == (
+        ROOT / ".venv"
+    ).resolve()
     global_python = pyright["pythonVersion"]
     assert supported_python_version(global_python)
     assert all(
