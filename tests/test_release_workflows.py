@@ -36,6 +36,18 @@ def checkout_steps(job: dict[str, Any]) -> list[dict[str, Any]]:
     ]
 
 
+def assert_checkout_precedes_run_steps(job: dict[str, Any]) -> None:
+    steps = job["steps"]
+    checkout_indexes = [
+        index
+        for index, step in enumerate(steps)
+        if step.get("uses", "").startswith("actions/checkout@")
+    ]
+    run_indexes = [index for index, step in enumerate(steps) if "run" in step]
+    assert checkout_indexes and run_indexes
+    assert min(checkout_indexes) < min(run_indexes)
+
+
 def assert_hard_gates_fail_closed(
     jobs: dict[str, dict[str, Any]], job_names: tuple[str, ...]
 ) -> None:
@@ -167,6 +179,7 @@ def test_release_checkouts_and_reusable_workflows_use_the_frozen_commit() -> Non
 
     prepare_checkouts = checkout_steps(prepare)
     assert prepare_checkouts
+    assert_checkout_precedes_run_steps(prepare)
     for checkout in prepare_checkouts:
         assert checkout["with"]["ref"] == "${{ github.sha }}"
     for job_name in ("build", "publish"):

@@ -19,6 +19,10 @@ def load_yaml(path: Path) -> dict[str, Any]:
     return cast(dict[str, Any], value)
 
 
+def supported_python_version(version: str) -> bool:
+    return re.fullmatch(r"3\.(?:12|13|14)(?:\.\d+)?", version) is not None
+
+
 def direct_command_tokens(
     command: str, tool: str, expected_python: str | None = None
 ) -> list[str]:
@@ -39,7 +43,7 @@ def direct_command_tokens(
             if python_version == matrix_version:
                 assert expected_python == matrix_version
             else:
-                assert re.fullmatch(r"3\.(?:12|13|14)(?:\.\d+)?", python_version)
+                assert supported_python_version(python_version)
             if expected_python is not None:
                 if expected_python == matrix_version:
                     assert python_version == matrix_version
@@ -86,15 +90,51 @@ def test_core_pyright_gate_is_strict_required_and_candidate_scoped() -> None:
     check = checks["check"]
     matrix_python_versions = check["strategy"]["matrix"]["python-version"]
     assert matrix_python_versions
-    assert all(
-        re.fullmatch(r"3\.(?:12|13|14)(?:\.\d+)?", version)
-        for version in matrix_python_versions
-    )
+    assert all(supported_python_version(version) for version in matrix_python_versions)
     check_python = next(
         step
         for step in check["steps"]
         if step.get("uses", "").startswith("actions/setup-python@")
     )["with"]["python-version"]
+    assert check_python == "${{ matrix.python-version }}"
+    sync_step = next(
+        step
+        for step in check["steps"]
+        if shlex.split(step.get("run", ""))[:2] == ["uv", "sync"]
+    )
+    sync_command = sync_step["run"].strip()
+    assert "\n" not in sync_command and "\r" not in sync_command
+    sync_tokens = shlex.split(sync_command)
+    assert sync_tokens[:2] == ["uv", "sync"]
+    assert sync_tokens[sync_tokens.index("--python") + 1] == check_python
+    assert Counter(sync_tokens) == Counter(
+        [
+            "uv",
+            "sync",
+            "--locked",
+            "--all-groups",
+            "--python",
+            "${{ matrix.python-version }}",
+        ]
+    )
+    python_check = next(
+        step
+        for step in check["steps"]
+        if "python" in shlex.split(step.get("run", ""))
+        and "--version" in shlex.split(step.get("run", ""))
+    )
+    assert direct_command_tokens(python_check["run"], "python", check_python) == [
+        "python",
+        "--version",
+    ]
+    pytest_step = next(
+        step for step in check["steps"] if "pytest" in shlex.split(step.get("run", ""))
+    )
+    pytest_tokens = direct_command_tokens(pytest_step["run"], "pytest", check_python)
+    assert Counter(pytest_tokens[1:]) == Counter(
+        ["tests/", "--import-mode", "importlib"]
+    )
+    assert pytest_tokens[pytest_tokens.index("--import-mode") + 1] == "importlib"
     full_pyright = next(
         step
         for step in check["steps"]
@@ -117,6 +157,12 @@ def test_pyright_configuration_is_strict() -> None:
     ]["pyright"]
 
     assert pyright["typeCheckingMode"] == "strict"
+    global_python = pyright["pythonVersion"]
+    assert supported_python_version(global_python)
+    assert all(
+        supported_python_version(environment.get("pythonVersion", global_python))
+        for environment in pyright.get("executionEnvironments", [])
+    )
 
 
 def test_pre_commit_runs_the_same_core_gate_on_config_or_target_changes() -> None:

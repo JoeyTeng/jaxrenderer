@@ -123,6 +123,7 @@ def test_periodic_workflow_is_master_only_read_only_and_serialised() -> None:
         "github.repository == 'JoeyTeng/jaxrenderer' && "
         "github.ref == 'refs/heads/master'"
     )
+    assert int(discover["timeout-minutes"]) * 60 >= MAX_RUNTIME_SECONDS
     assert discover["outputs"] == {
         "has_sources": "${{ steps.discover.outputs.has_sources }}",
         "matrix": "${{ steps.discover.outputs.matrix }}",
