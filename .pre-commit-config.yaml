@@ -61,18 +61,11 @@ repos:
         pass_filenames: false
         stages: [manual]
 
-      - id: pyright-core-types
-        name: Pyright core types
-        entry: uv run --no-sync --python 3.14 pyright --warnings renderer/types.py
+      - id: pyright-required-modules
+        name: Pyright required modules
+        entry: uv run --no-sync --python 3.14 pyright --warnings renderer/types.py renderer/geometry.py renderer/model.py
         language: system
-        files: ^(pyproject\.toml|renderer/types\.py)$
-        pass_filenames: false
-
-      - id: pyright-geometry
-        name: Pyright geometry
-        entry: uv run --no-sync --python 3.14 pyright --warnings renderer/geometry.py
-        language: system
-        files: ^(pyproject[.]toml|renderer/(geometry|types)[.]py)$
+        files: ^(\.pre-commit-config[.]yaml|pyproject[.]toml|renderer/(types|geometry|model|_meta_utils|value_checker)[.]py)$
         pass_filenames: false
 
       - id: cspell
