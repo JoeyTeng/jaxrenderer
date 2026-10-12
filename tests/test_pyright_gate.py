@@ -66,18 +66,28 @@ def test_core_pyright_gate_is_strict_required_and_candidate_scoped() -> None:
         for step in lint["steps"]
         if step.get("uses", "").startswith("actions/checkout@")
     ]
-    gate = next(
+    required_modules = {
+        "renderer/types.py",
+        "renderer/geometry.py",
+        "renderer/model.py",
+    }
+    gates = [
         step
         for step in lint["steps"]
         if "pyright" in shlex.split(step.get("run", ""))
-        and "renderer/types.py" in shlex.split(step.get("run", ""))
-    )
+        and required_modules.intersection(shlex.split(step.get("run", "")))
+    ]
     lint_python = next(
         step
         for step in lint["steps"]
         if step.get("uses", "").startswith("actions/setup-python@")
     )["with"]["python-version"]
+    assert len(gates) == 1
+    gate = gates[0]
     command = direct_command_tokens(gate["run"], "pyright", lint_python)
+    assert command.count("--warnings") == 1
+    assert [token for token in command if token.startswith("-")] == ["--warnings"]
+    assert required_modules.issubset(set(command))
 
     assert len(checkouts) == 1
     assert checkouts[0]["with"]["repository"] == (
@@ -86,7 +96,6 @@ def test_core_pyright_gate_is_strict_required_and_candidate_scoped() -> None:
     assert checkouts[0]["with"]["ref"] == (
         "${{ inputs.commit || github.event.pull_request.head.sha || github.sha }}"
     )
-    assert Counter(command) == Counter(["pyright", "--warnings", "renderer/types.py"])
     assert gate.get("continue-on-error", "false") == "false"
     assert lint.get("continue-on-error", "false") == "false"
 
@@ -172,22 +181,39 @@ def test_pyright_configuration_is_strict() -> None:
     )
 
 
-def test_pre_commit_runs_the_same_core_gate_on_config_or_target_changes() -> None:
+def test_pre_commit_runs_the_required_gate_on_config_or_target_changes() -> None:
     config = yaml.safe_load(
         (ROOT / ".pre-commit-config.yaml").read_text(encoding="utf-8")
     )
     assert isinstance(config, dict)
     hooks = next(repo["hooks"] for repo in config["repos"] if repo["repo"] == "local")
-    core_hook = next(hook for hook in hooks if hook["id"] == "pyright-core-types")
+    blocking_hooks = [hook for hook in hooks if hook["id"].startswith("pyright-")]
+    assert [hook["id"] for hook in blocking_hooks] == ["pyright-required-modules"]
+    required_hook = blocking_hooks[0]
     full_hook = next(hook for hook in hooks if hook["id"] == "pyright")
-    core_command = direct_command_tokens(core_hook["entry"], "pyright")
+    required_command = direct_command_tokens(required_hook["entry"], "pyright", "3.14")
 
-    pattern = re.compile(core_hook["files"])
-    assert pattern.search("pyproject.toml")
-    assert pattern.search("renderer/types.py")
+    pattern = re.compile(required_hook["files"])
+    required_triggers = {
+        ".pre-commit-config.yaml",
+        "pyproject.toml",
+        "renderer/types.py",
+        "renderer/geometry.py",
+        "renderer/model.py",
+        "renderer/_meta_utils.py",
+        "renderer/value_checker.py",
+    }
+    assert all(pattern.search(path) for path in required_triggers)
     assert not pattern.search("tests/unrelated.py")
-    assert core_hook["pass_filenames"] is False
-    assert Counter(core_command) == Counter(
-        ["pyright", "--warnings", "renderer/types.py"]
-    )
+    assert required_hook["pass_filenames"] is False
+    assert required_hook.get("stages", ["pre-commit"]) != ["manual"]
+    assert required_command.count("--warnings") == 1
+    assert [token for token in required_command if token.startswith("-")] == [
+        "--warnings"
+    ]
+    assert {
+        "renderer/types.py",
+        "renderer/geometry.py",
+        "renderer/model.py",
+    } <= set(required_command)
     assert full_hook["stages"] == ["manual"]
