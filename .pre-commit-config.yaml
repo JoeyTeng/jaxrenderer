@@ -68,6 +68,13 @@ repos:
         files: ^(pyproject\.toml|renderer/types\.py)$
         pass_filenames: false
 
+      - id: pyright-geometry
+        name: Pyright geometry
+        entry: uv run --no-sync --python 3.14 pyright --warnings renderer/geometry.py
+        language: system
+        files: ^(pyproject[.]toml|renderer/(geometry|types)[.]py)$
+        pass_filenames: false
+
       - id: cspell
         name: cspell
         entry: cspell-cli

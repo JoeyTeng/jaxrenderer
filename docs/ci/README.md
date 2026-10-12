@@ -4,7 +4,9 @@ The GitHub Actions workflow tests Python 3.12–3.14 on Linux using the locked d
 
 Run `uv run ruff check --no-respect-gitignore assets renderer examples test_resources tests tools` to run the same zero-violation `.py` and `.pyi` lint gate locally. Ruff uses the rules and ignores in `pyproject.toml` and checks in-scope files even when `.gitignore` matches them; `typings/` remains out of scope.
 
-The required Python 3.14 lint job also runs strict Pyright with warnings enabled on `renderer/types.py`; this core module must have no errors or warnings. The full-repository strict Pyright run remains advisory, with its diagnostics visible while broader JAX typing issues are addressed. A dedicated `linux-render-regression` job also runs the CPU render and gradient regressions on Python 3.14 with the locked dependencies.
+The required Python 3.14 lint job also runs strict Pyright with warnings enabled on `renderer/types.py` and `renderer/geometry.py`; both modules must have no errors or warnings. Matching pre-commit hooks run these checks when their target files or configuration change. The full-repository strict Pyright run remains advisory, with its diagnostics visible while broader JAX typing issues are addressed. A dedicated `linux-render-regression` job also runs the CPU render and gradient regressions on Python 3.14 with the locked dependencies.
+
+These modules use the public `jax.Array` type, following the [JAX typing guidance](https://docs.jax.dev/en/latest/jax.typing.html), alongside jaxtyping's dtype and shape specifications. Geometry checks retain their runtime validation of shared dimensions, including during JIT tracing; passing Pyright alone does not verify these constraints. The `typed_jit` wrapper preserves callable signatures for Pyright.
 
 ## Provider checks
 
@@ -41,7 +43,7 @@ gh workflow run accelerators.yml --ref master -f pr=PR_NUMBER
 
 ### Publishing a release
 
-Publishing a GitHub Release starts `Build, validate and publish`. The workflow freezes the tag's full commit SHA, requires that commit to be in `master` history, and checks that the tag matches the package version. It reuses the ordinary CI gates: Ruff, strict Pyright on `renderer/types.py`, Python 3.12–3.14 tests, Linux/macOS render and gradient regressions, and the isolated NumPy `2.1.3` compatibility check. Ruff and the core type gate check the frozen candidate directly; full-repository Pyright remains advisory.
+Publishing a GitHub Release starts `Build, validate and publish`. The workflow freezes the tag's full commit SHA, requires that commit to be in `master` history, and checks that the tag matches the package version. It reuses the ordinary CI gates: Ruff, strict Pyright on `renderer/types.py` and `renderer/geometry.py`, Python 3.12–3.14 tests, Linux/macOS render and gradient regressions, and the isolated NumPy `2.1.3` compatibility check. Ruff and the required type gates check the frozen candidate directly; full-repository Pyright remains advisory.
 
 The package is built once and its installed wheel is smoke-tested. Only after CPU CI and the build pass do Modal GPU and Kaggle TPU confirmation run in parallel. Each validates the same frozen SHA and workflow attempt, genuine devices and the existing numerical tolerances. Failure, cancellation, timeout, missing reports or insufficient free quota block PyPI publication; there is no paid fallback or automatic retry.
 
