@@ -3,12 +3,12 @@ from functools import partial
 from typing import NamedTuple, Optional, TypeAlias, Union, cast
 
 import jax
+from jax import Array
 import jax.experimental.checkify as checkify
 import jax.lax as lax
 import jax.numpy as jnp
 from jax.tree_util import tree_map
 from jaxtyping import (
-    Array,
     Bool,
     Float,
     Integer,
@@ -17,7 +17,7 @@ from jaxtyping import (
     jaxtyped,  # pyright: ignore[reportUnknownVariableType]
 )
 
-from ._meta_utils import add_tracing_name
+from ._meta_utils import add_tracing_name, is_array_type
 from ._meta_utils import typed_jit as jit
 from .geometry import Camera, transform_matrix_from_rotation
 from .types import (
@@ -74,14 +74,14 @@ class Model(NamedTuple):
         """
         if specular_map is None:
             # reference: https://github.com/erwincoumans/tinyrenderer/blob/89e8adafb35ecf5134e7b17b71b0f825939dc6d9/model.cpp#L215
-            specular_map = lax.full(diffuse_map.shape[:2], 2.0)  # pyright: ignore
+            specular_map = lax.full(diffuse_map.shape[:2], 2.0)
 
-        assert isinstance(verts, Vertices), f"{verts}"
-        assert isinstance(norms, Normals), f"{norms}"
-        assert isinstance(uvs, UVCoordinates), f"{uvs}"
-        assert isinstance(faces, FaceIndices), f"{faces}"
-        assert isinstance(diffuse_map, Texture), f"{diffuse_map}"
-        assert isinstance(specular_map, SpecularMap), f"{specular_map}"
+        assert is_array_type(verts, Vertices), f"{verts}"
+        assert is_array_type(norms, Normals), f"{norms}"
+        assert is_array_type(uvs, UVCoordinates), f"{uvs}"
+        assert is_array_type(faces, FaceIndices), f"{faces}"
+        assert is_array_type(diffuse_map, Texture), f"{diffuse_map}"
+        assert is_array_type(specular_map, SpecularMap), f"{specular_map}"
 
         return cls(
             verts=verts,
@@ -98,14 +98,14 @@ class Model(NamedTuple):
     @jit
     def asserts(self) -> None:
         """Asserts that all fields are of correct shape and type."""
-        assert isinstance(self.verts, Vertices), f"{self.verts}"
-        assert isinstance(self.norms, Normals), f"{self.norms}"
-        assert isinstance(self.uvs, UVCoordinates), f"{self.uvs}"
-        assert isinstance(self.faces, FaceIndices), f"{self.faces}"
-        assert isinstance(self.faces_norm, FaceIndices), f"{self.faces_norm}"
-        assert isinstance(self.faces_uv, FaceIndices), f"{self.faces_uv}"
-        assert isinstance(self.diffuse_map, Texture), f"{self.diffuse_map}"
-        assert isinstance(self.specular_map, SpecularMap), f"{self.specular_map}"
+        assert is_array_type(self.verts, Vertices), f"{self.verts}"
+        assert is_array_type(self.norms, Normals), f"{self.norms}"
+        assert is_array_type(self.uvs, UVCoordinates), f"{self.uvs}"
+        assert is_array_type(self.faces, FaceIndices), f"{self.faces}"
+        assert is_array_type(self.faces_norm, FaceIndices), f"{self.faces_norm}"
+        assert is_array_type(self.faces_uv, FaceIndices), f"{self.faces_uv}"
+        assert is_array_type(self.diffuse_map, Texture), f"{self.diffuse_map}"
+        assert is_array_type(self.specular_map, SpecularMap), f"{self.specular_map}"
 
     @jaxtyped
     @checkify.checkify
@@ -132,19 +132,19 @@ class Model(NamedTuple):
             f"faces out of bound, expected [0, {self.verts.shape[0]}),"
             # separately specify fmt_kwargs in a non-f-string.
             " got {max_idx}.",
-            max_idx=self.faces.max(),  # pyright: ignore[reportUnknownMemberType]
+            max_idx=self.faces.max(),
         )
         checkify.check(  # pyright: ignore[reportUnknownMemberType]
             index_in_bound(self.faces_norm, self.norms.shape[0]),
             f"faces_norm out of bound, expected [0, {self.norms.shape[0]}),"
             " got {max_idx}.",
-            max_idx=self.faces_norm.max(),  # pyright: ignore[reportUnknownMemberType]
+            max_idx=self.faces_norm.max(),
         )
         checkify.check(  # pyright: ignore[reportUnknownMemberType]
             index_in_bound(self.faces_uv, self.uvs.shape[0]),
             f"faces_uv out of bound, expected [0, {self.uvs.shape[0]}),"
             " got {max_idx}.",
-            max_idx=self.faces_uv.max(),  # pyright: ignore[reportUnknownMemberType]
+            max_idx=self.faces_uv.max(),
         )
 
 
@@ -187,7 +187,7 @@ class MergedModel(NamedTuple):
     def generate_object_vert_info(
         counts: Sequence[int],
         values: Sequence[Union[int, Shaped[Array, "..."]]],
-    ) -> Shaped[Array, "vertices"]:
+    ) -> Shaped[Array, "vertices ..."]:
         """Generate object-wide info for each vertex in merged model as
             vertex-level info.
 
@@ -201,18 +201,22 @@ class MergedModel(NamedTuple):
             `counts` to create matrices: the shape depends on the value of
             `counts`.
         """
-        _values: Sequence[Shaped[Array, "_"]] = cast(
-            Sequence[Shaped[Array, "_"]],
-            tree_map(
-                lambda count, value: jnp.full(  # pyright: ignore[reportUnknownMemberType]
-                    (count, *jnp.asarray(value).shape),  # pyright: ignore
-                    value,
-                ),
-                counts,
-                values,
-            ),
+
+        def fill_vertices(
+            count: int,
+            value: Union[int, Shaped[Array, "..."]],
+        ) -> Array:
+            vertices: Array = jnp.full(  # pyright: ignore[reportUnknownMemberType]
+                (count, *jnp.asarray(value).shape),  # pyright: ignore[reportUnknownMemberType]
+                value,
+            )
+            return vertices
+
+        _values: Sequence[Array] = cast(
+            Sequence[Array],
+            tree_map(fill_vertices, counts, values),
         )
-        map_indices = lax.concatenate(_values, dimension=0)  # pyright: ignore
+        map_indices = lax.concatenate(_values, dimension=0)
 
         return map_indices
 
@@ -230,15 +234,15 @@ class MergedModel(NamedTuple):
         for count in counts:
             cumsum.append(cumsum[-1] + count)
 
-        dtype = jax.dtypes.result_type(*vs)  # pyright: ignore
+        dtype = jax.dtypes.result_type(*vs)
 
         # merge vertices
-        verts: VertT = lax.concatenate(  # pyright: ignore[reportUnknownMemberType]
-            [v.astype(dtype) for v in vs],  # pyright: ignore[reportUnknownMemberType]
+        verts: VertT = lax.concatenate(
+            [v.astype(dtype) for v in vs],
             dimension=0,
         )
         # merge faces
-        faces: FaceIndicesT = lax.concatenate(  # pyright: ignore[reportUnknownMemberType]
+        faces: FaceIndicesT = lax.concatenate(
             [f + cumsum[i] for i, f in enumerate(fs)],
             dimension=0,
         )
@@ -270,8 +274,11 @@ class MergedModel(NamedTuple):
         # TODO: find a better way to merge maps
         with jax.ensure_compile_time_eval():
             dims: int = len(maps[0].shape)
-            shapes: Sequence[tuple[int, ...]]
-            shapes = tree_map(lambda m: m.shape, maps)
+
+            def map_shape(m: MapT) -> tuple[int, ...]:
+                return m.shape
+
+            shapes: Sequence[tuple[int, ...]] = tree_map(map_shape, maps)
             # pick the largest shape for each dimension
             single_shape: tuple[int, ...] = cast(
                 tuple[int, ...],
@@ -283,23 +290,22 @@ class MergedModel(NamedTuple):
                 ),
             )
 
-            dtype = jax.dtypes.result_type(*maps)  # pyright: ignore
+            dtype = jax.dtypes.result_type(*maps)
 
-        new_map = lax.concatenate(  # pyright: ignore[reportUnknownMemberType]
-            tree_map(
-                lambda m: lax.pad(  # pyright: ignore[reportUnknownMemberType]
-                    m,
-                    jnp.array(0, dtype=m.dtype),  # pyright: ignore
-                    tree_map(
-                        lambda capacity, content: (0, capacity - content, 0),
-                        single_shape,
-                        m.shape,
-                    ),
-                ).astype(dtype),
-                maps,
-            ),
-            dimension=0,
-        )
+        def pad_map(m: MapT) -> MapT:
+            def padding(
+                capacity: int,
+                content: int,
+            ) -> tuple[int, int, int]:
+                return (0, capacity - content, 0)
+
+            padding_config = tree_map(padding, single_shape, m.shape)
+            return lax.pad(m, lax.full((), 0, dtype=m.dtype), padding_config).astype(
+                dtype
+            )
+
+        padded_maps: Sequence[MapT] = tree_map(pad_map, maps)
+        new_map: MapT = lax.concatenate(padded_maps, dimension=0)
 
         return new_map, (single_shape[0], single_shape[1])
 
@@ -324,20 +330,20 @@ class MergedModel(NamedTuple):
             scalar.
           - map_index: index of the map to use.
         """
-        assert isinstance(uv, Float[Array, "2"]), f"{uv}"
-        assert isinstance(shape, Integer[Array, "2"]), f"{shape}"
-        assert isinstance(map_index, IntV), f"{map_index}"
-        assert isinstance(offset, IntV), f"{offset}"
+        assert is_array_type(uv, Float[Array, "2"]), f"{uv}"
+        assert is_array_type(shape, Integer[Array, "2"]), f"{shape}"
+        assert is_array_type(map_index, IntV), f"{map_index}"
+        assert is_array_type(offset, IntV), f"{offset}"
         # since given uv are in [0, 1] (and may be scaled, if is cube),
         # we need to multiply it by (w, h) of the texture map first.
         # This is equivalent to just obtain the fractional part of uv.
-        fractional_uv: FloatV = cast(FloatV, jnp.modf(uv)[0])
-        fractional_uv = jnp.where(  # pyright: ignore[reportUnknownMemberType]
+        fractional_uv: FloatV = jnp.modf(uv)[0]  # pyright: ignore[reportUnknownMemberType]
+        fractional_uv = jnp.where(
             fractional_uv < 0,
             fractional_uv + 1,
             fractional_uv,
         )
-        assert isinstance(fractional_uv, Float[Array, "2"])
+        assert is_array_type(fractional_uv, Float[Array, "2"])
 
         return (fractional_uv * shape).at[0].add(map_index * offset)
 
@@ -349,7 +355,7 @@ class ModelObject(NamedTuple):
     """Reference to the model, with mesh, attached maps, etc."""
     local_scaling: Vec3f = jnp.ones(3)  # pyright: ignore[reportUnknownMemberType]
     """Local scaling factors of the object, in x, y, z."""
-    transform: ModelMatrix = jnp.identity(4)  # pyright: ignore[reportUnknownMemberType]
+    transform: ModelMatrix = jnp.identity(4)
     """Transform matrix (model matrix) of the model."""
     # TODO: Support double_sided
     double_sided: BoolV = FALSE_ARRAY
@@ -364,9 +370,7 @@ class ModelObject(NamedTuple):
         Parameters:
           - position: the new position of the object.
         """
-        return self._replace(
-            transform=self.transform.at[:3, 3].set(position)  # pyright: ignore
-        )
+        return self._replace(transform=self.transform.at[:3, 3].set(position))
 
     @jaxtyped
     def replace_with_orientation(
@@ -389,17 +393,12 @@ class ModelObject(NamedTuple):
             if orientation is None:
                 orientation = jnp.array((0.0, 0.0, 0.0, 1.0))  # pyright: ignore
 
-            assert isinstance(orientation, Vec4f), f"{orientation}"
+            assert is_array_type(orientation, Vec4f), f"{orientation}"
             rotation_matrix = transform_matrix_from_rotation(orientation)
 
-        assert isinstance(
-            rotation_matrix,
-            Float[Array, "3 3"],
-        ), f"{rotation_matrix}"
+        assert is_array_type(rotation_matrix, Float[Array, "3 3"]), f"{rotation_matrix}"
 
-        return self._replace(
-            transform=self.transform.at[:3, :3].set(rotation_matrix)  # pyright: ignore
-        )
+        return self._replace(transform=self.transform.at[:3, :3].set(rotation_matrix))
 
     @jaxtyped
     def replace_with_local_scaling(self, local_scaling: Vec3f) -> "ModelObject":
@@ -431,7 +430,7 @@ def batch_models(models: Sequence[MergedModel]) -> MergedModel:
     """
     merged_model = MergedModel._make(
         (
-            lax.concatenate(  # pyright: ignore[reportUnknownMemberType]
+            lax.concatenate(
                 [
                     jnp.asarray(model[i])[None, ...]  # pyright: ignore
                     for model in models
@@ -466,19 +465,19 @@ def merge_objects(objects: Sequence[ModelObject]) -> MergedModel:
             counts,
             list(range(len(models))),
         )
-        assert isinstance(map_indices, Integer[Array, "vertices"])
+        assert is_array_type(map_indices, Integer[Array, "vertices"])
 
         map_wh_per_object = jnp.asarray(  # pyright: ignore[reportUnknownMemberType]
             [m.diffuse_map.shape[:2] for m in models]
         )
-        assert isinstance(map_wh_per_object, Integer[Array, "objects 2"])
+        assert is_array_type(map_wh_per_object, Integer[Array, "objects 2"])
 
         double_sided: Bool[Array, "vertices"]
         double_sided = MergedModel.generate_object_vert_info(
             counts,
             [obj.double_sided for obj in objects],
         )
-        assert isinstance(double_sided, Bool[Array, "vertices"])
+        assert is_array_type(double_sided, Bool[Array, "vertices"])
 
     # merge maps
     diffuse_map, single_map_shape = MergedModel.merge_maps(
@@ -496,7 +495,7 @@ def merge_objects(objects: Sequence[ModelObject]) -> MergedModel:
     ) -> Vertices:
         """Apply transforms defined in `ModelObject` to vertices."""
         world: Float[Array, "N 3"] = Camera.apply_pos(verts * local_scaling, transform)
-        assert isinstance(world, Float[Array, "N 3"])
+        assert is_array_type(world, Float[Array, "N 3"])
 
         return world
 
@@ -529,7 +528,7 @@ def merge_objects(objects: Sequence[ModelObject]) -> MergedModel:
                 jnp.linalg.inv(transform).T,  # pyright: ignore
             ),
         )
-        assert isinstance(world, Float[Array, "N 3"])
+        assert is_array_type(world, Float[Array, "N 3"])
 
         return world
 

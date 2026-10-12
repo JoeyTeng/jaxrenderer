@@ -75,6 +75,13 @@ repos:
         files: ^(pyproject[.]toml|renderer/(geometry|types)[.]py)$
         pass_filenames: false
 
+      - id: pyright-model
+        name: Pyright model
+        entry: uv run --no-sync --python 3.14 pyright --warnings renderer/model.py
+        language: system
+        files: ^(pyproject[.]toml|renderer/(model|types|geometry|_meta_utils|value_checker)[.]py)$
+        pass_filenames: false
+
       - id: cspell
         name: cspell
         entry: cspell-cli
