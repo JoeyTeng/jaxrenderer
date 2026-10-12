@@ -43,7 +43,7 @@ gh workflow run accelerators.yml --ref master -f pr=PR_NUMBER
 
 ### Publishing a release
 
-Publishing a GitHub Release starts `Build, validate and publish`. The workflow freezes the tag's full commit SHA, requires that commit to be in `master` history, and checks that the tag matches the package version. It reuses the ordinary CI gates: Ruff, strict Pyright on `renderer/types.py`, `renderer/geometry.py` and `renderer/model.py`, Python 3.12–3.14 tests, Linux/macOS render and gradient regressions, and the isolated NumPy `2.1.3` compatibility check. Ruff and the required type gates check the frozen candidate directly; full-repository Pyright remains advisory.
+Publishing a GitHub Release starts `Build, validate and publish`. The workflow freezes the tag's full commit SHA, requires that commit to be in `master` history, and checks that the tag matches the package version. It reuses the ordinary CI gates: Ruff, strict Pyright on the required modules listed above, Python 3.12–3.14 tests, Linux/macOS render and gradient regressions, and the isolated NumPy `2.1.3` compatibility check. Ruff and the required type gates check the frozen candidate directly; full-repository Pyright remains advisory.
 
 The package is built once and its installed wheel is smoke-tested. Only after CPU CI and the build pass do Modal GPU and Kaggle TPU confirmation run in parallel. Each validates the same frozen SHA and workflow attempt, genuine devices and the existing numerical tolerances. Failure, cancellation, timeout, missing reports or insufficient free quota block PyPI publication; there is no paid fallback or automatic retry.
 
