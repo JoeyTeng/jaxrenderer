@@ -13,7 +13,7 @@ from jaxtyping import (
 )
 import pytest
 
-from renderer.geometry import _is_array_type  # pyright: ignore[reportPrivateUsage]
+from renderer._meta_utils import is_array_type
 
 
 def _array(shape: tuple[int, ...], dtype: Any) -> Array:
@@ -22,14 +22,14 @@ def _array(shape: tuple[int, ...], dtype: Any) -> Array:
 
 @jaxtyped(typechecker=None)
 def _matches_shared_vector_size(left: object, right: object) -> bool:
-    return _is_array_type(left, Float[Array, "n 3"]) and _is_array_type(
+    return is_array_type(left, Float[Array, "n 3"]) and is_array_type(
         right, Float[Array, "n 3"]
     )
 
 
 @jaxtyped(typechecker=None)
 def _matches_float_matrix(value: object) -> bool:
-    return _is_array_type(value, Float[Array, "n 3"])
+    return is_array_type(value, Float[Array, "n 3"])
 
 
 @jaxtyped(typechecker=None)

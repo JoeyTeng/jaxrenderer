@@ -13,7 +13,7 @@ from jaxtyping import (
     jaxtyped,  # pyright: ignore[reportUnknownVariableType]
 )
 
-from ._meta_utils import add_tracing_name
+from ._meta_utils import add_tracing_name, is_array_type
 from ._meta_utils import typed_jit as jit
 from .types import FloatV, JaxFloating, NumV, Triangle2Df, Vec2f, Vec2i, Vec3f, Vec4f
 
@@ -35,13 +35,6 @@ Projection: TypeAlias = Float[Array, "4 4"]
 Viewport: TypeAlias = Float[Array, "4 4"]
 
 
-def _is_array_type(value: object, array_type: object) -> bool:
-    """Check a jaxtyping specification in the active shape context."""
-    # This cast bridges Pyright's static type-form limitation; the runtime
-    # specification passed to isinstance is unchanged.
-    return isinstance(value, cast(type[Array], array_type))
-
-
 @jaxtyped
 @partial(jit, donate_argnums=(0,), inline=True)
 @add_tracing_name
@@ -51,7 +44,7 @@ def normalise(vector: Float[Array, "*a dim"]) -> Float[Array, "*a dim"]:
         Float[Array, "*a dim"],
         vector / jnp.linalg.norm(vector),
     )
-    assert _is_array_type(result, Float[Array, "*a dim"])
+    assert is_array_type(result, Float[Array, "*a dim"])
 
     return result
 
@@ -142,7 +135,7 @@ def interpolate(
         barycentric_screen=barycentric_screen,
         barycentric_clip=barycentric_clip,
     )
-    assert _is_array_type(interpolated, Num[Array, "*valueDimensions"])
+    assert is_array_type(interpolated, Num[Array, "*valueDimensions"])
 
     return interpolated
 
@@ -156,7 +149,7 @@ def to_homogeneous(
 ) -> Float[Array, "*batch dim+1"]:
     """Transform the coordinates to homogeneous coordinates by append a batch
     of `value`s (default 1.) in the last axis."""
-    if not _is_array_type(cast(object, value), Float[Array, "*batch"]):
+    if not is_array_type(cast(object, value), Float[Array, "*batch"]):
         value = jnp.array(value)  # pyright: ignore[reportUnknownMemberType]
 
     target_dtype = jax.dtypes.result_type(coordinates)
@@ -258,7 +251,7 @@ class Camera(NamedTuple):
         """
         if view_inv is None:
             view_inv = cast(View, jnp.linalg.inv(view))
-        assert _is_array_type(view_inv, View)
+        assert is_array_type(view_inv, View)
 
         projection_inv: Projection = lax.cond(  # pyright: ignore
             jnp.isclose(projection[3, 3], 0),
@@ -269,12 +262,12 @@ class Camera(NamedTuple):
             # arg
             projection,
         )
-        assert _is_array_type(cast(object, projection_inv), Projection), (
+        assert is_array_type(cast(object, projection_inv), Projection), (
             f"{projection_inv}"
         )
 
         viewport_inv: Viewport = cls.viewport_matrix_inv(viewport)
-        assert _is_array_type(viewport_inv, Viewport)
+        assert is_array_type(viewport_inv, Viewport)
 
         return cls(
             view=view,
@@ -321,7 +314,7 @@ class Camera(NamedTuple):
             matrix.astype(dtype),
             (((lhs_contract_axis,), (1,)), ([], [])),
         )
-        assert _is_array_type(transformed, Num[Array, "*N 4"])
+        assert is_array_type(transformed, Num[Array, "*N 4"])
 
         return transformed
 
@@ -346,13 +339,13 @@ class Camera(NamedTuple):
         Returns: coordinates transformed
         """
         points_homo = to_homogeneous(points)
-        assert _is_array_type(points_homo, Num[Array, "*N 4"])
+        assert is_array_type(points_homo, Num[Array, "*N 4"])
 
         transformed_homo = cls.apply(points_homo, matrix)
-        assert _is_array_type(transformed_homo, Num[Array, "*N 4"])
+        assert is_array_type(transformed_homo, Num[Array, "*N 4"])
 
         transformed = to_cartesian(transformed_homo)
-        assert _is_array_type(transformed, Num[Array, "*N 3"])
+        assert is_array_type(transformed, Num[Array, "*N 3"])
 
         return transformed
 
@@ -377,7 +370,7 @@ class Camera(NamedTuple):
         Returns: vectors transformed and normalised
         """
         normalised_vectors = normalise(vectors)
-        assert _is_array_type(normalised_vectors, Num[Array, "*N 3"])
+        assert is_array_type(normalised_vectors, Num[Array, "*N 3"])
 
         points_homo = cast(
             Num[Array, "*N 4"],
@@ -386,16 +379,16 @@ class Camera(NamedTuple):
                 jnp.zeros((), dtype=vectors.dtype),  # pyright: ignore
             ),
         )
-        assert _is_array_type(points_homo, Num[Array, "*N 4"])
+        assert is_array_type(points_homo, Num[Array, "*N 4"])
 
         transformed_homo = cls.apply(points_homo, matrix)
-        assert _is_array_type(transformed_homo, Num[Array, "*N 4"])
+        assert is_array_type(transformed_homo, Num[Array, "*N 4"])
 
         transformed = transformed_homo[..., :3]
-        assert _is_array_type(transformed, Num[Array, "*N 3"])
+        assert is_array_type(transformed, Num[Array, "*N 3"])
 
         transformed_normalised = normalise(transformed)
-        assert _is_array_type(transformed_normalised, Num[Array, "*N 3"])
+        assert is_array_type(transformed_normalised, Num[Array, "*N 3"])
 
         return transformed_normalised
 
@@ -418,10 +411,10 @@ class Camera(NamedTuple):
             coordinates are normalised.
         """
         screen_space = self.apply(points, self.world_to_screen)
-        assert _is_array_type(screen_space, Num[Array, "*N 4"])
+        assert is_array_type(screen_space, Num[Array, "*N 4"])
 
         normalised = normalise_homogeneous(screen_space)
-        assert _is_array_type(normalised, Num[Array, "*N 4"])
+        assert is_array_type(normalised, Num[Array, "*N 4"])
 
         return normalised
 
@@ -444,7 +437,7 @@ class Camera(NamedTuple):
             coordinates are not normalized.
         """
         clip_space = self.apply(points, self.world_to_clip)
-        assert _is_array_type(clip_space, Num[Array, "*N 4"])
+        assert is_array_type(clip_space, Num[Array, "*N 4"])
 
         return clip_space
 
@@ -474,7 +467,7 @@ class Camera(NamedTuple):
             self.viewport,
             _screen,
         )
-        assert _is_array_type(clip, Float[Array, "*N 4"])
+        assert is_array_type(clip, Float[Array, "*N 4"])
         shuffle = lax.cond(  # pyright: ignore
             self.projection[3, 3] == 0,
             # perspective projection
@@ -486,9 +479,9 @@ class Camera(NamedTuple):
             self.projection[..., shuffle],
             clip[..., shuffle],
         )[..., shuffle]
-        assert _is_array_type(eye, Float[Array, "*N 4"])
+        assert is_array_type(eye, Float[Array, "*N 4"])
         world = self.apply(eye, self.view_inv)
-        assert _is_array_type(world, Float[Array, "*N 4"])
+        assert is_array_type(world, Float[Array, "*N 4"])
 
         if screen.ndim == 1:
             world = world[0]
@@ -521,20 +514,20 @@ class Camera(NamedTuple):
         """
 
         scale_inv = jnp.diag(1.0 / jnp.diag(scale_translation_mat))
-        assert _is_array_type(scale_inv, Float[Array, "4 4"])
+        assert is_array_type(scale_inv, Float[Array, "4 4"])
 
         # scale_translation = scale @ translation;
         # thus  translation = scale_inv @ scale @ translation
         #                   = scale_inv @ scale_translation
         translation: Float[Array, "4 4"] = scale_inv @ scale_translation_mat
-        assert _is_array_type(translation, Float[Array, "4 4"])
+        assert is_array_type(translation, Float[Array, "4 4"])
 
         # inverse of translation: negative of translation
         translation_inv = jnp.identity(4).at[:3, 3].set(-translation[:3, 3])
-        assert _is_array_type(translation_inv, Float[Array, "4 4"])
+        assert is_array_type(translation_inv, Float[Array, "4 4"])
 
         scale_translation_inv = translation_inv @ scale_inv
-        assert _is_array_type(scale_translation_inv, Float[Array, "4 4"])
+        assert is_array_type(scale_translation_inv, Float[Array, "4 4"])
 
         return scale_translation_inv
 
@@ -629,14 +622,14 @@ class Camera(NamedTuple):
             .set(-forward)
         )
         m_inv: View = m.T
-        assert _is_array_type(m_inv, View)
+        assert is_array_type(m_inv, View)
 
         # inverse of translation is just the negative of translation
         translation_inv: View = jnp.identity(4).at[:3, 3].set(eye)
-        assert _is_array_type(translation_inv, View)
+        assert is_array_type(translation_inv, View)
 
         view_matrix_inv: View = translation_inv @ m_inv
-        assert _is_array_type(view_matrix_inv, View)
+        assert is_array_type(view_matrix_inv, View)
 
         return view_matrix_inv
 
@@ -713,10 +706,10 @@ class Camera(NamedTuple):
         """
         with jax.ensure_compile_time_eval():
             shuffle: Integer[Array, "4"] = jnp.array((0, 1, 3, 2))  # pyright: ignore
-            assert _is_array_type(shuffle, Integer[Array, "4"])
+            assert is_array_type(shuffle, Integer[Array, "4"])
 
         inv = cls.inv_scale_translation_matrix(mat[:, shuffle])[shuffle, :]
-        assert _is_array_type(inv, Projection)
+        assert is_array_type(inv, Projection)
 
         return inv
 
@@ -780,7 +773,7 @@ class Camera(NamedTuple):
         `inv_scale_translation_matrix` directly.
         """
         inv = cls.inv_scale_translation_matrix(mat)
-        assert _is_array_type(inv, Projection)
+        assert is_array_type(inv, Projection)
 
         return inv
 
@@ -864,7 +857,7 @@ class Camera(NamedTuple):
         Return: Viewport^{-1}, (4, 4) matrix.
         """
         viewport_inv: Viewport = cls.inv_scale_translation_matrix(viewport)
-        assert _is_array_type(viewport_inv, Viewport)
+        assert is_array_type(viewport_inv, Viewport)
 
         return viewport_inv
 
@@ -902,7 +895,7 @@ def compute_normal(triangle_verts: Float[Array, "3 3"]) -> Float[Array, "3"]:
         triangle_verts[1, :] - triangle_verts[0, :],
     )
     normal = cast(Float[Array, "3"], normal / jnp.linalg.norm(normal, keepdims=True))
-    assert _is_array_type(normal, Float[Array, "3"])
+    assert is_array_type(normal, Float[Array, "3"])
 
     return normal
 
@@ -923,8 +916,8 @@ def quaternion(
     """
     axis = normalise(jnp.asarray(rotation_axis))  # pyright: ignore
     angle = jnp.radians(jnp.asarray(rotation_angle))  # pyright: ignore
-    assert _is_array_type(axis, Vec3f), f"{rotation_axis}"
-    assert _is_array_type(angle, FloatV), f"{rotation_angle}"
+    assert is_array_type(axis, Vec3f), f"{rotation_axis}"
+    assert is_array_type(angle, FloatV), f"{rotation_angle}"
 
     quaternion: Vec4f = (
         jnp.zeros(4)  # pyright: ignore[reportUnknownMemberType]
@@ -948,8 +941,8 @@ def quaternion_mul(quatA: Vec4f, quatB: Vec4f) -> Vec4f:
     References:
       - [Quaternion multiplication](https://www.mathworks.com/help/nav/ref/quaternion.mtimes.html)
     """
-    assert _is_array_type(quatA, Vec4f)
-    assert _is_array_type(quatB, Vec4f)
+    assert is_array_type(quatA, Vec4f)
+    assert is_array_type(quatB, Vec4f)
 
     with jax.ensure_compile_time_eval():
         idx103 = jnp.array((1, 0, 3))  # pyright: ignore[reportUnknownMemberType]
@@ -984,8 +977,8 @@ def rotation_matrix(
     """
     axis = normalise(jnp.asarray(rotation_axis))  # pyright: ignore
     angle = jnp.radians(jnp.asarray(rotation_angle))  # pyright: ignore
-    assert _is_array_type(axis, Vec3f), f"{rotation_axis}"
-    assert _is_array_type(angle, FloatV), f"{rotation_angle}"
+    assert is_array_type(axis, Vec3f), f"{rotation_axis}"
+    assert is_array_type(angle, FloatV), f"{rotation_angle}"
 
     c = jnp.cos(angle)
 
@@ -996,7 +989,7 @@ def rotation_matrix(
         - jnp.sin(angle) * jnp.cross(axis, jnp.identity(3))
         + (1 - c) * jnp.outer(axis, axis),  # first term
     )
-    assert _is_array_type(rotation_matrix, Float[Array, "3 3"])
+    assert is_array_type(rotation_matrix, Float[Array, "3 3"])
 
     return rotation_matrix
 
@@ -1030,7 +1023,7 @@ def transform_matrix_from_rotation(rotation: Vec4f) -> Float[Array, "3 3"]:
             (xz - wy, yz + wx, 1.0 - (xx + yy)),
         )
     )
-    assert _is_array_type(mat, Float[Array, "3 3"])
+    assert is_array_type(mat, Float[Array, "3 3"])
 
     return mat
 
@@ -1066,6 +1059,6 @@ def barycentric(pts: Triangle2Df, p: Vec2f) -> Vec3f:
             ),
         ),
     )
-    assert _is_array_type(v, Vec3f)
+    assert is_array_type(v, Vec3f)
 
     return v

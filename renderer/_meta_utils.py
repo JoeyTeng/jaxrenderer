@@ -5,11 +5,19 @@ import sys
 from typing import Any, ParamSpec, Protocol, TypeVar, cast
 
 import jax
+from jax import Array
 
-__all__ = ["add_tracing_name", "export", "typed_jit"]
+__all__ = ["add_tracing_name", "export", "is_array_type", "typed_jit"]
 
 ArgT = ParamSpec("ArgT")
 RetT = TypeVar("RetT")
+
+
+def is_array_type(value: object, array_type: object) -> bool:
+    """Check a jaxtyping specification in the active shape context."""
+    # This cast bridges Pyright's static type-form limitation; the runtime
+    # specification passed to isinstance is unchanged.
+    return isinstance(value, cast(type[Array], array_type))
 
 
 def add_tracing_name(func: Callable[ArgT, RetT]) -> Callable[ArgT, RetT]:
