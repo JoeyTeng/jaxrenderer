@@ -10,7 +10,7 @@ from jaxtyping import (
     jaxtyped,  # pyright: ignore[reportUnknownVariableType]
 )
 
-from .._meta_utils import add_tracing_name
+from .._meta_utils import add_tracing_name, is_array_type
 from .._meta_utils import typed_jit as jit
 from ..geometry import Camera, normalise, to_homogeneous
 from ..shader import ID, MixerOutput, PerFragment, PerVertex, Shader
@@ -82,7 +82,7 @@ class PhongTextureShader(
         # Use gl_VertexID to index in `extra` buffer.
         position: Vec4f = to_homogeneous(extra.position[gl_VertexID])
         gl_Position: Vec4f = camera.to_clip(position)
-        assert isinstance(gl_Position, Vec4f)
+        assert is_array_type(gl_Position, Vec4f)
 
         # assume normal here is in world space. If it is in model space, it
         # must be transformed by the inverse transpose of the model matrix.
@@ -91,7 +91,7 @@ class PhongTextureShader(
             normalise(extra.normal[gl_VertexID]),
             camera.world_to_eye_norm,
         )
-        assert isinstance(normal, Vec3f)
+        assert is_array_type(normal, Vec3f)
 
         return (
             PerVertex(gl_Position=gl_Position),
@@ -112,7 +112,11 @@ class PhongTextureShader(
         varying: PhongTextureExtraFragmentData,
         extra: PhongTextureExtraInput,
     ) -> tuple[PerFragment, PhongTextureExtraFragmentData]:
-        built_in: PerFragment = Shader.fragment(
+        built_in: PerFragment = Shader[
+            PhongTextureExtraInput,
+            PhongTextureExtraFragmentData,
+            PhongTextureExtraMixerOutput,
+        ].fragment(
             gl_FragCoord,
             gl_FrontFacing,
             gl_PointCoord,
@@ -122,8 +126,13 @@ class PhongTextureShader(
         assert isinstance(built_in, PerFragment)
 
         # repeat texture
-        uv = lax.floor(varying.uv).astype(int)  # pyright: ignore
-        uv = uv % jnp.asarray(extra.texture.shape[:2])  # pyright: ignore
+        uv = lax.floor(varying.uv).astype(int)
+        uv = (
+            uv
+            % jnp.asarray(  # pyright: ignore[reportUnknownMemberType]
+                extra.texture.shape[:2]
+            )
+        )
         texture_colour: Colour = extra.texture[uv[0], uv[1]]
 
         # light colour * intensity
@@ -134,7 +143,7 @@ class PhongTextureShader(
 
         return (
             PerFragment(
-                keeps=jnp.logical_and(  # pyright: ignore[reportUnknownMemberType]
+                keeps=jnp.logical_and(
                     built_in.keeps,
                     gl_FrontFacing,
                 ),
@@ -144,13 +153,9 @@ class PhongTextureShader(
                 colour=cast(
                     Vec3f,
                     lax.cond(  # pyright: ignore[reportUnknownMemberType]
-                        jnp.all(  # pyright: ignore[reportUnknownMemberType]
-                            light_colour >= 0
-                        ),
+                        jnp.all(light_colour >= 0),
                         lambda: texture_colour * light_colour,
-                        lambda: jnp.zeros(  # pyright: ignore[reportUnknownMemberType]
-                            3
-                        ),
+                        lambda: jnp.zeros(3),  # pyright: ignore[reportUnknownMemberType]
                     ),
                 ),
                 uv=varying.uv,
@@ -169,9 +174,14 @@ class PhongTextureShader(
     ) -> tuple[MixerOutput, PhongTextureExtraMixerOutput]:
         mixer_output: MixerOutput
         extra_output: PhongTextureExtraFragmentData
-        mixer_output, extra_output = cast(
-            tuple[MixerOutput, PhongTextureExtraFragmentData],
-            Shader.mix(gl_FragDepth, keeps, extra),
+        mixer_output, extra_output = Shader[
+            PhongTextureExtraInput,
+            PhongTextureExtraFragmentData,
+            PhongTextureExtraFragmentData,
+        ].mix(
+            gl_FragDepth,
+            keeps,
+            extra,
         )
         assert isinstance(mixer_output, MixerOutput)
         assert isinstance(extra_output, PhongTextureExtraFragmentData)
