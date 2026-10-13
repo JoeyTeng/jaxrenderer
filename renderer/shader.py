@@ -2,11 +2,11 @@ from abc import ABC, abstractmethod
 from functools import partial
 from typing import Generic, NamedTuple, TypeAlias, TypeVar, Union
 
+from jax import Array
 import jax.lax as lax
 import jax.numpy as jnp
 from jax.tree_util import Partial, tree_map
 from jaxtyping import (
-    Array,
     Bool,
     Float,
     PyTree,  # pyright: ignore[reportUnknownVariableType]
@@ -14,7 +14,7 @@ from jaxtyping import (
     jaxtyped,  # pyright: ignore[reportUnknownVariableType]
 )
 
-from ._meta_utils import add_tracing_name
+from ._meta_utils import add_tracing_name, is_array_type
 from ._meta_utils import typed_jit as jit
 from .geometry import Camera, Interpolation, interpolate
 from .types import (
@@ -204,40 +204,40 @@ class Shader(ABC, Generic[ShaderExtraInputT, VaryingT, MixedExtraT]):
           the input parameters. The returned fields must be batched.
         """
         depths: Float[Array, "primitives"]
-        depths = jnp.where(  # pyright: ignore[reportUnknownMemberType]
+        depths = jnp.where(
             keeps & gl_FrontFacing,
             gl_FragCoord[:, 2],
             jnp.inf,
         )
-        assert isinstance(depths, Float[Array, "primitives"])
+        assert is_array_type(depths, Float[Array, "primitives"])
 
         # when all keeps are false, all depths will be inf, and there will
         # still be a valid idx generated, as promised by argmin.
-        idx: IntV = jnp.argmin(depths)  # pyright: ignore[reportUnknownMemberType]
-        assert isinstance(idx, IntV)
+        idx: IntV = jnp.argmin(depths)
+        assert is_array_type(idx, IntV)
 
         _get = partial(
             # use `dynamic_slice` instead of `slice` according to benchmark
             # https://colab.research.google.com/drive/1idBbgEDbxI6wi5kzlHF6kzWryoFSm8-p#scrollTo=-bHrz3kZ5A0p
-            lax.dynamic_slice_in_dim,  # pyright: ignore[reportUnknownMemberType]
+            lax.dynamic_slice_in_dim,
             start_index=idx,
             slice_size=1,
             axis=0,
         )
 
         _gl_FragCoord: Float[Array, "kept_primitives 4"] = _get(gl_FragCoord)
-        assert isinstance(_gl_FragCoord, Float[Array, "kept_primitives 4"])
+        assert is_array_type(_gl_FragCoord, Float[Array, "kept_primitives 4"])
         _gl_FrontFacing: Bool[Array, "kept_primitives"] = _get(gl_FrontFacing)
-        assert isinstance(_gl_FrontFacing, Bool[Array, "kept_primitives"])
+        assert is_array_type(_gl_FrontFacing, Bool[Array, "kept_primitives"])
         _gl_PointCoord: Float[Array, "kept_primitives 2"] = _get(gl_PointCoord)
-        assert isinstance(_gl_PointCoord, Float[Array, "kept_primitives 2"])
+        assert is_array_type(_gl_PointCoord, Float[Array, "kept_primitives 2"])
         _keeps: Bool[Array, "kept_primitives"] = _get(keeps)
-        assert isinstance(_keeps, Bool[Array, "kept_primitives"])
+        assert is_array_type(_keeps, Bool[Array, "kept_primitives"])
         _values: VaryingT = tree_map(_get, values)
         _screen: Float[Array, "kept_primitives 3"] = _get(barycentric_screen)
-        assert isinstance(_screen, Float[Array, "kept_primitives 3"])
+        assert is_array_type(_screen, Float[Array, "kept_primitives 3"])
         _clip: Float[Array, "kept_primitives 3"] = _get(barycentric_clip)
-        assert isinstance(_clip, Float[Array, "kept_primitives 3"])
+        assert is_array_type(_clip, Float[Array, "kept_primitives 3"])
 
         return (
             _gl_FragCoord,
@@ -345,7 +345,7 @@ class Shader(ABC, Generic[ShaderExtraInputT, VaryingT, MixedExtraT]):
 
         Use this to implement the `blending` behaviour if needed.
 
-        For the default behaviour, the values from fragment with maximum
+        For the default behaviour, the values from fragment with minimum
         `gl_FragDepth` value AND `keeps` being True will be used as the output.
         In the default implementation, if no fragment has `keeps` being True,
         then mixed value will be the an arbitrary fragment's value for both
@@ -371,25 +371,28 @@ class Shader(ABC, Generic[ShaderExtraInputT, VaryingT, MixedExtraT]):
         """
 
         depths: Float[Array, "primitives"]
-        depths = jnp.where(  # pyright: ignore[reportUnknownMemberType]
+        depths = jnp.where(
             keeps,
             gl_FragDepth,
             jnp.inf,
         )
-        assert isinstance(depths, Float[Array, "primitives"])
+        assert is_array_type(depths, Float[Array, "primitives"])
 
         # when all keeps are false, all depths will be inf, and there will
         # still be a valid idx generated, as promised by argmin.
         idx: IntV
-        idx = jnp.argmin(depths)  # pyright: ignore[reportUnknownMemberType]
-        assert isinstance(idx, IntV)
+        idx = jnp.argmin(depths)
+        assert is_array_type(idx, IntV)
 
         keep: BoolV = keeps[idx]
-        assert isinstance(keep, BoolV)
+        assert is_array_type(keep, BoolV)
         depth: FloatV = depths[idx]
-        assert isinstance(depth, FloatV)
+        assert is_array_type(depth, FloatV)
+
+        def select(value: Array) -> Array:
+            return value[idx]
 
         return (
             MixerOutput(keep=keep, zbuffer=depth),
-            tree_map(lambda x: x[idx], extra),
+            tree_map(select, extra),
         )
