@@ -1,5 +1,5 @@
 from functools import partial
-from typing import NamedTuple, cast
+from typing import NamedTuple
 
 import jax.lax as lax
 import jax.numpy as jnp
@@ -10,7 +10,7 @@ from jaxtyping import (
     jaxtyped,  # pyright: ignore[reportUnknownVariableType]
 )
 
-from .._meta_utils import add_tracing_name
+from .._meta_utils import add_tracing_name, is_array_type
 from .._meta_utils import typed_jit as jit
 from ..geometry import Camera, normalise, to_homogeneous
 from ..shader import ID, MixerOutput, PerFragment, PerVertex, Shader
@@ -72,20 +72,17 @@ class GouraudTextureShader(
         # Use gl_VertexID to index in `extra` buffer.
         position: Vec4f = to_homogeneous(extra.position[gl_VertexID])
         gl_Position: Vec4f = camera.to_clip(position)
-        assert isinstance(gl_Position, Vec4f)
+        assert is_array_type(gl_Position, Vec4f)
 
         # assume normal here is in world space. If it is in model space, it
         # must be transformed by the inverse transpose of the model matrix.
         # Ref: https://github.com/ssloy/tinyrenderer/wiki/Lesson-5:-Moving-the-camera#transformation-of-normal-vectors
         normal: Vec3f = normalise(extra.normal[gl_VertexID])
-        intensity: FloatV = cast(
-            FloatV,
-            jnp.dot(
-                normal,
-                normalise(extra.light.direction),
-            ),
+        intensity: FloatV = jnp.dot(
+            normal,
+            normalise(extra.light.direction),
         )
-        assert isinstance(intensity, FloatV)
+        assert is_array_type(intensity, FloatV)
 
         light_colour: Colour
         light_colour = extra.light.colour * intensity
@@ -109,7 +106,11 @@ class GouraudTextureShader(
         varying: GouraudTextureExtraFragmentData,
         extra: GouraudTextureExtraInput,
     ) -> tuple[PerFragment, GouraudTextureExtraFragmentData]:
-        built_in: PerFragment = Shader.fragment(
+        built_in: PerFragment = Shader[
+            GouraudTextureExtraInput,
+            GouraudTextureExtraFragmentData,
+            GouraudTextureExtraMixerOutput,
+        ].fragment(
             gl_FragCoord,
             gl_FrontFacing,
             gl_PointCoord,
@@ -119,8 +120,13 @@ class GouraudTextureShader(
         assert isinstance(built_in, PerFragment)
 
         # repeat texture
-        uv = lax.floor(varying.uv).astype(int)  # pyright: ignore
-        uv = uv % jnp.asarray(extra.texture.shape[:2])  # pyright: ignore
+        uv = lax.floor(varying.uv).astype(int)
+        uv = (
+            uv
+            % jnp.asarray(  # pyright: ignore[reportUnknownMemberType]
+                extra.texture.shape[:2]
+            )
+        )
         texture_colour: Colour = extra.texture[uv[0], uv[1]]
         light_colour: Colour = varying.colour
 
@@ -130,7 +136,7 @@ class GouraudTextureShader(
                     (
                         built_in.keeps,
                         gl_FrontFacing,
-                        (light_colour >= 0).all(),  # pyright: ignore
+                        (light_colour >= 0).all(),
                     )
                 ).all(),
                 use_default_depth=built_in.use_default_depth,
@@ -152,9 +158,14 @@ class GouraudTextureShader(
     ) -> tuple[MixerOutput, GouraudTextureExtraMixerOutput]:
         mixer_output: MixerOutput
         extra_output: GouraudTextureExtraFragmentData
-        mixer_output, extra_output = cast(
-            tuple[MixerOutput, GouraudTextureExtraFragmentData],
-            Shader.mix(gl_FragDepth, keeps, extra),
+        mixer_output, extra_output = Shader[
+            GouraudTextureExtraInput,
+            GouraudTextureExtraFragmentData,
+            GouraudTextureExtraFragmentData,
+        ].mix(
+            gl_FragDepth,
+            keeps,
+            extra,
         )
         assert isinstance(mixer_output, MixerOutput)
         assert isinstance(extra_output, GouraudTextureExtraFragmentData)

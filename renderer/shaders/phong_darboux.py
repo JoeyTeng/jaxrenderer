@@ -1,18 +1,17 @@
 from functools import partial
 from typing import NamedTuple, TypeAlias, cast
 
+from jax import Array
 import jax.lax as lax
 import jax.numpy as jnp
-from jax.tree_util import Partial
 from jaxtyping import (
-    Array,
     Bool,
     Float,
     Integer,
     jaxtyped,  # pyright: ignore[reportUnknownVariableType]
 )
 
-from .._meta_utils import add_tracing_name
+from .._meta_utils import add_tracing_name, is_array_type
 from .._meta_utils import typed_jit as jit
 from ..geometry import (
     Camera,
@@ -123,18 +122,18 @@ class PhongTextureDarbouxShader(
         extra: PhongTextureDarbouxExtraInput,
     ) -> tuple[PerVertex, PhongTextureDarbouxExtraFragmentData]:
         # Use gl_VertexID to index in `extra` buffer.
-        assert isinstance(gl_VertexID, ID), gl_VertexID
-        assert isinstance(gl_InstanceID, ID), gl_InstanceID
+        assert is_array_type(gl_VertexID, ID), gl_VertexID
+        assert is_array_type(gl_InstanceID, ID), gl_InstanceID
         position: Vec4f = to_homogeneous(extra.position[gl_VertexID])
         gl_Position: Vec4f = camera.to_clip(position)
-        assert isinstance(gl_Position, Vec4f)
+        assert is_array_type(gl_Position, Vec4f)
 
-        assert isinstance(extra.id_to_face, Integer[Array, "vertices"]), (
+        assert is_array_type(extra.id_to_face, Integer[Array, "vertices"]), (
             f"Expected Integer array with shape {extra.position.shape[:1]}, "
             f"got {type(extra.id_to_face)} with shape "
             f"{extra.id_to_face.shape}"
         )
-        assert isinstance(extra.faces_indices, Integer[Array, "faces 3"]), (
+        assert is_array_type(extra.faces_indices, Integer[Array, "faces 3"]), (
             f"Expected Integer array with shape (faces, 3), "
             f"got {type(extra.faces_indices)} with shape "
             f"{extra.faces_indices.shape}"
@@ -144,10 +143,10 @@ class PhongTextureDarbouxShader(
         triangle_model: Triangle = to_homogeneous(extra.position[face_indices])
         triangle_clip: Triangle = camera.to_clip(triangle_model)
         triangle_ndc: Triangle3f = to_cartesian(triangle_clip)
-        assert isinstance(triangle_ndc, Triangle3f)
+        assert is_array_type(triangle_ndc, Triangle3f)
 
         triangle_uv: Triangle2f = extra.uv[face_indices]
-        assert isinstance(triangle_uv, Triangle2f)
+        assert is_array_type(triangle_uv, Triangle2f)
 
         # assume normal here is in world space. If it is in model space, it
         # must be transformed by the inverse transpose of the model matrix.
@@ -156,7 +155,7 @@ class PhongTextureDarbouxShader(
             normalise(extra.normal[gl_VertexID]),
             camera.world_to_eye_norm,
         )
-        assert isinstance(normal, Vec3f)
+        assert is_array_type(normal, Vec3f)
 
         return (
             PerVertex(gl_Position=gl_Position),
@@ -177,18 +176,19 @@ class PhongTextureDarbouxShader(
         barycentric_screen: Vec3f,
         barycentric_clip: Vec3f,
     ) -> PhongTextureDarbouxExtraFragmentData:
-        smooth_interpolation = Partial(
-            interpolate,
-            barycentric_screen=barycentric_screen,
-            barycentric_clip=barycentric_clip,
-            mode=Interpolation.SMOOTH,
-        )
+        def smooth_interpolation(value: Array) -> Array:
+            return interpolate(
+                value,
+                barycentric_screen=barycentric_screen,
+                barycentric_clip=barycentric_clip,
+                mode=Interpolation.SMOOTH,
+            )
 
-        normal = cast(Vec3f, smooth_interpolation(values.normal))
-        assert isinstance(normal, Vec3f)
+        normal: Vec3f = smooth_interpolation(values.normal)
+        assert is_array_type(normal, Vec3f)
 
-        uv = cast(Vec2f, smooth_interpolation(values.uv))
-        assert isinstance(uv, Vec2f)
+        uv: Vec2f = smooth_interpolation(values.uv)
+        assert is_array_type(uv, Vec2f)
 
         varying: PhongTextureDarbouxExtraFragmentData = (
             PhongTextureDarbouxExtraFragmentData(
@@ -201,8 +201,8 @@ class PhongTextureDarbouxShader(
                 triangle_uv=values.triangle_uv[0],
             )
         )
-        assert isinstance(varying.triangle, Triangle3f)
-        assert isinstance(varying.triangle_uv, Triangle2f)
+        assert is_array_type(varying.triangle, Triangle3f)
+        assert is_array_type(varying.triangle_uv, Triangle2f)
 
         return varying
 
@@ -217,7 +217,11 @@ class PhongTextureDarbouxShader(
         varying: PhongTextureDarbouxExtraFragmentData,
         extra: PhongTextureDarbouxExtraInput,
     ) -> tuple[PerFragment, PhongTextureDarbouxExtraFragmentData]:
-        built_in: PerFragment = Shader.fragment(
+        built_in: PerFragment = Shader[
+            PhongTextureDarbouxExtraInput,
+            PhongTextureDarbouxExtraFragmentData,
+            PhongTextureDarbouxExtraFragmentData,
+        ].fragment(
             gl_FragCoord,
             gl_FrontFacing,
             gl_PointCoord,
@@ -230,11 +234,11 @@ class PhongTextureDarbouxShader(
         )
 
         # repeat texture
-        uv = lax.floor(varying.uv).astype(int)  # pyright: ignore
-        uv = uv % jnp.asarray(extra.texture.shape[:2])  # pyright: ignore
+        uv = lax.floor(varying.uv).astype(int)
+        uv = uv % jnp.asarray(extra.texture.shape[:2])  # pyright: ignore[reportUnknownMemberType]
 
         normal: Vec3f = normalise(varying.normal)
-        A: Float[Array, "3 3"] = jnp.vstack(  # pyright: ignore[reportUnknownMemberType]
+        A: Float[Array, "3 3"] = jnp.vstack(
             [
                 varying.triangle[1, :] - varying.triangle[0, :],
                 varying.triangle[2, :] - varying.triangle[0, :],
@@ -250,7 +254,7 @@ class PhongTextureDarbouxShader(
             [_uv[1, 1] - _uv[0, 1], _uv[2, 1] - _uv[0, 1], 0]
         )
 
-        B = lax.concatenate(  # pyright: ignore[reportUnknownMemberType]
+        B = lax.concatenate(
             [
                 normalise(i)[:, None],
                 normalise(j)[:, None],
@@ -258,10 +262,10 @@ class PhongTextureDarbouxShader(
             ],
             dimension=1,
         )
-        assert isinstance(B, Float[Array, "3 3"])
+        assert is_array_type(B, Float[Array, "3 3"])
 
         normal = normalise(B @ extra.normal_map[uv[0], uv[1]])
-        assert isinstance(normal, Vec3f)
+        assert is_array_type(normal, Vec3f)
 
         texture_colour: Colour = extra.texture[uv[0], uv[1]]
 
@@ -273,7 +277,7 @@ class PhongTextureDarbouxShader(
 
         return (
             PerFragment(
-                keeps=jnp.logical_and(  # pyright: ignore[reportUnknownMemberType]
+                keeps=jnp.logical_and(
                     built_in.keeps,
                     gl_FrontFacing,
                 ),
@@ -281,9 +285,7 @@ class PhongTextureDarbouxShader(
             ),
             varying._replace(
                 colour=lax.cond(  # pyright: ignore[reportUnknownMemberType]
-                    jnp.all(  # pyright: ignore[reportUnknownMemberType]
-                        light_colour >= 0
-                    ),
+                    jnp.all(light_colour >= 0),
                     lambda: texture_colour * light_colour,
                     lambda: jnp.zeros(3),  # pyright: ignore[reportUnknownMemberType]
                 )
@@ -301,10 +303,11 @@ class PhongTextureDarbouxShader(
     ) -> tuple[MixerOutput, PhongTextureDarbouxExtraMixerOutput]:
         mixer_output: MixerOutput
         extra_output: PhongTextureDarbouxExtraFragmentData
-        mixer_output, extra_output = cast(
-            tuple[MixerOutput, PhongTextureDarbouxExtraFragmentData],
-            Shader.mix(gl_FragDepth, keeps, extra),
-        )
+        mixer_output, extra_output = Shader[
+            PhongTextureDarbouxExtraInput,
+            PhongTextureDarbouxExtraFragmentData,
+            PhongTextureDarbouxExtraFragmentData,
+        ].mix(gl_FragDepth, keeps, extra)
         assert isinstance(mixer_output, MixerOutput)
         assert isinstance(extra_output, PhongTextureDarbouxExtraFragmentData)
 

@@ -7,7 +7,7 @@ from jaxtyping import (
     jaxtyped,  # pyright: ignore[reportUnknownVariableType]
 )
 
-from .._meta_utils import add_tracing_name
+from .._meta_utils import add_tracing_name, is_array_type
 from .._meta_utils import typed_jit as jit
 from ..geometry import Camera, to_homogeneous
 from ..shader import ID, PerVertex, Shader
@@ -50,7 +50,7 @@ class DepthShader(
         # Use gl_VertexID to index in `extra` buffer.
         position: Vec4f = to_homogeneous(extra.position[gl_VertexID])
         gl_Position: Vec4f = camera.to_clip(position)
-        assert isinstance(gl_Position, Vec4f)
+        assert is_array_type(gl_Position, Vec4f)
 
         return (
             PerVertex(gl_Position=gl_Position),
