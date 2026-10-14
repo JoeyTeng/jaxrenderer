@@ -1,12 +1,12 @@
 from functools import partial
-from typing import Any, NamedTuple, TypeVar, cast
+from typing import Any, NamedTuple, Protocol, TypeVar, cast
 
 import jax
+from jax import Array
 import jax.lax as lax
 import jax.numpy as jnp
 from jax.tree_util import tree_map
 from jaxtyping import (
-    Array,
     Bool,
     Float,
     Integer,
@@ -14,7 +14,7 @@ from jaxtyping import (
     jaxtyped,  # pyright: ignore[reportUnknownVariableType]
 )
 
-from ._meta_utils import add_tracing_name
+from ._meta_utils import add_tracing_name, is_array_type
 from ._meta_utils import typed_jit as jit
 from .geometry import Camera, Interpolation, Viewport, interpolate
 from .shader import (
@@ -82,7 +82,7 @@ class PerPrimitive(NamedTuple):
         in clip-space, not normalised.
         """
         clip: Triangle = per_vertex.gl_Position
-        assert isinstance(clip, Triangle)
+        assert is_array_type(clip, Triangle)
         # matrix with x, y, w
         matrix: Float[Array, "3 3"] = clip[:, jnp.array((0, 1, 3))]  # pyright: ignore
         # If == 0, the matrix inverse does not exist, should use another
@@ -90,20 +90,18 @@ class PerPrimitive(NamedTuple):
         # `jnp.linalg.det` has built-in 3x3 det optimisation
         determinant = cast(
             FloatV,
-            jnp.linalg.det(matrix),  # pyright: ignore[reportUnknownMemberType]
+            jnp.linalg.det(matrix),
         )
-        assert isinstance(determinant, FloatV)
+        assert is_array_type(determinant, FloatV)
 
         # an arbitrary number for numerical stability
-        keep: BoolV = (
-            lax.abs(determinant) > 1e-6  # pyright: ignore[reportUnknownMemberType]
-        )
+        keep: BoolV = lax.abs(determinant) > 1e-6
 
         # although this may result in NaN or Inf when keep is False,
         # it will be discarded later.
         # Perf: Remove lax.cond to reduce extra operations `select_n` in HLO.
         mat_inv = cast(Float[Array, "3 3"], jnp.linalg.inv(matrix))
-        assert isinstance(mat_inv, Float[Array, "3 3"])
+        assert is_array_type(mat_inv, Float[Array, "3 3"])
 
         return cls(
             gl_Position=clip,
@@ -114,6 +112,15 @@ class PerPrimitive(NamedTuple):
 
 
 T = TypeVar("T", bound=tuple[Any, ...])
+_BufferLeafT = TypeVar("_BufferLeafT", bound=Array)
+
+
+class _IndexedExtra(Protocol):
+    """Input operations used to locate the vertex buffer."""
+
+    def __len__(self) -> int: ...
+
+    def __getitem__(self, index: int) -> object: ...
 
 
 @jaxtyped
@@ -127,7 +134,7 @@ T = TypeVar("T", bound=tuple[Any, ...])
 def _postprocessing(
     shader: type[Shader[ShaderExtraInputT, VaryingT, MixedExtraT]],
     buffers: Buffers[T],
-    per_primitive: tuple[Any, ...],  # Batch PerPrimitive
+    per_primitive: PerPrimitive,
     varyings: VaryingT,
     extra: ShaderExtraInputT,
     viewport: Viewport,
@@ -137,25 +144,13 @@ def _postprocessing(
         # vmap batch along second axis
         batch_size: int = int(buffers[0].shape[1])
         row_indices: Integer[Array, "width"]
-        row_indices = lax.iota(  # pyright: ignore[reportUnknownMemberType]
-            int, int(buffers[0].shape[0])
-        )
+        row_indices = lax.iota(int, int(buffers[0].shape[0]))
 
     @jaxtyped
     @partial(jit, inline=True)
     @add_tracing_name
     def _per_pixel(coord: Vec2i) -> tuple[MixerOutput, MixedExtraT]:
-        assert isinstance(coord, Vec2i), f"expected Vec2i, got {coord}"
-
-        ReturnT = tuple[  #
-            Float[Array, "kept_primitives 4"],  #
-            Bool[Array, "kept_primitives"],  #
-            Float[Array, "kept_primitives 2"],  #
-            Bool[Array, "kept_primitives"],  #
-            VaryingT,  #
-            Float[Array, "kept_primitives 3"],  #
-            Float[Array, "kept_primitives 3"],  #
-        ]
+        assert is_array_type(coord, Vec2i), f"expected Vec2i, got {coord}"
 
         @jaxtyped
         @partial(jit, inline=True)
@@ -163,7 +158,15 @@ def _postprocessing(
         def _per_primitive_preprocess(
             primitive: PerPrimitive,
             varying_per_primitive: VaryingT,
-        ) -> ReturnT:
+        ) -> tuple[
+            Vec4f,
+            BoolV,
+            Vec2f,
+            BoolV,
+            VaryingT,
+            Vec3f,
+            Vec3f,
+        ]:
             # PROCESS: Early Culling (`primitive_chooser`)
 
             # For early exit when not keep primitive / determinant is 0
@@ -187,11 +190,11 @@ def _postprocessing(
                 # a pseudo-parameter that is zero at the two vertices on the
                 # edge and one at the opposite vertex, as described
                 # in [Olano and Greer, 1997].
-                clip_coef = cast(Vec3f, jnp.dot(xy1_ndc, primitive.matrix_inv))
-                assert isinstance(clip_coef, Vec3f)
+                clip_coef: Vec3f = jnp.dot(xy1_ndc, primitive.matrix_inv)
+                assert is_array_type(clip_coef, Vec3f)
                 # 1/w, w in clip space.
-                w_reciprocal: FloatV = clip_coef.sum()  # pyright: ignore
-                assert isinstance(w_reciprocal, FloatV)
+                w_reciprocal: FloatV = clip_coef.sum()
+                assert is_array_type(w_reciprocal, FloatV)
 
                 return clip_coef, w_reciprocal
 
@@ -203,10 +206,10 @@ def _postprocessing(
                 clip_coef: Vec3f,
                 w_reciprocal: FloatV,
             ) -> tuple[  #
-                Float[Array, "kept_primitives 4"],  # gl_FragCoord
-                Bool[Array, "kept_primitives"],  # gl_FrontFacing
-                Float[Array, "kept_primitives 2"],  # gl_PointCoord
-                Float[Array, "kept_primitives 3"],  # true_clip_coef
+                Vec4f,  # gl_FragCoord
+                BoolV,  # gl_FrontFacing
+                Vec2f,  # gl_PointCoord
+                Vec3f,  # true_clip_coef
             ]:
                 # Prepare inputs for fragment shader
                 z: FloatV = interpolate(
@@ -217,7 +220,7 @@ def _postprocessing(
                 )
                 # viewport transform for z, from clip space to window space
                 z = z * viewport[2, 2] + viewport[2, 3]
-                gl_FragCoord: Vec4f = jnp.array(  # pyright: ignore
+                gl_FragCoord: Vec4f = jnp.array(  # pyright: ignore[reportUnknownMemberType]
                     (
                         coord[0],
                         coord[1],
@@ -225,21 +228,21 @@ def _postprocessing(
                         w_reciprocal,
                     )
                 )
-                assert isinstance(gl_FragCoord, Vec4f)
+                assert is_array_type(gl_FragCoord, Vec4f)
 
                 # Ref: https://registry.khronos.org/OpenGL-Refpages/gl4/html/gl_FrontFacing.xhtml
                 # True if not back-facing.
                 gl_FrontFacing: BoolV = primitive.determinant >= 0
-                assert isinstance(gl_FrontFacing, BoolV)
+                assert is_array_type(gl_FrontFacing, BoolV)
 
                 gl_PointCoord: Vec2f
                 with jax.ensure_compile_time_eval():
                     # TODO: implement Point primitive properly.
-                    gl_PointCoord = lax.full((2,), 0.0)  # pyright: ignore
+                    gl_PointCoord = lax.full((2,), 0.0)
 
                 # this interpolates to target value u, not u/w
                 true_clip_coef: Vec3f = clip_coef / w_reciprocal
-                assert isinstance(true_clip_coef, Vec3f)
+                assert is_array_type(true_clip_coef, Vec3f)
 
                 return (gl_FragCoord, gl_FrontFacing, gl_PointCoord, true_clip_coef)
 
@@ -255,8 +258,8 @@ def _postprocessing(
             # always executed.
             clip_coef, w_reciprocal = _when_keep_primitive()
 
-            in_triangle: BoolV = (clip_coef >= 0).all()  # pyright: ignore
-            assert isinstance(in_triangle, BoolV)
+            in_triangle: BoolV = (clip_coef >= 0).all()
+            assert is_array_type(in_triangle, BoolV)
 
             # Perf: although this may result in garbage values (NaN or Inf)
             # when keep or in_triangle is False, since it will be discarded
@@ -307,18 +310,24 @@ def _postprocessing(
                 gl_FrontFacing=gl_FrontFacing,
                 gl_PointCoord=gl_PointCoord,
                 varying=varying,
-                extra=extra,
+                extra=extra,  # pyright: ignore[reportUnknownArgumentType]  # PyTree bound is opaque to Pyright
             )
             assert isinstance(per_frag, PerFragment)
             assert isinstance(extra_fragment_output, tuple)
 
             # enforce default `gl_FragDepth` when `use_default_depth`
+            def _use_default_depth() -> PerFragment:
+                return per_frag._replace(gl_FragDepth=gl_FragCoord[2])
+
+            def _keep_fragment_depth() -> PerFragment:
+                return per_frag
+
             per_frag = cast(
                 PerFragment,
                 lax.cond(  # pyright: ignore[reportUnknownMemberType]
                     per_frag.use_default_depth,
-                    lambda: per_frag._replace(gl_FragDepth=gl_FragCoord[2]),
-                    lambda: per_frag,
+                    _use_default_depth,
+                    _keep_fragment_depth,
                 ),
             )
             assert isinstance(per_frag, PerFragment)
@@ -330,7 +339,7 @@ def _postprocessing(
         # END OF `_interpolate_fragment_shading`
 
         args = jax.vmap(_per_primitive_preprocess)(
-            per_primitive,  # pyright: ignore # need to find a way to express un-batch
+            per_primitive,
             varyings,
         )
         chosen_args = shader.primitive_chooser(*args)
@@ -343,8 +352,8 @@ def _postprocessing(
 
         gl_Depths = built_in.gl_FragDepth
         keeps = built_in.keeps
-        assert isinstance(gl_Depths, Float[Array, "kept_primitives"])
-        assert isinstance(keeps, Bool[Array, "kept_primitives"])
+        assert is_array_type(gl_Depths, Float[Array, "kept_primitives"])
+        assert is_array_type(keeps, Bool[Array, "kept_primitives"])
 
         # PROCESS: Per-Sample Operations (Mixing: depth test + colour blending)
         mixed_output: MixerOutput
@@ -379,16 +388,18 @@ def _postprocessing(
         extras: MixedExtraT
         # vmap over axis 1 (height) of the buffers. Axis 0 (width) is `i`.
         (keeps, depths), extras = jax.vmap(_per_pixel)(
-            lax.concatenate(  # pyright: ignore[reportUnknownMemberType]
+            lax.concatenate(
                 (
-                    lax.full((batch_size, 1), i),  # pyright: ignore
-                    lax.broadcasted_iota(int, (batch_size, 1), 0),  # pyright: ignore
+                    lax.full((batch_size, 1), i),
+                    lax.broadcasted_iota(  # pyright: ignore[reportUnknownMemberType]
+                        int, (batch_size, 1), 0
+                    ),
                 ),
                 1,
             )
         )
-        assert isinstance(keeps, Bool[Array, "height"])
-        assert isinstance(depths, Num[Array, "height"])
+        assert is_array_type(keeps, Bool[Array, "height"])
+        assert is_array_type(depths, Num[Array, "height"])
         assert isinstance(extras, tuple)
 
         return MixerOutput(keep=keeps, zbuffer=depths), extras
@@ -415,23 +426,34 @@ def _postprocessing(
         depths: ZBuffer = mixer_outputs[0].zbuffer
         extras: MixedExtraT = mixer_outputs[1]
 
-        S = TypeVar("S")
-
         @partial(jit, donate_argnums=(2,), inline=True)
-        def _merge_first_axis(_mask: Bool[Array, "_"], _new: S, _old: S) -> S:
+        def _merge_first_axis(
+            _mask: Bool[Array, "_"], _new: _BufferLeafT, _old: _BufferLeafT
+        ) -> _BufferLeafT:
             @partial(jit, donate_argnums=(2,), inline=True)
-            def _merge_second_axis(__mask: BoolV, __new: S, __old: S) -> S:
+            def _merge_second_axis(
+                __mask: BoolV, __new: _BufferLeafT, __old: _BufferLeafT
+            ) -> _BufferLeafT:
+                def _choose_new() -> _BufferLeafT:
+                    return __new
+
+                def _choose_old() -> _BufferLeafT:
+                    return __old
+
                 return cast(
-                    S,
+                    _BufferLeafT,
                     lax.cond(  # pyright: ignore[reportUnknownMemberType]
-                        __mask, lambda: __new, lambda: __old
+                        __mask, _choose_new, _choose_old
                     ),
                 )
 
             return jax.vmap(_merge_second_axis)(_mask, _new, _old)
 
+        def _merge_buffer_leaf(new: Array, old: Array) -> Array:
+            return jax.vmap(_merge_first_axis)(keeps, new, old)
+
         new_buffers: Buffers[T] = tree_map(
-            lambda new, old: jax.vmap(_merge_first_axis)(keeps, new, old),
+            _merge_buffer_leaf,
             Buffers(zbuffer=depths, targets=tuple(extras)),
             old_buffers,
         )
@@ -446,8 +468,13 @@ def _postprocessing(
     # Not using vmap due to memory constraints
     # TODO: using map for readability when map supports unroll.
     # Reference: https://jax.readthedocs.io/en/latest/_modules/jax/_src/lax/control_flow/loops.html#map
+    def _render_row(
+        carry: tuple[()], row_index: IntV
+    ) -> tuple[tuple[()], tuple[MixerOutput, MixedExtraT]]:
+        return carry, _per_row(row_index)
+
     mixer_outputs = lax.scan(
-        lambda _, x: ((), _per_row(x)),
+        _render_row,
         init=(),
         xs=row_indices,
         unroll=loop_unroll,
@@ -484,14 +511,14 @@ def render(
     vertices_count: int
     gl_InstanceID: ID
     with jax.ensure_compile_time_eval():
-        assert len(extra) > 0
-        assert isinstance(extra[0], Num[Array, "*"])
-        vertices: Num[Array, "*"] = cast(Num[Array, "*"], extra[0])
+        extra_items = cast(_IndexedExtra, extra)
+        assert len(extra_items) > 0
+        assert is_array_type(extra_items[0], Num[Array, "*"])
+        vertices: Num[Array, "*"] = cast(Num[Array, "*"], extra_items[0])
         vertices_count: int = vertices.shape[0]
-
         gl_InstanceID = jnp.array(0, dtype=int)  # pyright: ignore
         assert isinstance(vertices_count, int)
-        assert isinstance(gl_InstanceID, ID)
+        assert is_array_type(gl_InstanceID, ID)
 
     @jaxtyped
     @partial(jit, inline=True)
@@ -504,7 +531,7 @@ def render(
             gl_VertexID,
             gl_InstanceID,
             camera,
-            extra,
+            extra,  # pyright: ignore[reportUnknownArgumentType]  # PyTree bound is opaque to Pyright
         )
         assert isinstance(per_vertex, PerVertex)
         assert isinstance(varying, tuple)
@@ -513,21 +540,21 @@ def render(
 
     # PROCESS: Vertex Processing
     per_vertices, varyings = jax.vmap(vertex_processing)(
-        lax.iota(int, vertices_count),  # gl_VertexID # pyright: ignore
+        lax.iota(int, vertices_count),  # gl_VertexID
     )
+
+    def _index_vertices_by_face(field: Array) -> Array:
+        return field[face_indices]
 
     # everything after vertex processing, will directly update buffers
     buffers = _postprocessing(
         shader=shader,
         buffers=buffers,
         per_primitive=jax.vmap(PerPrimitive.create)(
-            tree_map(
-                lambda field: field[face_indices],
-                per_vertices,
-            )
+            tree_map(_index_vertices_by_face, per_vertices)
         ),
-        varyings=tree_map(lambda field: field[face_indices], varyings),
-        extra=extra,
+        varyings=tree_map(_index_vertices_by_face, varyings),
+        extra=extra,  # pyright: ignore[reportUnknownArgumentType]  # PyTree bound is opaque to Pyright
         viewport=camera.viewport,
         loop_unroll=loop_unroll,
     )

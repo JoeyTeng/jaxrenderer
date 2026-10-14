@@ -63,9 +63,9 @@ repos:
 
       - id: pyright-required-modules
         name: Pyright required modules
-        entry: uv run --no-sync --python 3.14 pyright --warnings renderer/types.py renderer/geometry.py renderer/model.py renderer/shader.py renderer/shaders
+        entry: uv run --no-sync --python 3.14 pyright --warnings renderer/types.py renderer/geometry.py renderer/model.py renderer/shader.py renderer/pipeline.py renderer/shaders
         language: system
-        files: ^(\.pre-commit-config[.]yaml|pyproject[.]toml|renderer/(types|geometry|model|shader|shadow|_meta_utils|value_checker)[.]py|renderer/shaders/.*[.]pyi?)$
+        files: ^(\.pre-commit-config[.]yaml|pyproject[.]toml|renderer/(types|geometry|model|shader|pipeline|shadow|_meta_utils|value_checker)[.]py|renderer/shaders/.*[.]pyi?)$
         pass_filenames: false
 
       - id: cspell
