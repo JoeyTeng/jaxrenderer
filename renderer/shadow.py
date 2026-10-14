@@ -6,7 +6,7 @@ import jax.lax as lax
 import jax.numpy as jnp
 from jaxtyping import jaxtyped  # pyright: ignore[reportUnknownVariableType]
 
-from ._meta_utils import add_tracing_name
+from ._meta_utils import add_tracing_name, is_array_type
 from .geometry import Camera, View, Viewport
 from .pipeline import render
 from .shaders.depth import DepthExtraInput, DepthShader
@@ -86,7 +86,7 @@ class Shadow(NamedTuple):
             centre=centre,
             up=up,
         )
-        assert isinstance(view, View)
+        assert is_array_type(view, View)
 
         _camera: Camera = Camera.create(
             view=view,
@@ -113,7 +113,7 @@ class Shadow(NamedTuple):
             loop_unroll=loop_unroll,
         )
         shadow_map = shadow_map + offset
-        assert isinstance(shadow_map, ZBuffer)
+        assert is_array_type(shadow_map, ZBuffer)
 
         shadow: Shadow = Shadow(
             shadow_map=shadow_map,
@@ -131,20 +131,18 @@ class Shadow(NamedTuple):
         Parameters:
           - position: position in shadow buffer's screen space.
         """
-        assert isinstance(position, Vec2f), f"{position} is not a Vec3f."
+        assert is_array_type(position, Vec2f), f"{position} is not a Vec3f."
 
-        pos: Vec2i = lax.round(  # pyright: ignore[reportUnknownMemberType]
-            position[:2]
-        ).astype(int)
-        assert isinstance(pos, Vec2i)
+        pos: Vec2i = lax.round(position[:2]).astype(int)
+        assert is_array_type(pos, Vec2i)
 
-        value: FloatV = self.shadow_map.at[pos[0], pos[1]].get(  # pyright: ignore[reportUnknownMemberType]
+        value: FloatV = self.shadow_map.at[pos[0], pos[1]].get(
             mode="fill",
             indices_are_sorted=True,
             unique_indices=True,
             # outside shadow map, no shadow
             fill_value=jnp.inf,
         )
-        assert isinstance(value, FloatV)
+        assert is_array_type(value, FloatV)
 
         return value
