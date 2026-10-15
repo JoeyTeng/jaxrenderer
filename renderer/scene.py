@@ -8,6 +8,7 @@ from jaxtyping import (
     jaxtyped,  # pyright: ignore[reportUnknownVariableType]
 )
 
+from ._meta_utils import is_array_type
 from .model import Model, ModelObject
 from .shapes.capsule import UpAxis, create_capsule
 from .shapes.cube import create_cube
@@ -65,14 +66,12 @@ class Scene(NamedTuple):
             only one number is given, it is used for both x and y.
         """
         # reference: https://github.com/erwincoumans/tinyrenderer/blob/89e8adafb35ecf5134e7b17b71b0f825939dc6d9/model.cpp#L215
-        specular_map: SpecularMap = lax.full(  # pyright: ignore[reportUnknownMemberType]
-            diffuse_map.shape[:2], 2.0
-        )
+        specular_map: SpecularMap = lax.full(diffuse_map.shape[:2], 2.0)
 
         _half_extents = jnp.asarray(  # pyright: ignore[reportUnknownMemberType]
             half_extents
         )
-        assert isinstance(_half_extents, Float[Array, "3"]), (
+        assert is_array_type(_half_extents, Float[Array, "3"]), (
             f"Expected 2 floats in half_extends, got {half_extents}"
         )
 
@@ -80,10 +79,8 @@ class Scene(NamedTuple):
             texture_scaling
         )
         if _texture_scaling.size == 1:
-            _texture_scaling = lax.full(  # pyright: ignore[reportUnknownMemberType]
-                (2,), _texture_scaling
-            )
-        assert isinstance(_texture_scaling, Float[Array, "2"]), (
+            _texture_scaling = lax.full((2,), _texture_scaling)
+        assert is_array_type(_texture_scaling, Float[Array, "2"]), (
             f"Expected 2 floats in texture_scaling, got {texture_scaling}"
         )
 
@@ -113,7 +110,7 @@ class Scene(NamedTuple):
           - diffuse_map: the diffuse map of the capsule.
         """
         # reference: https://github.com/erwincoumans/tinyrenderer/blob/89e8adafb35ecf5134e7b17b71b0f825939dc6d9/model.cpp#L215
-        specular_map: SpecularMap = lax.full(  # pyright: ignore[reportUnknownMemberType]
+        specular_map: SpecularMap = lax.full(
             diffuse_map.shape[:2],
             2.0,
         )
@@ -220,7 +217,7 @@ class Scene(NamedTuple):
             position,
             dtype=float,
         )
-        assert isinstance(position, Vec3f), f"{position}"
+        assert is_array_type(position, Vec3f), f"{position}"
 
         new_obj = self.objects[object_id].replace_with_position(position)
 
@@ -275,7 +272,7 @@ class Scene(NamedTuple):
             local_scaling,
             dtype=float,
         )
-        assert isinstance(scaling, Vec3f), f"{scaling}"
+        assert is_array_type(scaling, Vec3f), f"{scaling}"
 
         new_obj = self.objects[object_id].replace_with_local_scaling(scaling)
 
