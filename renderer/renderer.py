@@ -1,6 +1,6 @@
 from collections.abc import Sequence
 from functools import partial
-from typing import Any, NamedTuple, Optional, TypeAlias, TypeVar, Union, cast
+from typing import Any, NamedTuple, Optional, TypeAlias, TypeVar, Union
 
 import jax
 import jax.lax as lax
@@ -13,7 +13,7 @@ from jaxtyping import (
     jaxtyped,  # pyright: ignore[reportUnknownVariableType]
 )
 
-from ._meta_utils import add_tracing_name
+from ._meta_utils import add_tracing_name, is_array_type
 from ._meta_utils import typed_jit as jit
 from .geometry import Camera, Projection, View, Viewport, normalise
 from .model import MergedModel, ModelObject, merge_objects
@@ -32,7 +32,8 @@ from .types import (
     Canvas,
     Colour,
     DtypeInfo,
-    FloatV,
+    JaxFloating,
+    JaxInteger,
     LightSource,
     NumV,
     Vec3f,
@@ -145,34 +146,30 @@ class Renderer:
         eye: Vec3f = jnp.asarray(  # pyright: ignore[reportUnknownMemberType]
             camera.position, dtype=float
         )
-        assert isinstance(eye, Vec3f), f"{eye}"
+        assert is_array_type(eye, Vec3f), f"{eye}"
         centre: Vec3f = jnp.asarray(  # pyright: ignore[reportUnknownMemberType]
             camera.target, dtype=float
         )
-        assert isinstance(centre, Vec3f), f"{centre}"
+        assert is_array_type(centre, Vec3f), f"{centre}"
         up: Vec3f = jnp.asarray(  # pyright: ignore[reportUnknownMemberType]
             camera.up, dtype=float
         )
-        assert isinstance(up, Vec3f), f"{up}"
+        assert is_array_type(up, Vec3f), f"{up}"
 
         view_mat: View = Camera.view_matrix(eye=eye, centre=centre, up=up)
-        assert isinstance(view_mat, View), f"{view_mat}"
+        assert is_array_type(view_mat, View), f"{view_mat}"
         view_inv: View = Camera.view_matrix_inv(eye=eye, centre=centre, up=up)
-        assert isinstance(view_inv, View), f"{view_inv}"
+        assert is_array_type(view_inv, View), f"{view_inv}"
         projection_mat: Projection = Camera.perspective_projection_matrix(
             fovy=camera.vfov,
             aspect=(
-                lax.tan(  # pyright: ignore[reportUnknownMemberType]
-                    cast(FloatV, jnp.radians(camera.hfov) / 2.0)
-                )
-                / lax.tan(  # pyright: ignore[reportUnknownMemberType]
-                    cast(FloatV, jnp.radians(camera.vfov) / 2.0)
-                )
+                lax.tan(jnp.radians(camera.hfov) / 2.0)
+                / lax.tan(jnp.radians(camera.vfov) / 2.0)
             ),
             z_near=camera.near,
             z_far=camera.far,
         )
-        assert isinstance(projection_mat, Projection), f"{projection_mat}"
+        assert is_array_type(projection_mat, Projection), f"{projection_mat}"
         viewport_mat: Viewport = Camera.viewport_matrix(
             lowerbound=jnp.zeros(  # pyright: ignore[reportUnknownMemberType]
                 2,
@@ -185,7 +182,7 @@ class Renderer:
                 camera.viewDepth
             ),
         )
-        assert isinstance(viewport_mat, Viewport), f"{viewport_mat}"
+        assert is_array_type(viewport_mat, Viewport), f"{viewport_mat}"
 
         _camera: Camera = Camera.create(
             view=view_mat,
@@ -229,7 +226,7 @@ class Renderer:
         Returns: Buffers, with zbuffer and (coloured image, ).
         """
         _batch = (batch,) if batch is not None else ()
-        zbuffer: ZBuffer = lax.full(  # pyright: ignore[reportUnknownMemberType]
+        zbuffer: ZBuffer = lax.full(
             (*_batch, width, height),
             zbuffer_default,
         )
@@ -276,35 +273,27 @@ class Renderer:
         Returns: Buffers, with zbuffer and (coloured image, ).
         """
         # flatten so each vertex has its own "extra"
-        position = model.verts[
-            model.faces.reshape((-1,))  # pyright: ignore[reportUnknownMemberType]
-        ]
-        normal = model.norms[
-            model.faces_norm.reshape((-1,))  # pyright: ignore[reportUnknownMemberType]
-        ]
-        uv = model.uvs[
-            model.faces_uv.reshape((-1,))  # pyright: ignore[reportUnknownMemberType]
-        ]
+        position = model.verts[model.faces.reshape((-1,))]
+        normal = model.norms[model.faces_norm.reshape((-1,))]
+        uv = model.uvs[model.faces_uv.reshape((-1,))]
 
-        texture_index = model.texture_index[
-            model.faces_uv.reshape((-1,))  # pyright: ignore[reportUnknownMemberType]
-        ]
+        texture_index = model.texture_index[model.faces_uv.reshape((-1,))]
         # double_sided = model.texture_index[model.faces_uv.reshape((-1,))]
 
         face_indices: Integer[Array, "_ 3"]
         face_indices = jnp.arange(  # pyright: ignore[reportUnknownMemberType]
             model.faces.size
         ).reshape(model.faces.shape)
-        assert isinstance(face_indices, Integer[Array, "_ 3"])
+        assert is_array_type(face_indices, Integer[Array, "_ 3"])
 
         light_dir: Vec3f = normalise(light.direction.copy())
-        assert isinstance(light_dir, Vec3f), f"{light_dir}"
+        assert is_array_type(light_dir, Vec3f), f"{light_dir}"
 
         light_dir_eye: Vec3f = Camera.apply_vec(
             light_dir.copy(),
             camera.view,
         )
-        assert isinstance(light_dir_eye, Vec3f), f"{light_dir_eye}"
+        assert is_array_type(light_dir_eye, Vec3f), f"{light_dir_eye}"
 
         extra = PhongReflectionTextureExtraInput(
             position=position,
@@ -345,25 +334,23 @@ class Renderer:
             # with shadows
             assert isinstance(shadow_param, ShadowParameters), f"{shadow_param}"
             # first pass: render shadow map
-            shadow = cast(
-                Shadow,
-                Shadow.render_shadow_map(
-                    shadow_map=lax.full_like(  # pyright: ignore[reportUnknownMemberType]
-                        buffers.zbuffer,
-                        DtypeInfo.create(
-                            jax.dtypes.result_type(buffers.zbuffer)  # pyright: ignore
-                        ).max,
-                    ),
-                    verts=model.verts,
-                    faces=model.faces,
-                    light_direction=light.direction,
-                    viewport_matrix=camera.viewport,
-                    centre=shadow_param.centre,
-                    up=shadow_param.up,
-                    strength=shadow_param.strength,
-                    offset=shadow_param.offset,
-                    loop_unroll=loop_unroll,
+            zbuffer_dtype: type[JaxFloating | JaxInteger | int] = jnp.dtype(
+                jax.dtypes.result_type(buffers.zbuffer)
+            ).type
+            shadow = Shadow.render_shadow_map(
+                shadow_map=lax.full_like(
+                    buffers.zbuffer,
+                    DtypeInfo[JaxFloating | JaxInteger | int].create(zbuffer_dtype).max,
                 ),
+                verts=model.verts,
+                faces=model.faces,
+                light_direction=light.direction,
+                viewport_matrix=camera.viewport,
+                centre=shadow_param.centre,
+                up=shadow_param.up,
+                strength=shadow_param.strength,
+                offset=shadow_param.offset,
+                loop_unroll=loop_unroll,
             )
             assert isinstance(shadow, Shadow), f"{shadow}"
 
@@ -473,6 +460,6 @@ class Renderer:
             shadow_param=shadow_param,
             loop_unroll=loop_unroll,
         )
-        assert isinstance(canvas, Canvas), f"{canvas}"
+        assert is_array_type(canvas, Canvas), f"{canvas}"
 
         return canvas
