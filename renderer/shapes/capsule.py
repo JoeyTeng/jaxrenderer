@@ -8,6 +8,7 @@ from jaxtyping import (
     jaxtyped,  # pyright: ignore[reportUnknownVariableType]
 )
 
+from .._meta_utils import is_array_type
 from ..model import Model
 from ..types import (
     FaceIndices,
@@ -1995,16 +1996,16 @@ def create_capsule(
 
     verts: Vertices = _verts[:, shuffled] * radius
     verts = verts.at[:, up_axis].add(
-        jnp.where(  # pyright: ignore[reportUnknownMemberType]
+        jnp.where(
             verts[:, up_axis] > 0,
             half_height,
             -half_height,
         )
     )
-    assert isinstance(verts, Vertices)
+    assert is_array_type(verts, Vertices)
 
     normals: Normals = _normals[:, shuffled]
-    assert isinstance(normals, Normals)
+    assert is_array_type(normals, Normals)
 
     return Model(
         verts=verts,

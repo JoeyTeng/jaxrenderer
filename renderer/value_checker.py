@@ -30,7 +30,7 @@ def index_in_bound(
     else:
         _min, _max = 0, bound[0]
 
-    return jnp.logical_and(  # pyright: ignore[reportUnknownMemberType]
-        (indices >= _min).all(),  # pyright: ignore[reportUnknownMemberType]
-        (indices < _max).all(),  # pyright: ignore[reportUnknownMemberType]
+    return jnp.logical_and(
+        (indices >= _min).all(),
+        (indices < _max).all(),
     )
