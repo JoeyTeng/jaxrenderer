@@ -199,12 +199,9 @@ class _Shader(Shader[ExtraInput, ExtraFragmentData, ExtraMixerOutput]):
         extra: ExtraInput,
     ) -> tuple[PerFragment, ExtraFragmentData]:
         built_in: PerFragment
-        built_in, _varying = cast(
-            tuple[PerFragment, ExtraFragmentData],
-            Shader.fragment(  # pyright: ignore[reportUnknownMemberType]
-                gl_FragCoord, gl_FrontFacing, gl_PointCoord, varying, extra
-            ),
-        )
+        built_in, _varying = Shader[
+            ExtraInput, ExtraFragmentData, ExtraMixerOutput
+        ].fragment(gl_FragCoord, gl_FrontFacing, gl_PointCoord, varying, extra)
         texture_colour: Colour = varying.colour
         a = jnp.modf(varying.uv)[0] < 0.5  # pyright: ignore[reportUnknownMemberType]
         texture_colour = jnp.where(
@@ -230,7 +227,7 @@ class _Shader(Shader[ExtraInput, ExtraFragmentData, ExtraMixerOutput]):
         extra_output: ExtraFragmentData
         mixer_output, extra_output = cast(
             tuple[MixerOutput, ExtraFragmentData],
-            Shader.mix(  # pyright: ignore[reportUnknownMemberType]
+            Shader[ExtraInput, ExtraFragmentData, ExtraMixerOutput].mix(
                 gl_FragDepth, keeps, extra
             ),
         )
