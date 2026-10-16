@@ -67,7 +67,7 @@ def _validate_result(
     }
     if not isinstance(result, dict):
         raise ModalCIError("remote result has missing or unexpected fields")
-    # JSON object keys are strings by definition; the exact key set is checked next.
+    # The exact key set is checked before these keys are used as strings.
     result = cast(dict[str, object], result)
     if set(result) != fields:
         raise ModalCIError("remote result has missing or unexpected fields")
@@ -101,7 +101,7 @@ def _validate_result(
     for raw_device in devices:
         if not isinstance(raw_device, dict):
             raise ModalCIError("remote result contains malformed device metadata")
-        # JSON object keys are strings; the key set and values are checked here.
+        # The exact key set is checked before these keys are used as strings.
         raw_device = cast(dict[str, object], raw_device)
         if set(raw_device) != {"platform", "device_kind", "id"}:
             raise ModalCIError("remote result contains malformed device metadata")
@@ -113,9 +113,11 @@ def _validate_result(
     versions = result["versions"]
     if not isinstance(versions, dict):
         raise ModalCIError("remote result versions must map names to strings")
-    versions = cast(dict[str, object], versions)
+    # Modal RPC results are SDK objects, not JSON-decoded mappings, so validate
+    # their keys before narrowing them to strings.
+    versions = cast(dict[object, object], versions)
     if not all(
-        name and isinstance(version, str) and version
+        isinstance(name, str) and name and isinstance(version, str) and version
         for name, version in versions.items()
     ):
         raise ModalCIError("remote result versions must map names to strings")
@@ -247,7 +249,7 @@ def execute(binding: Mapping[str, object], output_dir: Path) -> dict[str, object
         import modal
 
         app, remote_function = _create_modal_app(modal)
-        archive_bytes: bytes | None = None
+        archive_bytes: object = None
         remote_result: dict[str, object] | None = None
         controller_error: str | None = None
         with modal.enable_output(), app.run():
@@ -265,7 +267,10 @@ def execute(binding: Mapping[str, object], output_dir: Path) -> dict[str, object
                 (controller_error or "Modal invocation failed").encode("utf-8"),
             )
         if archive_bytes is not None:
-            if len(archive_bytes) > MAX_ARTIFACT_BYTES:
+            if (
+                not isinstance(archive_bytes, bytes)
+                or len(archive_bytes) > MAX_ARTIFACT_BYTES
+            ):
                 raise ModalCIError(
                     "Modal returned an invalid or oversized artifact archive"
                 )

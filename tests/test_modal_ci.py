@@ -142,6 +142,20 @@ def test_result_accepts_exact_release_binding_and_requires_versions() -> None:
         _ = _validate_result(_release_result(versions={}), RELEASE_BINDING)
 
 
+@pytest.mark.parametrize(
+    "versions",
+    [
+        {1: "0.11.2"},
+        {"": "0.11.2"},
+        {"jax": 0.11},
+        {"jax": ""},
+    ],
+)
+def test_result_rejects_malformed_remote_version_entries(versions: object) -> None:
+    with pytest.raises(modal_ci.ModalCIError, match="versions must map names"):
+        _ = _validate_result(_result(versions=versions), GOOD_BINDING)
+
+
 def test_failed_remote_result_is_preserved_for_controller_failure_status() -> None:
     result = _result(
         device_backend="unknown",
