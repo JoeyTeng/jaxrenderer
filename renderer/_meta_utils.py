@@ -46,7 +46,7 @@ def export(fn: T) -> T:
     if hasattr(mod, "__all__"):
         mod.__all__.append(fn.__name__)
     else:
-        mod.__all__ = [fn.__name__]  # pyright: ignore[reportGeneralTypeIssues]
+        setattr(mod, "__all__", [fn.__name__])
 
     return fn
 

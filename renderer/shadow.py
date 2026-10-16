@@ -1,12 +1,12 @@
 from functools import partial
 from typing import NamedTuple
 
-import jax
 import jax.lax as lax
 import jax.numpy as jnp
 from jaxtyping import jaxtyped  # pyright: ignore[reportUnknownVariableType]
 
 from ._meta_utils import add_tracing_name, is_array_type
+from ._meta_utils import typed_jit as jit
 from .geometry import Camera, View, Viewport
 from .pipeline import render
 from .shaders.depth import DepthExtraInput, DepthShader
@@ -39,7 +39,7 @@ class Shadow(NamedTuple):
     @staticmethod
     @jaxtyped
     @partial(
-        jax.jit,  # pyright: ignore[reportUnknownMemberType]
+        jit,
         static_argnames=("loop_unroll",),
         donate_argnums=(0,),
         inline=True,

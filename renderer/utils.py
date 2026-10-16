@@ -1,6 +1,6 @@
 from collections.abc import Sequence
 from functools import partial
-from typing import Union, cast
+from typing import Union
 
 import jax
 from jax import lax
@@ -13,7 +13,7 @@ from jaxtyping import (
     jaxtyped,  # pyright: ignore[reportUnknownVariableType]
 )
 
-from ._meta_utils import add_tracing_name
+from ._meta_utils import add_tracing_name, is_array_type
 from ._meta_utils import typed_jit as jit
 from .types import Canvas, IntV, Texture, ZBuffer
 
@@ -47,27 +47,27 @@ def merge_canvases(
     then merge zbuffer as well.
     """
     pixel_idx: Integer[Array, "width height"]
-    pixel_idx = jnp.argmax(zbuffers, axis=0)  # pyright: ignore[reportUnknownMemberType]
-    assert isinstance(pixel_idx, Integer[Array, "width height"])
+    pixel_idx = jnp.argmax(zbuffers, axis=0)
+    assert is_array_type(pixel_idx, Integer[Array, "width height"])
 
     zbuffer: ZBuffer = get_value_from_index(
-        lax.transpose(  # pyright: ignore[reportUnknownMemberType]
+        lax.transpose(
             zbuffers,
             (1, 2, 0),
         ),
         pixel_idx,
     )
-    assert isinstance(zbuffer, ZBuffer)
+    assert is_array_type(zbuffer, ZBuffer)
 
     canvas: Canvas = get_value_from_index(
         # first vmap along width, then height, then choose among "faces"
-        lax.transpose(  # pyright: ignore[reportUnknownMemberType]
+        lax.transpose(
             canvases,
             (1, 2, 0, 3),
         ),
         pixel_idx,
     )
-    assert isinstance(canvas, Canvas)
+    assert is_array_type(canvas, Canvas)
 
     return zbuffer, canvas
 
@@ -91,8 +91,8 @@ def transpose_for_display(
     To be compatible with PyTinyrenderer and most image processing programs,
     the default behaviour is to flip vertically.
     """
-    mat = cast(Num[Array, "snd fst *channel"], jnp.swapaxes(matrix, 0, 1))
-    assert isinstance(mat, Num[Array, "snd fst *channel"])
+    mat = jnp.swapaxes(matrix, 0, 1)
+    assert is_array_type(mat, Num[Array, "snd fst *channel"])
     if flip_vertical:
         mat = mat[::-1, ...]
 
@@ -121,7 +121,7 @@ def build_texture_from_PyTinyrenderer(
 
     Returns: A texture with shape `(width, height, channels)`.
     """
-    return jnp.reshape(  # pyright: ignore[reportUnknownMemberType]
+    return jnp.reshape(
         jnp.asarray(texture),  # pyright: ignore[reportUnknownMemberType]
         (width, height, -1),
         order="C",

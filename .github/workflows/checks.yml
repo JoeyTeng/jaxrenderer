@@ -50,8 +50,8 @@ jobs:
       - name: Check Ruff lint
         run: uv run --no-sync --python 3.14 ruff check --no-respect-gitignore assets renderer examples test_resources tests tools
 
-      - name: Run strict Pyright on required modules
-        run: uv run --no-sync --python 3.14 pyright --warnings renderer/types.py renderer/geometry.py renderer/model.py renderer/shader.py renderer/pipeline.py renderer/shadow.py renderer/shaders
+      - name: Run strict Pyright on the renderer package
+        run: uv run --no-sync --python 3.14 pyright --warnings renderer
 
   check:
     runs-on: ubuntu-latest
