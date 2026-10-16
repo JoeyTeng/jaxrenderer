@@ -53,19 +53,10 @@ repos:
         files: ^(assets/|renderer/|examples/|test_resources/|tests/|tools/).*[.]pyi?$
 
       - id: pyright
-        name: pyright
-        entry: uv run --no-sync pyright
+        name: Pyright project
+        entry: uv run --no-sync --python 3.14 pyright --warnings
         language: system
-        types: [python]
-        files: (renderer/|examples/|test_resources/tests/).*.py$
-        pass_filenames: false
-        stages: [manual]
-
-      - id: pyright-required-modules
-        name: Pyright renderer package
-        entry: uv run --no-sync --python 3.14 pyright --warnings renderer
-        language: system
-        files: ^(\.pre-commit-config[.]yaml|pyproject[.]toml|uv[.]lock|renderer/.*[.]pyi?)$
+        files: ^(\.pre-commit-config[.]yaml|pyproject[.]toml|uv[.]lock|(assets|renderer|examples|test_resources|tests|tools)/.*[.]pyi?)$
         pass_filenames: false
 
       - id: cspell

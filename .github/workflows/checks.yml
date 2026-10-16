@@ -50,8 +50,8 @@ jobs:
       - name: Check Ruff lint
         run: uv run --no-sync --python 3.14 ruff check --no-respect-gitignore assets renderer examples test_resources tests tools
 
-      - name: Run strict Pyright on the renderer package
-        run: uv run --no-sync --python 3.14 pyright --warnings renderer
+      - name: Run strict Pyright on the project
+        run: uv run --no-sync --python 3.14 pyright --warnings
 
   check:
     runs-on: ubuntu-latest
@@ -81,12 +81,6 @@ jobs:
 
       - name: Check Python version
         run: uv run --no-sync --python "${{ matrix.python-version }}" python --version
-
-      - name: Run pyright
-        if: matrix.python-version == '3.14'
-        # Keep the strict JAX compatibility diagnostics visible while the existing API debt is addressed.
-        continue-on-error: true
-        run: uv run --no-sync --python "${{ matrix.python-version }}" pyright
 
       - name: Run tests
         run: uv run --no-sync --python "${{ matrix.python-version }}" pytest tests/ --import-mode importlib

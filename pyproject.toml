@@ -93,7 +93,7 @@ known-first-party = ["renderer", "examples", "test_resources"]
 order-by-type = true
 
 [tool.pyright]
-include = ["renderer", "examples", "test_resources", "tests"]
+include = ["assets", "renderer", "examples", "test_resources", "tests", "tools"]
 exclude = ["typings/**", ".*/**", "**/node_modules", "**/__pycache__"]
 typeCheckingMode = "strict"
 venvPath = "."
