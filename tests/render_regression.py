@@ -1,4 +1,3 @@
-# pyright: basic
 """Numerical rendering regression checks shared by the CI backends."""
 
 from importlib.metadata import version
@@ -7,7 +6,7 @@ import os
 from pathlib import Path
 import platform
 import sys
-from typing import Iterable, Mapping
+from typing import Iterable, Mapping, cast
 
 from PIL import Image
 import jax
@@ -95,8 +94,8 @@ def save_image(name: str, image: np.ndarray) -> None:
 def write_report(section: str, metrics: Mapping[str, object]) -> None:
     ARTIFACT_DIR.mkdir(parents=True, exist_ok=True)
     report_path = ARTIFACT_DIR / "numeric-report.json"
-    report = (
-        json.loads(report_path.read_text(encoding="utf-8"))
+    report: dict[str, object] = (
+        cast(dict[str, object], json.loads(report_path.read_text(encoding="utf-8")))
         if report_path.exists()
         else {}
     )
@@ -108,7 +107,7 @@ def write_report(section: str, metrics: Mapping[str, object]) -> None:
         "numpy": np.__version__,
     }
     report[section] = dict(metrics)
-    report_path.write_text(
+    _ = report_path.write_text(
         json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8"
     )
     print(json.dumps({section: metrics}, sort_keys=True))

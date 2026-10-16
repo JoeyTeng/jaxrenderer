@@ -11,6 +11,7 @@ from jaxtyping import (
 )
 
 from renderer import jit
+from renderer._meta_utils import is_array_type
 from renderer.geometry import Camera, normalise, to_homogeneous
 from renderer.pipeline import render
 from renderer.shader import ID, MixerOutput, PerFragment, PerVertex, Shader
@@ -57,12 +58,12 @@ def test_render_batched_triangles():
     )
 
     buffers = Buffers(
-        zbuffer=lax.full(  # pyright: ignore[reportUnknownMemberType]
+        zbuffer=lax.full(
             (width, height),
             default_z,
         ),
         targets=(
-            lax.full(  # pyright: ignore[reportUnknownMemberType]
+            lax.full(
                 (width, height, 3),
                 default_ch,
             ),
@@ -119,22 +120,20 @@ def test_render_batched_triangles():
     # test zbuffer
     assert (
         jnp.unique(  # pyright: ignore[reportUnknownMemberType]
-            zbuffer[293:528, 964:1423].astype(jnp.uint8)  # pyright: ignore
+            zbuffer[293:528, 964:1423].astype(jnp.uint8)
         ).shape
-        == (  # pyright: ignore
-            1,
-        )
+        == (1,)
     ), "The depths of the triangle parallel to the camera should be uniform"
-    assert jnp.all(  # pyright: ignore[reportUnknownMemberType]
-        zbuffer[590:1049, 964:1423] == default_z
-    ), "The depths of unrendered places should remain default"
+    assert jnp.all(zbuffer[590:1049, 964:1423] == default_z), (
+        "The depths of unrendered places should remain default"
+    )
     assert zbuffer[551, 914] < zbuffer[1026, 92], (
         "The depths of a triangle facing towards camera should be closer"
     )
 
     # test canvas
-    default_pixel = jnp.array([default_ch] * 3)  # pyright: ignore
-    empty_pixels = (canvas == default_pixel).all(axis=2).sum()  # pyright: ignore
+    default_pixel = jnp.array([default_ch] * 3)  # pyright: ignore[reportUnknownMemberType]
+    empty_pixels = (canvas == default_pixel).all(axis=2).sum()
     assert empty_pixels > (width * height // 2), "The canvas should be mostly empty"
     assert empty_pixels < (width * height), "The canvas should not be all empty"
 
@@ -172,14 +171,11 @@ class _Shader(Shader[ExtraInput, ExtraFragmentData, ExtraMixerOutput]):
         # Use gl_VertexID to index in `extra` buffer.
         position: Vec4f = to_homogeneous(extra.position[gl_VertexID])
         gl_Position: Vec4f = camera.to_clip(position)
-        assert isinstance(gl_Position, Vec4f)
+        assert is_array_type(gl_Position, Vec4f)
 
         normal: Vec3f = normalise(extra.normal[gl_VertexID])
-        intensity = cast(
-            FloatV,
-            jnp.dot(normal, normalise(extra.light.direction)),
-        )
-        assert isinstance(intensity, FloatV)
+        intensity: FloatV = jnp.dot(normal, normalise(extra.light.direction))
+        assert is_array_type(intensity, FloatV)
 
         light_colour: Colour
         light_colour = extra.light.colour * intensity
@@ -202,16 +198,16 @@ class _Shader(Shader[ExtraInput, ExtraFragmentData, ExtraMixerOutput]):
         varying: ExtraFragmentData,
         extra: ExtraInput,
     ) -> tuple[PerFragment, ExtraFragmentData]:
-        built_in: PerFragment = Shader.fragment(
-            gl_FragCoord,
-            gl_FrontFacing,
-            gl_PointCoord,
-            varying,
-            extra,
-        )[0]
+        built_in: PerFragment
+        built_in, _varying = cast(
+            tuple[PerFragment, ExtraFragmentData],
+            Shader.fragment(  # pyright: ignore[reportUnknownMemberType]
+                gl_FragCoord, gl_FrontFacing, gl_PointCoord, varying, extra
+            ),
+        )
         texture_colour: Colour = varying.colour
-        a = cast(BoolV, jnp.modf(varying.uv)[0] < 0.5)
-        texture_colour = jnp.where(  # pyright: ignore[reportUnknownMemberType]
+        a = jnp.modf(varying.uv)[0] < 0.5  # pyright: ignore[reportUnknownMemberType]
+        texture_colour = jnp.where(
             a[0] != a[1],
             texture_colour,
             texture_colour * 0.5,
@@ -230,7 +226,14 @@ class _Shader(Shader[ExtraInput, ExtraFragmentData, ExtraMixerOutput]):
         keeps: Bool[Array, "primitives"],
         extra: ExtraFragmentData,
     ) -> tuple[MixerOutput, ExtraMixerOutput]:
-        mixer_output, extra_output = Shader.mix(gl_FragDepth, keeps, extra)
+        mixer_output: MixerOutput
+        extra_output: ExtraFragmentData
+        mixer_output, extra_output = cast(
+            tuple[MixerOutput, ExtraFragmentData],
+            Shader.mix(  # pyright: ignore[reportUnknownMemberType]
+                gl_FragDepth, keeps, extra
+            ),
+        )
         assert isinstance(extra_output, ExtraFragmentData)
 
         return (
@@ -268,12 +271,12 @@ def test_perspective_interpolation():
     )
 
     buffers = Buffers(
-        zbuffer=lax.full(  # pyright: ignore[reportUnknownMemberType]
+        zbuffer=lax.full(
             (width, height),
             1.0,
         ),
         targets=(
-            lax.full(  # pyright: ignore[reportUnknownMemberType]
+            lax.full(
                 (width, height, 3),
                 0.0,
             ),
@@ -321,7 +324,7 @@ def test_perspective_interpolation():
     assert canvas.shape == (height, width, 3)
 
     # test zbuffer
-    assert jnp.sum(zbuffer == default_z) > (width * height // 2), (  # pyright: ignore
+    assert jnp.sum(zbuffer == default_z) > (width * height // 2), (
         "The depths of unrendered places should remain default, "
         "which is the majority of the screen space"
     )
@@ -330,8 +333,8 @@ def test_perspective_interpolation():
     )
 
     # test canvas
-    default_pixel = jnp.array([default_ch] * 3)  # pyright: ignore
-    empty_pixels = (canvas == default_pixel).all(axis=2).sum()  # pyright: ignore
+    default_pixel = jnp.array([default_ch] * 3)  # pyright: ignore[reportUnknownMemberType]
+    empty_pixels = (canvas == default_pixel).all(axis=2).sum()
     assert empty_pixels > (width * height // 2), "The canvas should be mostly empty"
     assert empty_pixels < (width * height), "The canvas should not be all empty"
 

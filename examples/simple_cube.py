@@ -1,4 +1,3 @@
-# pyright: basic
 """Display the blue cube render used by the baseline regression checks."""
 
 from pathlib import Path

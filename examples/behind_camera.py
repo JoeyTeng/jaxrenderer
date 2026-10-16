@@ -80,9 +80,7 @@ img = Renderer.get_camera_image(
     height=height,
     shadow_param=shadow_param,
 )
-rgb_array = lax.clamp(  # pyright: ignore[reportUnknownMemberType]
-    0.0, img * 255, 255.0
-).astype(jnp.uint8)
+rgb_array = lax.clamp(0.0, img * 255, 255.0).astype(jnp.uint8)
 images.append(rgb_array)
 
 img = Renderer.get_camera_image(
@@ -93,9 +91,7 @@ img = Renderer.get_camera_image(
     height=height,
     shadow_param=shadow_param,
 )
-rgb_array = lax.clamp(  # pyright: ignore[reportUnknownMemberType]
-    0.0, img * 255, 255.0
-).astype(jnp.uint8)
+rgb_array = lax.clamp(0.0, img * 255, 255.0).astype(jnp.uint8)
 images.append(rgb_array)
 
 # PROCESS: show

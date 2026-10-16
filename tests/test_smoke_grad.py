@@ -1,4 +1,3 @@
-# pyright: basic
 from functools import partial
 import json
 import os
@@ -20,13 +19,13 @@ def _write_gradient_report(metrics: dict[str, float]) -> None:
     )
     artifact_dir.mkdir(parents=True, exist_ok=True)
     report_path = artifact_dir / "numeric-report.json"
-    report = (
-        json.loads(report_path.read_text(encoding="utf-8"))
+    report: dict[str, object] = (
+        cast(dict[str, object], json.loads(report_path.read_text(encoding="utf-8")))
         if report_path.exists()
         else {}
     )
     report["light_gradient"] = metrics
-    report_path.write_text(
+    _ = report_path.write_text(
         json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8"
     )
 
@@ -57,12 +56,12 @@ camera: Camera = Camera.create(
 )
 
 buffers = Buffers(
-    zbuffer=lax.full(  # pyright: ignore[reportUnknownMemberType]
+    zbuffer=lax.full(
         (width, height),
         0.0,
     ),
     targets=(
-        lax.full(  # pyright: ignore[reportUnknownMemberType]
+        lax.full(
             (width, height, 3),
             0.0,
         ),
@@ -115,16 +114,19 @@ def test_grad_over_camera():
     def camera_depth_loss(a: Camera) -> FloatV:
         depth = _render(camera=a, extra=extra)[0]
 
-        return jnp.sum(depth)  # pyright: ignore[reportUnknownMemberType]
+        return jnp.sum(depth)
 
-    grad_camera = cast(
-        FloatV,
+    grad_camera: Camera = cast(
+        Camera,
         jax.jit(  # pyright: ignore[reportUnknownMemberType]
             jax.grad(camera_depth_loss)  # pyright: ignore[reportUnknownMemberType]
         )(camera),
     )
 
-    jax.tree_util.tree_map(lambda a: a.block_until_ready(), grad_camera)
+    def block_until_ready(value: jax.Array) -> jax.Array:
+        return value.block_until_ready()
+
+    _ = jax.tree_util.tree_map(block_until_ready, grad_camera)
     assert jax.tree_util.tree_leaves(grad_camera)
 
 
@@ -135,20 +137,25 @@ def test_grad_over_light():
             extra=extra._replace(light=light),
         )
 
-        return canvas.sum()  # pyright: ignore[reportUnknownMemberType]
+        return canvas.sum()
 
     def loss_for_x(x: FloatV) -> FloatV:
-        light = LightSource(direction=jnp.array((x, 0.2, -1.0)))
+        light = LightSource(
+            direction=jnp.array((x, 0.2, -1.0)),  # pyright: ignore[reportUnknownMemberType]
+        )
         return _render_light(light)
 
-    x = jnp.asarray(0.3)
+    x = jnp.asarray(0.3)  # pyright: ignore[reportUnknownMemberType]
     epsilon = 0.01
-    gradient = jax.grad(loss_for_x)(x)
+    gradient: FloatV = cast(
+        FloatV,
+        jax.grad(loss_for_x)(x),  # pyright: ignore[reportUnknownMemberType]
+    )
     finite_difference = (loss_for_x(x + epsilon) - loss_for_x(x - epsilon)) / (
         2 * epsilon
     )
-    gradient.block_until_ready()
-    finite_difference.block_until_ready()
+    _ = gradient.block_until_ready()
+    _ = finite_difference.block_until_ready()
 
     gradient_value = float(gradient)
     finite_difference_value = float(finite_difference)

@@ -12,6 +12,7 @@ from jaxtyping import (
 import matplotlib.pyplot as plt
 
 from renderer import jit
+from renderer._meta_utils import is_array_type
 from renderer.geometry import Camera, normalise, to_homogeneous
 from renderer.pipeline import render
 from renderer.shader import ID, MixerOutput, PerFragment, PerVertex, Shader
@@ -54,10 +55,8 @@ camera: Camera = Camera.create(
 )
 
 buffers = Buffers(
-    zbuffer=lax.full((width, height), 1.0),  # pyright: ignore[reportUnknownMemberType]
-    targets=(
-        lax.full((width, height, 3), 0.0),  # pyright: ignore[reportUnknownMemberType]
-    ),
+    zbuffer=lax.full((width, height), 1.0),
+    targets=(lax.full((width, height, 3), 0.0),),
 )
 face_indices = jnp.array(  # pyright: ignore[reportUnknownMemberType]
     (
@@ -130,17 +129,14 @@ class _Shader(Shader[ExtraInput, ExtraFragmentData, ExtraMixerOutput]):
         # Use gl_VertexID to index in `extra` buffer.
         position: Vec4f = to_homogeneous(extra.position[gl_VertexID])
         gl_Position: Vec4f = camera.to_clip(position)
-        assert isinstance(gl_Position, Vec4f)
+        assert is_array_type(gl_Position, Vec4f)
 
         normal: Vec3f = normalise(extra.normal[gl_VertexID])
-        intensity = cast(
-            FloatV,
-            jnp.dot(
-                normal,
-                normalise(extra.light.direction),
-            ),
+        intensity: FloatV = jnp.dot(
+            normal,
+            normalise(extra.light.direction),
         )
-        assert isinstance(intensity, FloatV)
+        assert is_array_type(intensity, FloatV)
 
         light_colour: Colour
         light_colour = extra.light.colour * intensity
@@ -163,16 +159,16 @@ class _Shader(Shader[ExtraInput, ExtraFragmentData, ExtraMixerOutput]):
         varying: ExtraFragmentData,
         extra: ExtraInput,
     ) -> tuple[PerFragment, ExtraFragmentData]:
-        built_in: PerFragment = Shader.fragment(
-            gl_FragCoord,
-            gl_FrontFacing,
-            gl_PointCoord,
-            varying,
-            extra,
-        )[0]
+        built_in: PerFragment
+        built_in, _varying = cast(
+            tuple[PerFragment, ExtraFragmentData],
+            Shader.fragment(  # pyright: ignore[reportUnknownMemberType]
+                gl_FragCoord, gl_FrontFacing, gl_PointCoord, varying, extra
+            ),
+        )
         texture_colour: Colour = varying.colour
-        a = cast(BoolV, jnp.modf(varying.uv)[0] < 0.5)
-        texture_colour = jnp.where(  # pyright: ignore[reportUnknownMemberType]
+        a = jnp.modf(varying.uv)[0] < 0.5  # pyright: ignore[reportUnknownMemberType]
+        texture_colour = jnp.where(
             a[0] != a[1],
             texture_colour,
             texture_colour * 0.5,
@@ -191,7 +187,14 @@ class _Shader(Shader[ExtraInput, ExtraFragmentData, ExtraMixerOutput]):
         keeps: Bool[Array, "primitives"],
         extra: ExtraFragmentData,
     ) -> tuple[MixerOutput, ExtraMixerOutput]:
-        mixer_output, extra_output = Shader.mix(gl_FragDepth, keeps, extra)
+        mixer_output: MixerOutput
+        extra_output: ExtraFragmentData
+        mixer_output, extra_output = cast(
+            tuple[MixerOutput, ExtraFragmentData],
+            Shader.mix(  # pyright: ignore[reportUnknownMemberType]
+                gl_FragDepth, keeps, extra
+            ),
+        )
         assert isinstance(extra_output, ExtraFragmentData)
 
         return (
@@ -220,10 +223,8 @@ camera: Camera = Camera.create(
 )
 
 buffers = Buffers(
-    zbuffer=lax.full((width, height), 1.0),  # pyright: ignore[reportUnknownMemberType]
-    targets=(
-        lax.full((width, height, 3), 0.0),  # pyright: ignore[reportUnknownMemberType]
-    ),
+    zbuffer=lax.full((width, height), 1.0),
+    targets=(lax.full((width, height, 3), 0.0),),
 )
 face_indices = jnp.array(((0, 1, 2),))  # pyright: ignore[reportUnknownMemberType]
 position = jnp.array(  # pyright: ignore[reportUnknownMemberType]

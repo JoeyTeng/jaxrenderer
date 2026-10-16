@@ -103,9 +103,7 @@ img = Renderer.get_camera_image(
     shadow_param=ShadowParameters(),
 )
 
-rgb_array = lax.clamp(  # pyright: ignore[reportUnknownMemberType]
-    0.0, img * 255, 255.0
-).astype(jnp.uint8)
+rgb_array = lax.clamp(0.0, img * 255, 255.0).astype(jnp.uint8)
 
 fig, ax = plt.subplots()  # pyright: ignore
 ax.imshow(transpose_for_display(rgb_array))  # pyright: ignore[reportUnknownMemberType]
