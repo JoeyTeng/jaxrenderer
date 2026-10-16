@@ -12,7 +12,7 @@ import stat
 import sys
 import tarfile
 import tempfile
-from typing import Any
+from typing import Any, cast
 
 from tools import accelerator_runner
 
@@ -42,8 +42,9 @@ def _load_binding(path: Path) -> dict[str, object]:
         raise ModalCIError(f"could not read binding file: {error}") from error
     if not isinstance(value, dict):
         raise ModalCIError("binding JSON must be an object")
+    value = cast(dict[str, object], value)
     try:
-        return accelerator_runner._validate_binding(value)
+        return accelerator_runner.validate_binding(value)
     except accelerator_runner.RunnerError as error:
         raise ModalCIError(str(error)) from error
 
@@ -64,7 +65,11 @@ def _validate_result(
         "devices",
         "versions",
     }
-    if not isinstance(result, dict) or set(result) != fields:
+    if not isinstance(result, dict):
+        raise ModalCIError("remote result has missing or unexpected fields")
+    # JSON object keys are strings by definition; the exact key set is checked next.
+    result = cast(dict[str, object], result)
+    if set(result) != fields:
         raise ModalCIError("remote result has missing or unexpected fields")
     for name in identity_fields:
         if (
@@ -83,6 +88,7 @@ def _validate_result(
     devices = result["devices"]
     if not isinstance(devices, list) or type(result["device_count"]) is not int:
         raise ModalCIError("remote result has malformed device information")
+    devices = cast(list[object], devices)
     if result["device_count"] != len(devices):
         raise ModalCIError("remote result device_count does not match its devices")
     if result["success"] is True:
@@ -92,22 +98,28 @@ def _validate_result(
             )
     elif result["device_backend"] not in {backend, "unknown"}:
         raise ModalCIError("failed result reports an unexpected device backend")
-    for device in devices:
-        if (
-            not isinstance(device, dict)
-            or set(device) != {"platform", "device_kind", "id"}
-            or device["platform"] != backend
-            or any(
-                not isinstance(device[key], str) or not device[key] for key in device
-            )
+    for raw_device in devices:
+        if not isinstance(raw_device, dict):
+            raise ModalCIError("remote result contains malformed device metadata")
+        # JSON object keys are strings; the key set and values are checked here.
+        raw_device = cast(dict[str, object], raw_device)
+        if set(raw_device) != {"platform", "device_kind", "id"}:
+            raise ModalCIError("remote result contains malformed device metadata")
+        device = raw_device
+        if device["platform"] != backend or any(
+            not isinstance(device[key], str) or not device[key] for key in device
         ):
             raise ModalCIError("remote result contains malformed device metadata")
     versions = result["versions"]
-    if not isinstance(versions, dict) or not all(
-        isinstance(name, str) and name and isinstance(version, str) and version
+    if not isinstance(versions, dict):
+        raise ModalCIError("remote result versions must map names to strings")
+    versions = cast(dict[str, object], versions)
+    if not all(
+        name and isinstance(version, str) and version
         for name, version in versions.items()
     ):
         raise ModalCIError("remote result versions must map names to strings")
+    versions = cast(dict[str, str], versions)
     if result["success"] is True and not versions:
         raise ModalCIError("successful remote result must include version metadata")
     return result
@@ -142,11 +154,12 @@ def _pack_artifacts(output_dir: Path) -> bytes:
     return result
 
 
-def _remote_run(binding_data: str) -> tuple[bytes, dict[str, object]]:
+def remote_run(binding_data: str) -> tuple[bytes, dict[str, object]]:
     binding_value = json.loads(binding_data)
     if not isinstance(binding_value, dict):
         raise ModalCIError("remote binding must be a JSON object")
-    binding = accelerator_runner._validate_binding(binding_value)
+    binding_value = cast(dict[str, object], binding_value)
+    binding = accelerator_runner.validate_binding(binding_value)
     with tempfile.TemporaryDirectory(prefix="jaxrenderer-modal-") as temporary:
         output = Path(temporary) / "output"
         result = accelerator_runner.run(binding, "gpu", output)
@@ -183,7 +196,7 @@ def _create_modal_app(modal: Any) -> tuple[Any, Any]:
         import sys
 
         sys.path.insert(0, "/root")
-        from tools.modal_ci import _remote_run as remote_run
+        from tools.modal_ci import remote_run as remote_run
 
         return remote_run(binding_data)
 
@@ -219,7 +232,7 @@ def _atomic_write(path: Path, data: bytes) -> None:
         dir=path.parent, prefix=f".{path.name}.", delete=False
     ) as file:
         temporary = Path(file.name)
-        file.write(data)
+        _ = file.write(data)
     try:
         os.replace(temporary, path)
     finally:
@@ -227,7 +240,7 @@ def _atomic_write(path: Path, data: bytes) -> None:
 
 
 def execute(binding: Mapping[str, object], output_dir: Path) -> dict[str, object]:
-    frozen = accelerator_runner._validate_binding(binding)
+    frozen = accelerator_runner.validate_binding(binding)
     output, identity = _prepare_output(Path(output_dir))
     try:
         _preflight_credentials()
@@ -246,16 +259,13 @@ def execute(binding: Mapping[str, object], output_dir: Path) -> dict[str, object
             except Exception as error:
                 controller_error = f"{type(error).__name__}: {error}"
         if remote_result is None:
-            remote_result = accelerator_runner._initial_result(frozen, "gpu")
+            remote_result = accelerator_runner.initial_result(frozen, "gpu")
             _atomic_write(
                 output / "diagnostics.log",
                 (controller_error or "Modal invocation failed").encode("utf-8"),
             )
         if archive_bytes is not None:
-            if (
-                not isinstance(archive_bytes, bytes)
-                or len(archive_bytes) > MAX_ARTIFACT_BYTES
-            ):
+            if len(archive_bytes) > MAX_ARTIFACT_BYTES:
                 raise ModalCIError(
                     "Modal returned an invalid or oversized artifact archive"
                 )
@@ -268,7 +278,7 @@ def execute(binding: Mapping[str, object], output_dir: Path) -> dict[str, object
         )
     except Exception as error:
         if not (output / "result.json").exists():
-            failure = accelerator_runner._initial_result(frozen, "gpu")
+            failure = accelerator_runner.initial_result(frozen, "gpu")
             _atomic_write(
                 output / "diagnostics.log",
                 f"{type(error).__name__}: {error}\n".encode("utf-8"),
@@ -285,8 +295,8 @@ def execute(binding: Mapping[str, object], output_dir: Path) -> dict[str, object
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--binding", type=Path, required=True)
-    parser.add_argument("--output-dir", type=Path, required=True)
+    _ = parser.add_argument("--binding", type=Path, required=True)
+    _ = parser.add_argument("--output-dir", type=Path, required=True)
     arguments = parser.parse_args(argv)
     try:
         binding = _load_binding(arguments.binding)

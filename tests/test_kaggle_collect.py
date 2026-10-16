@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import builtins
 from collections.abc import Callable
+from dataclasses import dataclass, field
 import hashlib
 import json
 from pathlib import Path
@@ -72,7 +73,7 @@ def _kernel_id() -> str:
 def _resume_state(
     path: Path, *, kernel_id: str | None = None, version: Any = 1
 ) -> None:
-    path.write_text(
+    _ = path.write_text(
         json.dumps(
             {
                 "binding": BINDING,
@@ -84,22 +85,26 @@ def _resume_state(
     )
 
 
+@dataclass
 class _Request:
-    def __init__(self) -> None:
-        self.user_name = ""
-        self.kernel_slug = ""
-        self.version_label = ""
-        self.page_size = 0
-        self.page_token = ""
+    user_name: str = ""
+    kernel_slug: str = ""
+    version_label: str = ""
+    page_size: int = 0
+    page_token: str = ""
 
 
+def _new_request_list() -> list[_Request]:
+    return []
+
+
+@dataclass
 class _Api:
-    def __init__(self, files: list[str], status: Any = "COMPLETE") -> None:
-        self.files = files
-        self.status = status
-        self.metadata_requests: list[_Request] = []
-        self.status_requests: list[_Request] = []
-        self.output_requests: list[_Request] = []
+    files: list[str]
+    status: Any = "COMPLETE"
+    metadata_requests: list[_Request] = field(default_factory=_new_request_list)
+    status_requests: list[_Request] = field(default_factory=_new_request_list)
+    output_requests: list[_Request] = field(default_factory=_new_request_list)
 
     def get_kernel(self, request: _Request) -> Any:
         self.metadata_requests.append(request)
@@ -167,7 +172,7 @@ def _install_files(monkeypatch: pytest.MonkeyPatch) -> None:
             data = b"png-data"
         else:
             data = f"{name}: passed\n".encode()
-        destination.write_bytes(data)
+        _ = destination.write_bytes(data)
         return len(data)
 
     monkeypatch.setattr(collector, "_download_file", download)
@@ -212,7 +217,7 @@ def test_collect_requests_version_one_and_keeps_frozen_result_binding(
 def test_optional_diagnostics_log_is_collected_when_present(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    _install_fake_api(monkeypatch, files=[*FILES, "diagnostics.log"])
+    _ = _install_fake_api(monkeypatch, files=[*FILES, "diagnostics.log"])
     _install_files(monkeypatch)
     state, output = _prepare(monkeypatch, tmp_path)
 
@@ -309,7 +314,7 @@ def test_resume_state_identity_mismatch_fails_before_sdk(
 def test_full_controller_state_schema_is_accepted(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    _install_fake_api(monkeypatch, status="QUEUED")
+    _ = _install_fake_api(monkeypatch, status="QUEUED")
     state, output = _prepare(monkeypatch, tmp_path)
     contents = json.loads(state.read_text(encoding="utf-8"))
     contents.update(
@@ -326,7 +331,7 @@ def test_full_controller_state_schema_is_accepted(
             "last_error": None,
         }
     )
-    state.write_text(json.dumps(contents), encoding="utf-8")
+    _ = state.write_text(json.dumps(contents), encoding="utf-8")
 
     report = collector.collect(BINDING, state, output)
 
@@ -400,7 +405,9 @@ def test_duplicate_and_missing_outputs_fail_closed(
 def test_successful_output_still_requires_all_result_logs_and_report(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, missing: str
 ) -> None:
-    _install_fake_api(monkeypatch, files=[name for name in FILES if name != missing])
+    _ = _install_fake_api(
+        monkeypatch, files=[name for name in FILES if name != missing]
+    )
     state, output = _prepare(monkeypatch, tmp_path)
 
     report = collector.collect(BINDING, state, output)
@@ -413,7 +420,7 @@ def test_successful_output_still_requires_all_result_logs_and_report(
 def test_successful_output_still_requires_a_render_png(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    _install_fake_api(
+    _ = _install_fake_api(
         monkeypatch,
         files=[name for name in FILES if not name.lower().endswith(".png")],
     )
@@ -457,7 +464,7 @@ def test_result_binding_backend_devices_and_success_are_validated(
     value: Any,
     message: str,
 ) -> None:
-    _install_fake_api(monkeypatch)
+    _ = _install_fake_api(monkeypatch)
 
     def download(url: str, destination: Path, remaining: int) -> int:
         if destination.name == "result.json":
@@ -468,7 +475,7 @@ def test_result_binding_backend_devices_and_success_are_validated(
             data = json.dumps(result).encode()
         else:
             data = b"ok"
-        destination.write_bytes(data)
+        _ = destination.write_bytes(data)
         return len(data)
 
     monkeypatch.setattr(collector, "_download_file", download)
@@ -485,9 +492,9 @@ def test_collector_refuses_existing_output_and_redacts_token(
 ) -> None:
     state, output = _prepare(monkeypatch, tmp_path)
     output.mkdir()
-    (output / "kaggle-collection-report.json").write_text("old", encoding="utf-8")
+    _ = (output / "kaggle-collection-report.json").write_text("old", encoding="utf-8")
     with pytest.raises(collector.CollectionError, match="already exists"):
-        collector.collect(BINDING, state, output)
+        _ = collector.collect(BINDING, state, output)
     assert (output / "kaggle-collection-report.json").read_text() == "old"
 
     api = _install_fake_api(monkeypatch)
@@ -616,7 +623,7 @@ def test_sdk_redirect_is_rejected_before_following() -> None:
     request = SimpleNamespace(url="https://api.kaggle.com/api/v1/kernels/status")
 
     with pytest.raises(collector.CollectionError, match="redirects are not permitted"):
-        session.send(request)
+        _ = session.send(request)
     assert session.kwargs["allow_redirects"] is False
     assert session.response.closed is True
 
@@ -657,13 +664,12 @@ def test_download_session_disables_environment_auth_and_closes_response(
         def close(self) -> None:
             self.closed = True
 
+    @dataclass
     class _Session:
         trust_env = True
         auth = None
-
-        def __init__(self) -> None:
-            self.response = _Response()
-            self.call: tuple[tuple[Any, ...], dict[str, Any]] | None = None
+        response: _Response = field(default_factory=_Response)
+        call: tuple[tuple[Any, ...], dict[str, Any]] | None = None
 
         def get(self, *args: Any, **kwargs: Any) -> _Response:
             self.call = (args, kwargs)

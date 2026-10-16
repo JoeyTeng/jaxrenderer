@@ -1,7 +1,5 @@
 """Validate original TPU evidence independently of a new collection attempt."""
 
-# pyright: reportPrivateUsage=false
-
 from __future__ import annotations
 
 import copy
@@ -19,6 +17,11 @@ HEAD = "a" * 40
 COLLECTOR_HEAD = "b" * 40
 SOURCE_RUN = 789
 SOURCE_ATTEMPT = 3
+
+
+def _context() -> str:
+    helper = cast(Callable[[], str], getattr(gate, "_context"))
+    return helper()
 
 
 def binding() -> dict[str, object]:
@@ -148,16 +151,16 @@ def source(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
             if member == "tpu-release-binding.json"
             else data["controller_state"]
         )
-        path.write_text(json.dumps(value), encoding="utf-8")
+        _ = path.write_text(json.dumps(value), encoding="utf-8")
 
-    monkeypatch.setattr(gate.accelerator_gate, "_gh_api", api)
-    monkeypatch.setattr(gate, "_download_member", download)
+    monkeypatch.setattr(gate.accelerator_gate, "gh_api", api)
+    monkeypatch.setattr(gate, "download_member", download)
     return data
 
 
 def prepare(tmp_path: Path) -> Path:
     path = tmp_path / "source"
-    gate.prepare("789", "3", HEAD, path, tmp_path / "github-output")
+    _ = gate.prepare("789", "3", HEAD, path, tmp_path / "github-output")
     return path
 
 
@@ -175,7 +178,7 @@ def test_schedule_context_requires_the_exact_canonical_master_workflow(
     monkeypatch.setenv("GITHUB_RUN_ID", "990")
     monkeypatch.setenv("GITHUB_RUN_ATTEMPT", "1")
 
-    assert gate._context() == "990.1"
+    assert _context() == "990.1"
 
     for name, value in (
         ("GITHUB_REF", "refs/heads/feature"),
@@ -187,7 +190,7 @@ def test_schedule_context_requires_the_exact_canonical_master_workflow(
     ):
         monkeypatch.setenv(name, value)
         with pytest.raises(gate.CollectionGateError, match="scheduled collection"):
-            gate._context()
+            _ = _context()
         monkeypatch.setenv(
             name,
             value
@@ -205,14 +208,14 @@ def test_schedule_context_requires_the_exact_canonical_master_workflow(
 def test_manual_context_remains_supported_without_workflow_ref(
     source: dict[str, Any],
 ) -> None:
-    assert gate._context() == "990.1"
+    assert _context() == "990.1"
 
 
 def collected(tmp_path: Path) -> Path:
     output = tmp_path / "collected"
     output.mkdir(parents=True)
-    (output / "result.json").write_text(json.dumps(result()), encoding="utf-8")
-    (output / "kaggle-collection-report.json").write_text(
+    _ = (output / "result.json").write_text(json.dumps(result()), encoding="utf-8")
+    _ = (output / "kaggle-collection-report.json").write_text(
         json.dumps(
             {
                 "binding": binding(),
@@ -268,7 +271,7 @@ def test_prepare_rejects_wrong_run(
 ) -> None:
     source["run"][field] = value
     with pytest.raises(gate.CollectionGateError, match="exact completed"):
-        prepare(tmp_path)
+        _ = prepare(tmp_path)
 
 
 @pytest.mark.parametrize(
@@ -281,7 +284,7 @@ def test_prepare_rejects_other_gate_failure(
         "failure"
     )
     with pytest.raises(gate.CollectionGateError, match="required job"):
-        prepare(tmp_path)
+        _ = prepare(tmp_path)
 
 
 def test_prepare_rejects_incomplete_job_inventory(
@@ -289,14 +292,14 @@ def test_prepare_rejects_incomplete_job_inventory(
 ) -> None:
     source["jobs"]["total_count"] += 1
     with pytest.raises(gate.CollectionGateError, match="inventory"):
-        prepare(tmp_path)
+        _ = prepare(tmp_path)
 
 
 def test_prepare_rejects_duplicate_jobs(source: dict[str, Any], tmp_path: Path) -> None:
     source["jobs"]["jobs"].append(copy.deepcopy(source["jobs"]["jobs"][0]))
     source["jobs"]["total_count"] += 1
     with pytest.raises(gate.CollectionGateError, match="ambiguous"):
-        prepare(tmp_path)
+        _ = prepare(tmp_path)
 
 
 @pytest.mark.parametrize(
@@ -312,7 +315,7 @@ def test_prepare_rejects_invalid_artifact(
 ) -> None:
     source["artifacts"]["artifacts"][0][field] = value
     with pytest.raises(gate.CollectionGateError, match="artefact identity"):
-        prepare(tmp_path)
+        _ = prepare(tmp_path)
 
 
 def test_prepare_rejects_duplicate_artifacts(
@@ -323,7 +326,7 @@ def test_prepare_rejects_duplicate_artifacts(
     )
     source["artifacts"]["total_count"] += 1
     with pytest.raises(gate.CollectionGateError, match="exactly one"):
-        prepare(tmp_path)
+        _ = prepare(tmp_path)
 
 
 @pytest.mark.parametrize(
@@ -342,7 +345,7 @@ def test_prepare_classifies_known_non_timeout_controller_results_as_ineligible(
 ) -> None:
     source["controller_state"]["outcome"] = outcome
     with pytest.raises(gate.IneligibleSource, match="not a timeout"):
-        prepare(tmp_path)
+        _ = prepare(tmp_path)
 
 
 def test_preflight_without_submitted_version_is_ineligible(
@@ -351,7 +354,7 @@ def test_preflight_without_submitted_version_is_ineligible(
     source["controller_state"].update(outcome="preflight_error", submitted_version=None)
 
     with pytest.raises(gate.IneligibleSource, match="not a timeout"):
-        prepare(tmp_path)
+        _ = prepare(tmp_path)
 
 
 @pytest.mark.parametrize("version", [None, 1])
@@ -364,7 +367,7 @@ def test_prepare_skips_valid_legacy_state_without_timeout_evidence(
         gate.IneligibleSource,
         match=r"source 789\.3 legacy controller state has no timeout evidence",
     ):
-        prepare(tmp_path)
+        _ = prepare(tmp_path)
 
 
 @pytest.mark.parametrize(
@@ -406,7 +409,7 @@ def test_prepare_rejects_legacy_state_with_wrong_identity(
     source["controller_state"] = legacy
 
     with pytest.raises(gate.CollectionGateError, match=message):
-        prepare(tmp_path)
+        _ = prepare(tmp_path)
 
 
 @pytest.mark.parametrize("owner", ["", "bad user", "u" * 51, "joé"])
@@ -422,7 +425,7 @@ def test_prepare_rejects_malformed_legacy_kernel_owner(
         gate.CollectionGateError,
         match="source 789.3 legacy controller identity is invalid",
     ) as error:
-        prepare(tmp_path)
+        _ = prepare(tmp_path)
 
     assert not isinstance(error.value, gate.IneligibleSource)
 
@@ -436,7 +439,7 @@ def test_prepare_rejects_unknown_controller_schema_with_source_identity(
         gate.CollectionGateError,
         match=r"source 789\.3 controller state schema is unsupported",
     ):
-        prepare(tmp_path)
+        _ = prepare(tmp_path)
 
 
 def test_finish_separates_collection_from_release_credit(
@@ -482,7 +485,7 @@ def test_finish_accepts_terminal_success_after_timeout_as_validation_only(
     assert receipt["validation_only"] is True
     assert receipt["release_gate_credit"] is False
     with pytest.raises(gate.CollectionGateError, match="provider did not collect"):
-        gate.finish(original, collected(tmp_path / "provider-failed"), False)
+        _ = gate.finish(original, collected(tmp_path / "provider-failed"), False)
 
 
 @pytest.mark.parametrize(
@@ -505,9 +508,9 @@ def test_finish_rejects_unproven_result(
     report = output / "kaggle-collection-report.json"
     value_dict = json.loads(report.read_text())
     value_dict[field] = value
-    report.write_text(json.dumps(value_dict), encoding="utf-8")
+    _ = report.write_text(json.dumps(value_dict), encoding="utf-8")
     with pytest.raises(gate.CollectionGateError, match="original successful"):
-        gate.finish(original, output, True)
+        _ = gate.finish(original, output, True)
     assert not (output / "collection-receipt.json").exists()
 
 
@@ -517,7 +520,7 @@ def test_finish_rechecks_original_artifact_ids(
     original, output = prepare(tmp_path), collected(tmp_path)
     source["artifacts"]["artifacts"][0]["id"] = 101
     with pytest.raises(gate.CollectionGateError, match="identity changed"):
-        gate.finish(original, output, True)
+        _ = gate.finish(original, output, True)
 
 
 @pytest.mark.parametrize(
@@ -536,9 +539,9 @@ def test_finish_rejects_invalid_controller_state(
     path = original / "kaggle-controller-state.json"
     value_dict = json.loads(path.read_text())
     value_dict[field] = value
-    path.write_text(json.dumps(value_dict), encoding="utf-8")
+    _ = path.write_text(json.dumps(value_dict), encoding="utf-8")
     with pytest.raises(gate.CollectionGateError):
-        gate.finish(original, output, True)
+        _ = gate.finish(original, output, True)
 
 
 def test_download_selects_only_bounded_member(
@@ -556,7 +559,7 @@ def test_download_selects_only_bounded_member(
     monkeypatch.setattr(gate.subprocess, "run", run)
     path = tmp_path / "binding.json"
     download_member = cast(
-        Callable[[int, str, Path], None], getattr(gate, "_download_member")
+        Callable[[int, str, Path], None], getattr(gate, "download_member")
     )
     download_member(1, "binding.json", path)
     assert path.read_text() == "{}"

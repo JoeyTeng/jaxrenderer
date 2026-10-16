@@ -13,7 +13,7 @@ def test_ruff_includes_python_and_stub_files_in_every_lint_scope(
 ) -> None:
     ruff = Path(sys.executable).with_name("ruff")
     assert ruff.is_file()
-    (tmp_path / "pyproject.toml").write_text(
+    _ = (tmp_path / "pyproject.toml").write_text(
         (ROOT / "pyproject.toml").read_text(encoding="utf-8"), encoding="utf-8"
     )
     expected: set[str] = set()
@@ -26,7 +26,7 @@ def test_ruff_includes_python_and_stub_files_in_every_lint_scope(
         ):
             path = tmp_path / scope / relative
             path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text("", encoding="utf-8")
+            _ = path.write_text("", encoding="utf-8")
             expected.add(str(path.resolve()))
 
     result = subprocess.run(
@@ -51,12 +51,12 @@ def test_ruff_includes_python_and_stub_files_in_every_lint_scope(
 def test_real_ruff_rejects_a_lint_violation_in_a_stub_file(tmp_path: Path) -> None:
     ruff = Path(sys.executable).with_name("ruff")
     assert ruff.is_file()
-    (tmp_path / "pyproject.toml").write_text(
+    _ = (tmp_path / "pyproject.toml").write_text(
         (ROOT / "pyproject.toml").read_text(encoding="utf-8"), encoding="utf-8"
     )
     stub = tmp_path / "assets" / "lint_error.pyi"
     stub.parent.mkdir()
-    stub.write_text(
+    _ = stub.write_text(
         "def duplicate() -> None: ...\ndef duplicate() -> None: ...\n",
         encoding="utf-8",
     )
@@ -79,14 +79,14 @@ def test_real_ruff_checks_gitignored_python_files_with_override(
 ) -> None:
     ruff = Path(sys.executable).with_name("ruff")
     assert ruff.is_file()
-    (tmp_path / "pyproject.toml").write_text(
+    _ = (tmp_path / "pyproject.toml").write_text(
         (ROOT / "pyproject.toml").read_text(encoding="utf-8"), encoding="utf-8"
     )
     (tmp_path / ".git").mkdir()
-    (tmp_path / ".gitignore").write_text("assets/hidden.py\n", encoding="utf-8")
+    _ = (tmp_path / ".gitignore").write_text("assets/hidden.py\n", encoding="utf-8")
     source = tmp_path / "assets" / "hidden.py"
     source.parent.mkdir()
-    source.write_text("import os\n", encoding="utf-8")
+    _ = source.write_text("import os\n", encoding="utf-8")
     ignored = subprocess.run(
         [str(ruff), "check", "assets"],
         cwd=tmp_path,

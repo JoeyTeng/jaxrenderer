@@ -1,8 +1,10 @@
+from collections.abc import Callable
 import hashlib
 import json
 from pathlib import Path
 import re
 import subprocess
+from typing import Any, cast
 from unittest.mock import patch
 
 import pytest
@@ -11,12 +13,16 @@ from tools import kaggle_ci
 # Synthetic fixture catalogue: api-key-a (active), joey-private-v3.
 SYNTHETIC_API_KEY = "codex_synth_v1_api_key_a"
 
-BINDING = {
+BINDING: dict[str, object] = {
     "kind": "release",
     "head_sha": "a" * 40,
     "head_repository": "JoeyTeng/jaxrenderer",
     "run_id": "371234567.1",
 }
+
+
+def _private_helper(name: str) -> Callable[..., Any]:
+    return cast(Callable[..., Any], getattr(kaggle_ci, name))
 
 
 def success_result(binding: dict[str, object] = BINDING) -> dict[str, object]:
@@ -47,7 +53,7 @@ def authenticated(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_quota_requires_unambiguous_tpu_headroom() -> None:
     assert (
-        kaggle_ci._read_quota(
+        _private_helper("_read_quota")(
             '[{"resource":"GPU","remaining":"10.00h"},'
             '{"resource":"TPU","remaining":"0.75h"}]'
         )
@@ -61,14 +67,19 @@ def test_quota_requires_unambiguous_tpu_headroom() -> None:
         '[{"resource":"TPU","remaining":"1h"},{"resource":"TPU","remaining":"2h"}]',
     ):
         with pytest.raises(kaggle_ci.KaggleError):
-            kaggle_ci._read_quota(response)
+            _ = _private_helper("_read_quota")(response)
 
 
 def test_status_accepts_kaggle_worker_status_enum_output() -> None:
-    assert kaggle_ci._status('has status "KernelWorkerStatus.QUEUED"') == "queued"
-    assert kaggle_ci._status('has status "KernelWorkerStatus.COMPLETE"') == "complete"
+    assert (
+        _private_helper("_status")('has status "KernelWorkerStatus.QUEUED"') == "queued"
+    )
+    assert (
+        _private_helper("_status")('has status "KernelWorkerStatus.COMPLETE"')
+        == "complete"
+    )
     with pytest.raises(kaggle_ci.KaggleError, match="status type"):
-        kaggle_ci._status('has status "UntrustedStatus.QUEUED"')
+        _ = _private_helper("_status")('has status "UntrustedStatus.QUEUED"')
 
 
 def test_missing_credentials_fail_before_any_kaggle_command(
@@ -82,7 +93,7 @@ def test_missing_credentials_fail_before_any_kaggle_command(
 
     monkeypatch.setattr(kaggle_ci, "_command_ok", unexpected_command)
     with pytest.raises(kaggle_ci.KaggleError, match="KAGGLE_API_TOKEN"):
-        kaggle_ci.run(BINDING, "tpu", tmp_path)
+        _ = kaggle_ci.run(BINDING, "tpu", tmp_path)
     assert "KAGGLE_API_TOKEN" in (tmp_path / "kaggle-controller.log").read_text()
 
 
@@ -90,11 +101,11 @@ def test_private_kernel_embeds_only_the_trusted_runner(
     tmp_path: Path,
 ) -> None:
     runner = tmp_path / "accelerator_runner.py"
-    runner.write_text(
+    _ = runner.write_text(
         "def run(binding, backend, output_dir):\n    return {}\n", encoding="utf-8"
     )
     folder = tmp_path / "kernel"
-    kaggle_ci._make_kernel(
+    _private_helper("_make_kernel")(
         folder, "test-user", "jaxr-0123456789abcdef-0123456789", BINDING, runner
     )
 
@@ -117,16 +128,20 @@ def test_success_uses_a_fresh_private_slug_polls_and_downloads_bound_result(
 ) -> None:
     authenticated(monkeypatch)
     runner = tmp_path / "accelerator_runner.py"
-    runner.write_text(
+    _ = runner.write_text(
         "def run(binding, backend, output_dir):\n    return {}\n", encoding="utf-8"
     )
     monkeypatch.setattr(kaggle_ci, "__file__", str(tmp_path / "kaggle_ci.py"))
     fake_time = [0.0]
     monkeypatch.setattr(kaggle_ci.time, "monotonic", lambda: fake_time[0])
+
+    def advance_time(duration: float) -> None:
+        fake_time[0] += duration
+
     monkeypatch.setattr(
         kaggle_ci.time,
         "sleep",
-        lambda duration: fake_time.__setitem__(0, fake_time[0] + duration),
+        advance_time,
     )
     monkeypatch.setattr(kaggle_ci, "POLL_INTERVAL_SECONDS", 1900)
     commands: list[list[str]] = []
@@ -176,9 +191,9 @@ def test_success_uses_a_fresh_private_slug_polls_and_downloads_bound_result(
             # Remote output must preserve the controller's submission identity.
             pattern = re.compile(args[args.index("--file-pattern") + 1])
             if pattern.fullmatch("kaggle-controller-state.json"):
-                (output_dir / "kaggle-controller-state.json").write_text("{}")
+                _ = (output_dir / "kaggle-controller-state.json").write_text("{}")
             output = output_dir / "result.json"
-            output.write_text(json.dumps(success_result()), encoding="utf-8")
+            _ = output.write_text(json.dumps(success_result()), encoding="utf-8")
             return completed(args)
         pytest.fail(f"unexpected Kaggle command: {args}")
 
@@ -215,7 +230,7 @@ def test_queue_timeout_persists_submitted_identity_without_downloading_output(
 ) -> None:
     authenticated(monkeypatch)
     runner = tmp_path / "accelerator_runner.py"
-    runner.write_text(
+    _ = runner.write_text(
         "def run(binding, backend, output_dir):\n    return {}\n", encoding="utf-8"
     )
     monkeypatch.setattr(kaggle_ci, "__file__", str(tmp_path / "kaggle_ci.py"))
@@ -223,10 +238,14 @@ def test_queue_timeout_persists_submitted_identity_without_downloading_output(
     monkeypatch.setattr(kaggle_ci, "POLL_INTERVAL_SECONDS", 3)
     fake_time = [0.0]
     monkeypatch.setattr(kaggle_ci.time, "monotonic", lambda: fake_time[0])
+
+    def advance_time(duration: float) -> None:
+        fake_time[0] += duration
+
     monkeypatch.setattr(
         kaggle_ci.time,
         "sleep",
-        lambda duration: fake_time.__setitem__(0, fake_time[0] + duration),
+        advance_time,
     )
     commands: list[list[str]] = []
 
@@ -248,7 +267,7 @@ def test_queue_timeout_persists_submitted_identity_without_downloading_output(
 
     monkeypatch.setattr(kaggle_ci, "_command_ok", fake_command)
     with pytest.raises(kaggle_ci.KaggleError, match="queue polling timed out"):
-        kaggle_ci.run(BINDING, "tpu", tmp_path / "output")
+        _ = kaggle_ci.run(BINDING, "tpu", tmp_path / "output")
     assert sum(command[1:3] == ["kernels", "push"] for command in commands) == 1
     state = json.loads(
         (tmp_path / "output" / "kaggle-controller-state.json").read_text()
@@ -267,7 +286,7 @@ def test_status_returned_at_queue_deadline_times_out_before_result_download(
 ) -> None:
     authenticated(monkeypatch)
     runner = tmp_path / "accelerator_runner.py"
-    runner.write_text("def run(binding, backend, output_dir):\n    return {}\n")
+    _ = runner.write_text("def run(binding, backend, output_dir):\n    return {}\n")
     monkeypatch.setattr(kaggle_ci, "__file__", str(tmp_path / "kaggle_ci.py"))
     monkeypatch.setattr(kaggle_ci, "QUEUE_TIMEOUT_SECONDS", 5)
     fake_time = [0.0]
@@ -288,7 +307,7 @@ def test_status_returned_at_queue_deadline_times_out_before_result_download(
 
     monkeypatch.setattr(kaggle_ci, "_command_ok", fake_command)
     with pytest.raises(kaggle_ci.KaggleError, match="queue polling timed out"):
-        kaggle_ci.run(BINDING, "tpu", tmp_path / "output")
+        _ = kaggle_ci.run(BINDING, "tpu", tmp_path / "output")
 
     state = json.loads(
         (tmp_path / "output" / "kaggle-controller-state.json").read_text()
@@ -305,7 +324,7 @@ def test_failed_remote_status_still_retrieves_scoped_diagnostics(
 ) -> None:
     authenticated(monkeypatch)
     runner = tmp_path / "accelerator_runner.py"
-    runner.write_text(
+    _ = runner.write_text(
         "def run(binding, backend, output_dir):\n    return {}\n", encoding="utf-8"
     )
     monkeypatch.setattr(kaggle_ci, "__file__", str(tmp_path / "kaggle_ci.py"))
@@ -330,13 +349,13 @@ def test_failed_remote_status_still_retrieves_scoped_diagnostics(
             )
         if args[1:3] == ["kernels", "output"]:
             output = Path(args[args.index("--path") + 1]) / "diagnostics.log"
-            output.write_text("device backend was cpu", encoding="utf-8")
+            _ = output.write_text("device backend was cpu", encoding="utf-8")
             return completed(args)
         pytest.fail(f"unexpected Kaggle command: {args}")
 
     monkeypatch.setattr(kaggle_ci, "_command_ok", fake_command)
     with pytest.raises(kaggle_ci.KaggleError, match="status error") as raised:
-        kaggle_ci.run(BINDING, "tpu", tmp_path / "output")
+        _ = kaggle_ci.run(BINDING, "tpu", tmp_path / "output")
     state_text = (tmp_path / "output" / "kaggle-controller-state.json").read_text()
     log_text = (tmp_path / "output" / "kaggle-controller.log").read_text()
     assert SYNTHETIC_API_KEY not in state_text
@@ -363,17 +382,21 @@ def test_execution_deadline_survives_status_flapping_back_to_queued(
 ) -> None:
     authenticated(monkeypatch)
     runner = tmp_path / "accelerator_runner.py"
-    runner.write_text("def run(binding, backend, output_dir):\n    return {}\n")
+    _ = runner.write_text("def run(binding, backend, output_dir):\n    return {}\n")
     monkeypatch.setattr(kaggle_ci, "__file__", str(tmp_path / "kaggle_ci.py"))
     monkeypatch.setattr(kaggle_ci, "QUEUE_TIMEOUT_SECONDS", 1000)
     monkeypatch.setattr(kaggle_ci, "EXECUTION_TIMEOUT_SECONDS", 10)
     monkeypatch.setattr(kaggle_ci, "POLL_INTERVAL_SECONDS", 3)
     fake_time = [0.0]
     monkeypatch.setattr(kaggle_ci.time, "monotonic", lambda: fake_time[0])
+
+    def advance_time(duration: float) -> None:
+        fake_time[0] += duration
+
     monkeypatch.setattr(
         kaggle_ci.time,
         "sleep",
-        lambda duration: fake_time.__setitem__(0, fake_time[0] + duration),
+        advance_time,
     )
     commands: list[list[str]] = []
 
@@ -395,7 +418,7 @@ def test_execution_deadline_survives_status_flapping_back_to_queued(
 
     monkeypatch.setattr(kaggle_ci, "_command_ok", fake_command)
     with pytest.raises(kaggle_ci.KaggleError, match="execution polling timed out"):
-        kaggle_ci.run(BINDING, "tpu", tmp_path / "output")
+        _ = kaggle_ci.run(BINDING, "tpu", tmp_path / "output")
 
     state = json.loads(
         (tmp_path / "output" / "kaggle-controller-state.json").read_text()
@@ -424,7 +447,7 @@ def test_unknown_kaggle_status_is_saved_as_unknown_api_failure(
 ) -> None:
     authenticated(monkeypatch)
     runner = tmp_path / "accelerator_runner.py"
-    runner.write_text("def run(binding, backend, output_dir):\n    return {}\n")
+    _ = runner.write_text("def run(binding, backend, output_dir):\n    return {}\n")
     monkeypatch.setattr(kaggle_ci, "__file__", str(tmp_path / "kaggle_ci.py"))
 
     def fake_command(args: list[str], *, env: dict[str, str], timeout: float = 90):
@@ -439,7 +462,7 @@ def test_unknown_kaggle_status_is_saved_as_unknown_api_failure(
 
     monkeypatch.setattr(kaggle_ci, "_command_ok", fake_command)
     with pytest.raises(kaggle_ci.KaggleError) as raised:
-        kaggle_ci.run(BINDING, "tpu", tmp_path / "output")
+        _ = kaggle_ci.run(BINDING, "tpu", tmp_path / "output")
     state = json.loads(
         (tmp_path / "output" / "kaggle-controller-state.json").read_text()
     )
@@ -459,7 +482,7 @@ def test_status_cli_error_is_distinct_and_redacted_in_state_and_log(
 ) -> None:
     authenticated(monkeypatch)
     runner = tmp_path / "accelerator_runner.py"
-    runner.write_text("def run(binding, backend, output_dir):\n    return {}\n")
+    _ = runner.write_text("def run(binding, backend, output_dir):\n    return {}\n")
     monkeypatch.setattr(kaggle_ci, "__file__", str(tmp_path / "kaggle_ci.py"))
 
     def fake_command(args: list[str], *, env: dict[str, str], timeout: float = 90):
@@ -474,7 +497,7 @@ def test_status_cli_error_is_distinct_and_redacted_in_state_and_log(
 
     monkeypatch.setattr(kaggle_ci, "_command_ok", fake_command)
     with pytest.raises(kaggle_ci.KaggleError) as raised:
-        kaggle_ci.run(BINDING, "tpu", tmp_path / "output")
+        _ = kaggle_ci.run(BINDING, "tpu", tmp_path / "output")
     state_text = (tmp_path / "output" / "kaggle-controller-state.json").read_text()
     log_text = (tmp_path / "output" / "kaggle-controller.log").read_text()
     state = json.loads(state_text)
@@ -513,7 +536,7 @@ def test_resume_queries_status_once_without_mutating_input_or_collecting_output(
         )
     resume_state = tmp_path / "original-state.json"
     original_text = json.dumps(stored)
-    resume_state.write_text(original_text)
+    _ = resume_state.write_text(original_text)
     commands: list[list[str]] = []
 
     def fake_command(args: list[str], *, env: dict[str, str], timeout: float = 90):
@@ -549,7 +572,7 @@ def test_resume_rejects_binding_mismatch_before_provider_call(
 ) -> None:
     authenticated(monkeypatch)
     resume_state = tmp_path / "original-state.json"
-    resume_state.write_text(
+    _ = resume_state.write_text(
         json.dumps(
             {
                 "binding": {**BINDING, "run_id": "371234567.2"},
@@ -558,13 +581,18 @@ def test_resume_rejects_binding_mismatch_before_provider_call(
             }
         )
     )
+
+    def fail_command(*args: object, **kwargs: object) -> None:
+        del args, kwargs
+        pytest.fail("mismatched binding reached Kaggle")
+
     monkeypatch.setattr(
         kaggle_ci,
         "_command_ok",
-        lambda *args, **kwargs: pytest.fail("mismatched binding reached Kaggle"),
+        fail_command,
     )
     with pytest.raises(kaggle_ci.KaggleError, match="binding does not exactly match"):
-        kaggle_ci.resume_status(BINDING, resume_state, tmp_path / "collector")
+        _ = kaggle_ci.resume_status(BINDING, resume_state, tmp_path / "collector")
 
 
 def test_resume_unknown_status_fails_closed_without_gate_credit(
@@ -575,7 +603,7 @@ def test_resume_unknown_status_fails_closed_without_gate_credit(
         json.dumps(BINDING, sort_keys=True, separators=(",", ":")).encode()
     ).hexdigest()[:16]
     state_path = tmp_path / "state.json"
-    state_path.write_text(
+    _ = state_path.write_text(
         json.dumps(
             {
                 "binding": BINDING,
@@ -584,13 +612,20 @@ def test_resume_unknown_status_fails_closed_without_gate_credit(
             }
         )
     )
+
+    def unknown_status(
+        args: list[str], **kwargs: object
+    ) -> subprocess.CompletedProcess[str]:
+        del kwargs
+        return completed(args, 'has status "WAITING"')
+
     monkeypatch.setattr(
         kaggle_ci,
         "_command_ok",
-        lambda args, **kwargs: completed(args, 'has status "WAITING"'),
+        unknown_status,
     )
     with pytest.raises(kaggle_ci.KaggleError, match="unrecognised kernel status"):
-        kaggle_ci.resume_status(BINDING, state_path, tmp_path / "collector")
+        _ = kaggle_ci.resume_status(BINDING, state_path, tmp_path / "collector")
     report = json.loads(
         (tmp_path / "collector" / "kaggle-resume-report.json").read_text()
     )
@@ -606,30 +641,33 @@ def test_stale_result_with_a_different_frozen_identity_is_rejected(
     path = tmp_path / "result.json"
     result = success_result()
     result["run_id"] = "371234567.2"
-    path.write_text(json.dumps(result), encoding="utf-8")
+    _ = path.write_text(json.dumps(result), encoding="utf-8")
     with pytest.raises(kaggle_ci.KaggleError, match="run_id"):
-        kaggle_ci._validate_downloaded_result(path, BINDING)
+        _private_helper("validate_downloaded_result")(path, BINDING)
 
 
 def test_existing_output_result_is_not_treated_as_new_run_output(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     authenticated(monkeypatch)
-    (tmp_path / "result.json").write_text("{}", encoding="utf-8")
+    _ = (tmp_path / "result.json").write_text("{}", encoding="utf-8")
+
+    def fail_existing_output(*args: object, **kwargs: object) -> None:
+        del args, kwargs
+        pytest.fail("existing results must fail before submission")
+
     monkeypatch.setattr(
         kaggle_ci,
         "_command_ok",
-        lambda *args, **kwargs: pytest.fail(
-            "existing results must fail before submission"
-        ),
+        fail_existing_output,
     )
     with pytest.raises(kaggle_ci.KaggleError, match="already contains"):
-        kaggle_ci.run(BINDING, "tpu", tmp_path)
+        _ = kaggle_ci.run(BINDING, "tpu", tmp_path)
 
 
 def test_kernel_slug_stays_valid_with_long_pull_request_and_run_ids() -> None:
     binding = {**BINDING, "pr": 999999999999, "run_id": "37123456789.1"}
-    slug = kaggle_ci._kernel_slug(binding)
+    slug = _private_helper("_kernel_slug")(binding)
     assert len(slug) <= 50
     assert re.fullmatch(r"jaxr-[0-9a-f]{16}-[0-9a-f]{10}", slug)
 
@@ -644,6 +682,6 @@ def test_cli_failure_diagnostic_redacts_the_api_token() -> None:
         return_value=subprocess.CompletedProcess(args, 1, "", f"failed with {token}"),
     ):
         with pytest.raises(kaggle_ci.KaggleError) as error:
-            kaggle_ci._command_ok(args, env=environment)
+            _private_helper("_command_ok")(args, env=environment)
     assert token not in str(error.value)
     assert "[redacted]" in str(error.value)

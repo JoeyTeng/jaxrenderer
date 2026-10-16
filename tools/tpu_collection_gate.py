@@ -10,6 +10,7 @@ import re
 import resource
 import subprocess
 import sys
+from typing import cast
 import zipfile
 
 from tools import accelerator_gate, kaggle_ci, kaggle_collect, release_tpu_gate
@@ -51,13 +52,13 @@ class IneligibleSource(CollectionGateError):
     """A complete source inventory proves this run is not a TPU-only timeout."""
 
 
-def _positive_id(value: str) -> int:
+def positive_id(value: str) -> int:
     if not re.fullmatch(r"[1-9][0-9]{0,19}", value):
         raise CollectionGateError("run ID and attempt must be positive integers")
     return int(value)
 
 
-def _read_json(path: Path) -> dict[str, object]:
+def read_json(path: Path) -> dict[str, object]:
     try:
         if (
             path.is_symlink()
@@ -70,17 +71,17 @@ def _read_json(path: Path) -> dict[str, object]:
         raise CollectionGateError("could not read collection evidence") from error
     if not isinstance(value, dict):
         raise CollectionGateError("collection evidence must be a JSON object")
-    return value
+    return cast(dict[str, object], value)
 
 
 def _write_json(path: Path, value: dict[str, object]) -> None:
-    accelerator_gate._atomic_write_json(path, value)
+    accelerator_gate.atomic_write_json(path, value)
 
 
 def _context() -> str:
     event = os.environ.get("GITHUB_EVENT_NAME", "")
     if event == "workflow_dispatch":
-        accelerator_gate._require_dispatch_context()
+        accelerator_gate.require_dispatch_context()
     elif event == "schedule":
         workflow_ref = (
             f"{REPOSITORY}/.github/workflows/collect-tpu-periodic.yml@refs/heads/master"
@@ -99,7 +100,7 @@ def _context() -> str:
     sha = os.environ.get("GITHUB_SHA", "")
     if not accelerator_gate.SHA_RE.fullmatch(sha):
         raise CollectionGateError("collector GITHUB_SHA must be a full commit SHA")
-    return accelerator_gate._run_id_from_env()
+    return accelerator_gate.run_id_from_env()
 
 
 def _source_snapshot(run_id: int, attempt: int, commit: str) -> dict[str, object]:
@@ -107,10 +108,24 @@ def _source_snapshot(run_id: int, attempt: int, commit: str) -> dict[str, object
     if not accelerator_gate.SHA_RE.fullmatch(commit):
         raise CollectionGateError("source commit must be a full lowercase SHA")
     route = f"repos/{REPOSITORY}/actions/runs/{run_id}/attempts/{attempt}"
-    run = accelerator_gate._gh_api(route)
+    run = accelerator_gate.gh_api(route)
+    if not isinstance(run, dict):
+        raise CollectionGateError(
+            "source is not the exact completed publishing attempt"
+        )
+    run = cast(dict[str, object], run)
+    repository = run.get("repository")
+    head_repository = run.get("head_repository")
+    repository = (
+        cast(dict[str, object], repository) if isinstance(repository, dict) else {}
+    )
+    head_repository = (
+        cast(dict[str, object], head_repository)
+        if isinstance(head_repository, dict)
+        else {}
+    )
     if (
-        not isinstance(run, dict)
-        or type(run.get("id")) is not int
+        type(run.get("id")) is not int
         or run["id"] != run_id
         or type(run.get("run_attempt")) is not int
         or run["run_attempt"] != attempt
@@ -120,30 +135,36 @@ def _source_snapshot(run_id: int, attempt: int, commit: str) -> dict[str, object
         or run.get("status") != "completed"
         or run.get("conclusion") != "failure"
         or not isinstance(run.get("repository"), dict)
-        or str(run["repository"].get("full_name", "")).casefold()
-        != REPOSITORY.casefold()
+        or str(repository.get("full_name", "")).casefold() != REPOSITORY.casefold()
         or not isinstance(run.get("head_repository"), dict)
-        or str(run["head_repository"].get("full_name", "")).casefold()
-        != REPOSITORY.casefold()
+        or str(head_repository.get("full_name", "")).casefold() != REPOSITORY.casefold()
     ):
         raise CollectionGateError(
             "source is not the exact completed publishing attempt"
         )
-    release_tpu_gate._verify_master_history(commit)
-    page = accelerator_gate._gh_api(f"{route}/jobs?per_page=100")
+    release_tpu_gate.verify_master_history(commit)
+    page = accelerator_gate.gh_api(f"{route}/jobs?per_page=100")
+    if not isinstance(page, dict):
+        raise CollectionGateError("source job inventory is incomplete or too large")
+    page = cast(dict[str, object], page)
+    jobs_value = page.get("jobs")
+    jobs_list = cast(list[object], jobs_value) if isinstance(jobs_value, list) else []
+    total = page.get("total_count")
     if (
-        not isinstance(page, dict)
-        or type(page.get("total_count")) is not int
-        or not isinstance(page.get("jobs"), list)
-        or page["total_count"] != len(page["jobs"])
-        or page["total_count"] > 100
+        type(total) is not int
+        or not isinstance(jobs_value, list)
+        or total != len(jobs_list)
+        or total > 100
     ):
         raise CollectionGateError("source job inventory is incomplete or too large")
     jobs: dict[str, dict[str, object]] = {}
-    for job in page["jobs"]:
-        if not isinstance(job, dict) or not isinstance(job.get("name"), str):
+    for job_value in jobs_list:
+        if not isinstance(job_value, dict):
             raise CollectionGateError("source job metadata is malformed")
-        name = job["name"]
+        job = cast(dict[str, object], job_value)
+        if not isinstance(job.get("name"), str):
+            raise CollectionGateError("source job metadata is malformed")
+        name = cast(str, job["name"])
         if name in jobs or job.get("run_id") != run_id:
             raise CollectionGateError("source job identity is ambiguous")
         jobs[name] = job
@@ -179,37 +200,48 @@ def _source_snapshot(run_id: int, attempt: int, commit: str) -> dict[str, object
 
 
 def _artifact_metadata(run_id: int, name: str, commit: str) -> dict[str, object]:
-    page = accelerator_gate._gh_api(
+    page = accelerator_gate.gh_api(
         f"repos/{REPOSITORY}/actions/runs/{run_id}/artifacts?per_page=100"
     )
+    if not isinstance(page, dict):
+        raise CollectionGateError(
+            "source artefact inventory is incomplete or too large"
+        )
+    page = cast(dict[str, object], page)
+    artifacts_value = page.get("artifacts")
+    artifact_list = (
+        cast(list[object], artifacts_value) if isinstance(artifacts_value, list) else []
+    )
+    total = page.get("total_count")
     if (
-        not isinstance(page, dict)
-        or type(page.get("total_count")) is not int
-        or not isinstance(page.get("artifacts"), list)
-        or page["total_count"] != len(page["artifacts"])
-        or page["total_count"] > 100
+        type(total) is not int
+        or not isinstance(artifacts_value, list)
+        or total != len(artifact_list)
+        or total > 100
     ):
         raise CollectionGateError(
             "source artefact inventory is incomplete or too large"
         )
     matches = [
-        item
-        for item in page["artifacts"]
-        if isinstance(item, dict) and item.get("name") == name
+        cast(dict[str, object], item)
+        for item in artifact_list
+        if isinstance(item, dict) and cast(dict[str, object], item).get("name") == name
     ]
     if len(matches) != 1:
         raise CollectionGateError("source must have exactly one named artefact")
     item = matches[0]
+    artifact_id = item.get("id")
+    size = item.get("size_in_bytes")
     owner = item.get("workflow_run")
     if (
-        type(item.get("id")) is not int
-        or item["id"] <= 0
-        or type(item.get("size_in_bytes")) is not int
-        or not 0 < item["size_in_bytes"] <= MAX_ARCHIVE_BYTES
+        type(artifact_id) is not int
+        or artifact_id <= 0
+        or type(size) is not int
+        or not 0 < size <= MAX_ARCHIVE_BYTES
         or item.get("expired") is not False
         or not isinstance(owner, dict)
-        or owner.get("id") != run_id
-        or owner.get("head_sha") != commit
+        or cast(dict[str, object], owner).get("id") != run_id
+        or cast(dict[str, object], owner).get("head_sha") != commit
     ):
         raise CollectionGateError(
             "source artefact identity, size or availability is invalid"
@@ -217,7 +249,14 @@ def _artifact_metadata(run_id: int, name: str, commit: str) -> dict[str, object]
     return item
 
 
-def _download_member(artifact_id: int, member_name: str, destination: Path) -> None:
+def _artifact_id(metadata: dict[str, object]) -> int:
+    value = metadata.get("id")
+    if type(value) is not int or value <= 0:
+        raise CollectionGateError("source artefact identity is invalid")
+    return value
+
+
+def download_member(artifact_id: int, member_name: str, destination: Path) -> None:
     """Let gh handle authenticated redirects, with a capped temporary archive."""
     archive_path = destination.with_suffix(".zip")
     env = os.environ.copy()
@@ -234,7 +273,7 @@ def _download_member(artifact_id: int, member_name: str, destination: Path) -> N
         "GH_ENTERPRISE_TOKEN",
         "GITHUB_ENTERPRISE_TOKEN",
     ):
-        env.pop(key, None)
+        _ = env.pop(key, None)
     env.update(GH_TOKEN=token, GH_HOST="github.com", GH_PROMPT_DISABLED="1")
 
     def limit_file() -> None:
@@ -275,7 +314,7 @@ def _download_member(artifact_id: int, member_name: str, destination: Path) -> N
             data = archive.read(matches[0])
             if len(data) > MAX_JSON_BYTES:
                 raise CollectionGateError("source evidence exceeds its byte limit")
-            destination.write_bytes(data)
+            _ = destination.write_bytes(data)
     except (
         OSError,
         RuntimeError,
@@ -293,9 +332,7 @@ def _validate_source_files(
     source_dir: Path, source: dict[str, object]
 ) -> dict[str, object]:
     source_identity = f"{source['source_run_id']}.{source['source_attempt']}"
-    binding = release_tpu_gate._validate_binding(
-        _read_json(source_dir / "binding.json")
-    )
+    binding = release_tpu_gate.validate_binding(read_json(source_dir / "binding.json"))
     expected = {
         "kind": "release",
         "head_repository": REPOSITORY,
@@ -307,7 +344,7 @@ def _validate_source_files(
             f"source {source_identity} binding does not match the original attempt"
         )
     state_path = source_dir / "kaggle-controller-state.json"
-    state = _read_json(state_path)
+    state = read_json(state_path)
     state_fields = set(state)
     if state_fields == kaggle_ci.LEGACY_CONTROLLER_STATE_FIELDS:
         if state.get("binding") != binding:
@@ -323,7 +360,7 @@ def _validate_source_files(
             )
         kernel_id = state.get("kernel_id")
         try:
-            kaggle_collect._kernel_identity(binding, kernel_id)
+            _ = kaggle_collect.kernel_identity(dict(binding), kernel_id)
         except kaggle_collect.CollectionError as error:
             raise CollectionGateError(
                 f"source {source_identity} legacy controller identity is invalid"
@@ -375,7 +412,7 @@ def _validate_source_files(
         raise CollectionGateError(
             f"source {source_identity} controller outcome is unknown"
         )
-    return binding
+    return dict(binding)
 
 
 def prepare(
@@ -386,10 +423,10 @@ def prepare(
     github_output: Path,
 ) -> dict[str, object]:
     collector = _context()
-    run_id, attempt = _positive_id(source_run), _positive_id(source_attempt)
+    run_id, attempt = positive_id(source_run), positive_id(source_attempt)
     if collector == f"{run_id}.{attempt}":
         raise CollectionGateError("collection must use a separate workflow attempt")
-    _source_snapshot(run_id, attempt, commit)
+    _ = _source_snapshot(run_id, attempt, commit)
     binding_artifact = _artifact_metadata(
         run_id, f"tpu-release-binding-{attempt}", commit
     )
@@ -403,21 +440,23 @@ def prepare(
         "head_sha": commit,
         "collector_run_id": collector,
         "collector_sha": os.environ["GITHUB_SHA"],
-        "binding_artifact_id": binding_artifact["id"],
-        "controller_artifact_id": controller_artifact["id"],
+        "binding_artifact_id": _artifact_id(binding_artifact),
+        "controller_artifact_id": _artifact_id(controller_artifact),
     }
-    _download_member(
-        binding_artifact["id"], "tpu-release-binding.json", output_dir / "binding.json"
+    download_member(
+        _artifact_id(binding_artifact),
+        "tpu-release-binding.json",
+        output_dir / "binding.json",
     )
-    _download_member(
-        controller_artifact["id"],
+    download_member(
+        _artifact_id(controller_artifact),
         "kaggle-controller-state.json",
         output_dir / "kaggle-controller-state.json",
     )
-    _validate_source_files(output_dir, source)
+    _ = _validate_source_files(output_dir, source)
     _write_json(output_dir / "collection-source.json", source)
     with github_output.open("a", encoding="utf-8") as stream:
-        stream.write(
+        _ = stream.write(
             f"head_sha={commit}\nsource_run_id={run_id}\nsource_attempt={attempt}\n"
         )
     return source
@@ -428,7 +467,7 @@ def revalidate(
 ) -> tuple[dict[str, object], dict[str, object], dict[str, object]]:
     """Recheck the exact prepared source attempt and its original artefact IDs."""
     collector = _context()
-    source = _read_json(source_dir / "collection-source.json")
+    source = read_json(source_dir / "collection-source.json")
     if (
         set(source) != SOURCE_FIELDS
         or source.get("collector_run_id") != collector
@@ -437,12 +476,12 @@ def revalidate(
         raise CollectionGateError(
             "collection source receipt belongs to another collector"
         )
-    run_id = _positive_id(str(source["source_run_id"]))
-    attempt = _positive_id(str(source["source_attempt"]))
+    run_id = positive_id(str(source["source_run_id"]))
+    attempt = positive_id(str(source["source_attempt"]))
     commit = source["head_sha"]
     if not isinstance(commit, str):
         raise CollectionGateError("source SHA is malformed")
-    _source_snapshot(run_id, attempt, commit)
+    _ = _source_snapshot(run_id, attempt, commit)
     for field, name in (
         ("binding_artifact_id", f"tpu-release-binding-{attempt}"),
         ("controller_artifact_id", f"release-tpu-{commit}-{attempt}"),
@@ -450,7 +489,7 @@ def revalidate(
         if _artifact_metadata(run_id, name, commit)["id"] != source[field]:
             raise CollectionGateError("original source artefact identity changed")
     binding = _validate_source_files(source_dir, source)
-    state = _read_json(source_dir / "kaggle-controller-state.json")
+    state = read_json(source_dir / "kaggle-controller-state.json")
     return source, binding, state
 
 
@@ -459,7 +498,7 @@ def finish(
 ) -> dict[str, object]:
     source, binding, state = revalidate(source_dir)
     collector = str(source["collector_run_id"])
-    report = _read_json(output_dir / "kaggle-collection-report.json")
+    report = read_json(output_dir / "kaggle-collection-report.json")
     if (
         not provider_success
         or report.get("success") is not True
@@ -476,7 +515,11 @@ def finish(
         raise CollectionGateError(
             "provider did not collect the original successful TPU result"
         )
-    release_tpu_gate._read_result(output_dir / "result.json", binding, "tpu")
+    release_tpu_gate.read_result(
+        output_dir / "result.json",
+        cast(release_tpu_gate.Binding, binding),
+        "tpu",
+    )
     receipt = {
         "binding": binding,
         "collector_run_id": collector,
@@ -493,7 +536,7 @@ def finish(
     if summary_path:
         commit = str(source["head_sha"])
         with Path(summary_path).open("a", encoding="utf-8") as stream:
-            stream.write(
+            _ = stream.write(
                 "## Delayed TPU evidence collected\n\n"
                 f"- Original commit: `{commit}`\n- Original attempt: `{binding['run_id']}`\n"
                 f"- Collection attempt: `{collector}`\n"
@@ -507,15 +550,17 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
     first = commands.add_parser("prepare")
-    first.add_argument("--source-run", required=True)
-    first.add_argument("--source-attempt", required=True)
-    first.add_argument("--commit", required=True)
-    first.add_argument("--output-dir", type=Path, required=True)
-    first.add_argument("--github-output", type=Path, required=True)
+    _ = first.add_argument("--source-run", required=True)
+    _ = first.add_argument("--source-attempt", required=True)
+    _ = first.add_argument("--commit", required=True)
+    _ = first.add_argument("--output-dir", type=Path, required=True)
+    _ = first.add_argument("--github-output", type=Path, required=True)
     last = commands.add_parser("finish")
-    last.add_argument("--source-dir", type=Path, required=True)
-    last.add_argument("--output-dir", type=Path, required=True)
-    last.add_argument("--provider-success", choices=("true", "false"), required=True)
+    _ = last.add_argument("--source-dir", type=Path, required=True)
+    _ = last.add_argument("--output-dir", type=Path, required=True)
+    _ = last.add_argument(
+        "--provider-success", choices=("true", "false"), required=True
+    )
     args = parser.parse_args(argv)
     try:
         if args.command == "prepare":

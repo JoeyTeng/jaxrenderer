@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+from collections.abc import Mapping
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 import json
@@ -13,7 +14,7 @@ import subprocess
 import sys
 import tempfile
 import time
-from typing import Any, Iterator
+from typing import Generator, cast
 from urllib.parse import urlencode
 
 from tools import accelerator_gate, kaggle_ci, kaggle_collect, release_tpu_gate
@@ -52,6 +53,7 @@ class PeriodicError(RuntimeError):
 
 class _Budget:
     def __init__(self) -> None:
+        super().__init__()
         self.deadline = time.monotonic() + MAX_RUNTIME_SECONDS
 
     def check(self) -> None:
@@ -60,12 +62,12 @@ class _Budget:
 
 
 @contextmanager
-def _bounded_github_calls(budget: _Budget) -> Iterator[None]:
+def _bounded_github_calls(budget: _Budget) -> Generator[None, None, None]:
     """Check the aggregate deadline before each already-bounded GitHub operation."""
-    original_api = accelerator_gate._gh_api
-    original_download = collection_gate._download_member
+    original_api = accelerator_gate.gh_api
+    original_download = collection_gate.download_member
 
-    def checked_api(route: str, body: dict[str, object] | None = None) -> Any:
+    def checked_api(route: str, body: dict[str, object] | None = None) -> object:
         budget.check()
         return original_api(route, body)
 
@@ -74,13 +76,13 @@ def _bounded_github_calls(budget: _Budget) -> Iterator[None]:
         original_download(artifact_id, member, destination)
         budget.check()
 
-    accelerator_gate._gh_api = checked_api
-    collection_gate._download_member = checked_download
+    accelerator_gate.gh_api = checked_api
+    collection_gate.download_member = checked_download
     try:
         yield
     finally:
-        accelerator_gate._gh_api = original_api
-        collection_gate._download_member = original_download
+        accelerator_gate.gh_api = original_api
+        collection_gate.download_member = original_download
 
 
 def _require_context() -> str:
@@ -98,7 +100,7 @@ def _require_context() -> str:
     commit = os.environ.get("GITHUB_SHA", "")
     if not accelerator_gate.SHA_RE.fullmatch(commit):
         raise PeriodicError("collector GITHUB_SHA must be a full lowercase commit SHA")
-    return accelerator_gate._run_id_from_env()
+    return accelerator_gate.run_id_from_env()
 
 
 def _parse_timestamp(value: object) -> datetime:
@@ -116,20 +118,27 @@ def _parse_timestamp(value: object) -> datetime:
 def _identity_run(run: object, *, source: bool) -> dict[str, object]:
     if not isinstance(run, dict):
         raise PeriodicError("GitHub workflow run metadata is malformed")
+    # The GitHub transport decodes JSON objects; identity checks remain below.
+    run = cast(dict[str, object], run)
     repo = run.get("repository")
     head_repo = run.get("head_repository")
+    run_id = run.get("id")
+    attempt = run.get("run_attempt")
+    commit = run.get("head_sha")
     if (
-        type(run.get("id")) is not int
-        or run["id"] <= 0
-        or type(run.get("run_attempt")) is not int
-        or run["run_attempt"] <= 0
-        or not isinstance(run.get("head_sha"), str)
-        or not accelerator_gate.SHA_RE.fullmatch(run["head_sha"])
+        type(run_id) is not int
+        or run_id <= 0
+        or type(attempt) is not int
+        or attempt <= 0
+        or not isinstance(commit, str)
+        or not accelerator_gate.SHA_RE.fullmatch(commit)
         or run.get("path") != (SOURCE_WORKFLOW if source else WORKFLOW_PATH)
         or not isinstance(repo, dict)
-        or str(repo.get("full_name", "")).casefold() != REPOSITORY.casefold()
+        or str(cast(dict[str, object], repo).get("full_name", "")).casefold()
+        != REPOSITORY.casefold()
         or not isinstance(head_repo, dict)
-        or str(head_repo.get("full_name", "")).casefold() != REPOSITORY.casefold()
+        or str(cast(dict[str, object], head_repo).get("full_name", "")).casefold()
+        != REPOSITORY.casefold()
     ):
         raise PeriodicError("GitHub workflow run identity is not canonical")
     if source and run.get("event") not in {"release", "workflow_dispatch"}:
@@ -145,7 +154,7 @@ def _identity_run(run: object, *, source: bool) -> dict[str, object]:
 def _latest_source_attempt(run: dict[str, object], budget: _Budget) -> None:
     run_id = run["id"]
     budget.check()
-    latest = accelerator_gate._gh_api(f"repos/{REPOSITORY}/actions/runs/{run_id}")
+    latest = accelerator_gate.gh_api(f"repos/{REPOSITORY}/actions/runs/{run_id}")
     latest = _identity_run(latest, source=True)
     for field in (
         "id",
@@ -166,7 +175,7 @@ def _source_expired(
     """Check the exact source attempt against the seven-day collection window."""
     route = f"repos/{REPOSITORY}/actions/runs/{source_run_id}/attempts/{source_attempt}"
     budget.check()
-    run = _identity_run(accelerator_gate._gh_api(route), source=True)
+    run = _identity_run(accelerator_gate.gh_api(route), source=True)
     if (
         str(run["id"]) != source_run_id
         or str(run["run_attempt"]) != source_attempt
@@ -191,20 +200,24 @@ def _list_recent_runs(budget: _Budget) -> list[dict[str, object]]:
         }
     )
     budget.check()
-    page = accelerator_gate._gh_api(
+    page = accelerator_gate.gh_api(
         f"repos/{REPOSITORY}/actions/workflows/pypi.yml/runs?{query}"
     )
+    if not isinstance(page, dict):
+        raise PeriodicError("recent source run inventory is incomplete or too large")
+    page = cast(dict[str, object], page)
+    total = page.get("total_count")
+    items = page.get("workflow_runs")
     if (
-        not isinstance(page, dict)
-        or type(page.get("total_count")) is not int
-        or page["total_count"] < 0
-        or page["total_count"] > MAX_RUNS
-        or not isinstance(page.get("workflow_runs"), list)
-        or page["total_count"] != len(page["workflow_runs"])
+        type(total) is not int
+        or total < 0
+        or total > MAX_RUNS
+        or not isinstance(items, list)
+        or total != len(cast(list[object], items))
     ):
         raise PeriodicError("recent source run inventory is incomplete or too large")
     runs: list[dict[str, object]] = []
-    for item in page["workflow_runs"]:
+    for item in cast(list[object], items):
         run = _identity_run(item, source=True)
         created_at = _parse_timestamp(run.get("created_at"))
         if created_at > cutoff:
@@ -217,20 +230,25 @@ def _terminal_artifact(
 ) -> dict[str, object] | None:
     query = urlencode({"name": artifact_name, "per_page": str(MAX_RUNS), "page": "1"})
     budget.check()
-    page = accelerator_gate._gh_api(f"repos/{REPOSITORY}/actions/artifacts?{query}")
+    page = accelerator_gate.gh_api(f"repos/{REPOSITORY}/actions/artifacts?{query}")
+    if not isinstance(page, dict):
+        raise PeriodicError("terminal artefact inventory is incomplete or too large")
+    page = cast(dict[str, object], page)
+    total = page.get("total_count")
+    items = page.get("artifacts")
     if (
-        not isinstance(page, dict)
-        or type(page.get("total_count")) is not int
-        or page["total_count"] < 0
-        or page["total_count"] > MAX_RUNS
-        or not isinstance(page.get("artifacts"), list)
-        or page["total_count"] != len(page["artifacts"])
+        type(total) is not int
+        or total < 0
+        or total > MAX_RUNS
+        or not isinstance(items, list)
+        or total != len(cast(list[object], items))
     ):
         raise PeriodicError("terminal artefact inventory is incomplete or too large")
     matches = [
-        item
-        for item in page["artifacts"]
-        if isinstance(item, dict) and item.get("name") == artifact_name
+        cast(dict[str, object], item)
+        for item in cast(list[object], items)
+        if isinstance(item, dict)
+        and cast(dict[str, object], item).get("name") == artifact_name
     ]
     if len(matches) > 1:
         raise PeriodicError("multiple terminal artefacts have the same source identity")
@@ -238,17 +256,22 @@ def _terminal_artifact(
         return None
     item = matches[0]
     owner = item.get("workflow_run")
+    artifact_id = item.get("id")
+    size = item.get("size_in_bytes")
+    owner_map = cast(dict[str, object], owner) if isinstance(owner, dict) else None
+    owner_id = owner_map.get("id") if owner_map is not None else None
+    owner_sha = owner_map.get("head_sha") if owner_map is not None else None
     if (
-        type(item.get("id")) is not int
-        or item["id"] <= 0
-        or type(item.get("size_in_bytes")) is not int
-        or not 0 < item["size_in_bytes"] <= collection_gate.MAX_ARCHIVE_BYTES
+        type(artifact_id) is not int
+        or artifact_id <= 0
+        or type(size) is not int
+        or not 0 < size <= collection_gate.MAX_ARCHIVE_BYTES
         or item.get("expired") is not False
         or not isinstance(owner, dict)
-        or type(owner.get("id")) is not int
-        or owner["id"] <= 0
-        or not isinstance(owner.get("head_sha"), str)
-        or not accelerator_gate.SHA_RE.fullmatch(owner["head_sha"])
+        or type(owner_id) is not int
+        or owner_id <= 0
+        or not isinstance(owner_sha, str)
+        or not accelerator_gate.SHA_RE.fullmatch(owner_sha)
     ):
         raise PeriodicError(
             "terminal artefact identity, size or availability is invalid"
@@ -262,19 +285,22 @@ def _read_terminal(
     source_run_id: str,
     source_attempt: str,
     commit: str,
-    binding: dict[str, object],
+    binding: Mapping[str, object],
     kernel_id: str,
     budget: _Budget,
 ) -> dict[str, object]:
     owner = artifact["workflow_run"]
     assert isinstance(owner, dict)
-    collector_id = owner["id"]
-    collector_sha = owner["head_sha"]
+    owner = cast(dict[str, object], owner)
+    collector_id = cast(int, owner["id"])
+    collector_sha = cast(str, owner["head_sha"])
     name = f"tpu-periodic-terminal-{source_run_id}-{source_attempt}-{commit}"
     with tempfile.TemporaryDirectory(prefix="jaxrenderer-periodic-terminal-") as temp:
         path = Path(temp) / "periodic-terminal.json"
-        collection_gate._download_member(artifact["id"], "periodic-terminal.json", path)
-        record = collection_gate._read_json(path)
+        collection_gate.download_member(
+            cast(int, artifact["id"]), "periodic-terminal.json", path
+        )
+        record = collection_gate.read_json(path)
     if set(record) != TERMINAL_FIELDS:
         raise PeriodicError("terminal artefact has an unsupported schema")
     collector_attempt = record.get("collector_attempt")
@@ -291,7 +317,7 @@ def _read_terminal(
         f"repos/{REPOSITORY}/actions/runs/{collector_id}/attempts/{collector_attempt}"
     )
     budget.check()
-    run = _identity_run(accelerator_gate._gh_api(route), source=False)
+    run = _identity_run(accelerator_gate.gh_api(route), source=False)
     if (
         run["id"] != collector_id
         or run["head_sha"] != collector_sha
@@ -300,7 +326,7 @@ def _read_terminal(
         or run.get("conclusion") not in {"success", "failure", "cancelled", "timed_out"}
     ):
         raise PeriodicError("terminal artefact owner attempt is not complete and exact")
-    release_tpu_gate._verify_master_history(str(collector_sha))
+    release_tpu_gate.verify_master_history(str(collector_sha))
     if (
         record.get("terminal") is not True
         or record.get("source_run_id") != source_run_id
@@ -341,11 +367,11 @@ def _has_terminal(
     source_dir: Path,
     budget: _Budget,
 ) -> dict[str, object] | None:
-    source = collection_gate._read_json(source_dir / "collection-source.json")
-    binding = release_tpu_gate._validate_binding(
-        collection_gate._read_json(source_dir / "binding.json")
+    source = collection_gate.read_json(source_dir / "collection-source.json")
+    binding = release_tpu_gate.validate_binding(
+        collection_gate.read_json(source_dir / "binding.json")
     )
-    state = collection_gate._read_json(source_dir / "kaggle-controller-state.json")
+    state = collection_gate.read_json(source_dir / "kaggle-controller-state.json")
     name = f"tpu-periodic-terminal-{source_run_id}-{source_attempt}-{commit}"
     artifact = _terminal_artifact(int(source_run_id), name, budget)
     if artifact is None:
@@ -373,7 +399,7 @@ def _write_json(path: Path, value: dict[str, object]) -> None:
     data = json.dumps(value, indent=2, sort_keys=True).encode("utf-8") + b"\n"
     if len(data) > MAX_REPORT_BYTES:
         raise PeriodicError("periodic report exceeded its size limit")
-    path.write_bytes(data)
+    _ = path.write_bytes(data)
 
 
 def _write_outputs(path: Path, values: dict[str, str]) -> None:
@@ -381,18 +407,18 @@ def _write_outputs(path: Path, values: dict[str, str]) -> None:
         for name, value in values.items():
             if "\n" in name or "\n" in value:
                 raise PeriodicError("GitHub output value contains a newline")
-            stream.write(f"{name}={value}\n")
+            _ = stream.write(f"{name}={value}\n")
 
 
 def _write_summary(outcome: str, detail: str) -> None:
     summary = os.environ.get("GITHUB_STEP_SUMMARY", "")
     if summary:
         with Path(summary).open("a", encoding="utf-8") as stream:
-            stream.write(f"## Periodic TPU collection: {outcome}\n\n{detail}\n")
+            _ = stream.write(f"## Periodic TPU collection: {outcome}\n\n{detail}\n")
 
 
 def discover(output_dir: Path, github_output: Path) -> dict[str, object]:
-    _require_context()
+    _ = _require_context()
     output_dir.mkdir(parents=True, exist_ok=False)
     budget = _Budget()
     candidates: list[dict[str, str]] = []
@@ -418,7 +444,7 @@ def discover(output_dir: Path, github_output: Path) -> dict[str, object]:
                 ) as temp:
                     source_dir = Path(temp) / "source"
                     github_out = Path(temp) / "github-output"
-                    collection_gate.prepare(
+                    _ = collection_gate.prepare(
                         run_id, attempt, commit, source_dir, github_out
                     )
                     scanned += 1
@@ -471,11 +497,11 @@ def _terminal_record(
     outcome: str,
     remote_status: str,
 ) -> dict[str, object]:
-    source = collection_gate._read_json(source_dir / "collection-source.json")
-    binding = release_tpu_gate._validate_binding(
-        collection_gate._read_json(source_dir / "binding.json")
+    source = collection_gate.read_json(source_dir / "collection-source.json")
+    binding = release_tpu_gate.validate_binding(
+        collection_gate.read_json(source_dir / "binding.json")
     )
-    state = collection_gate._read_json(source_dir / "kaggle-controller-state.json")
+    state = collection_gate.read_json(source_dir / "kaggle-controller-state.json")
     collector_run = str(source["collector_run_id"])
     match = re.fullmatch(r"([1-9][0-9]*)\.([1-9][0-9]*)", collector_run)
     if match is None:
@@ -513,9 +539,10 @@ def collect_source(
     output_dir: Path,
     github_output: Path,
 ) -> tuple[dict[str, object], int]:
-    _require_context()
-    run_id = collection_gate._positive_id(source_run)
-    attempt = collection_gate._positive_id(source_attempt)
+    _ = _require_context()
+    report: dict[str, object]
+    run_id = collection_gate.positive_id(source_run)
+    attempt = collection_gate.positive_id(source_attempt)
     if not accelerator_gate.SHA_RE.fullmatch(commit):
         raise PeriodicError("source commit must be a full lowercase SHA")
     output_dir.mkdir(parents=True, exist_ok=False)
@@ -532,7 +559,7 @@ def collect_source(
             return report, 0
         source_dir = output_dir / "source"
         with tempfile.TemporaryDirectory(prefix="jaxrenderer-periodic-output-") as temp:
-            collection_gate.prepare(
+            _ = collection_gate.prepare(
                 str(run_id),
                 str(attempt),
                 commit,
@@ -562,8 +589,8 @@ def collect_source(
             )
             return report, 0
 
-        binding = release_tpu_gate._validate_binding(
-            collection_gate._read_json(source_dir / "binding.json")
+        binding = release_tpu_gate.validate_binding(
+            collection_gate.read_json(source_dir / "binding.json")
         )
         provider_dir = output_dir / "collected"
         provider_report = kaggle_collect.collect(
@@ -581,7 +608,7 @@ def collect_source(
             )
             return report, 0
         if outcome == "success":
-            collection_gate.finish(source_dir, provider_dir, True)
+            _ = collection_gate.finish(source_dir, provider_dir, True)
             if not isinstance(remote_status, str):
                 raise PeriodicError("successful provider report has no terminal status")
             terminal = _terminal_record(
@@ -631,14 +658,14 @@ def parser() -> argparse.ArgumentParser:
     root = argparse.ArgumentParser(description=__doc__)
     commands = root.add_subparsers(dest="command", required=True)
     discover_parser = commands.add_parser("discover")
-    discover_parser.add_argument("--output-dir", type=Path, required=True)
-    discover_parser.add_argument("--github-output", type=Path, required=True)
+    _ = discover_parser.add_argument("--output-dir", type=Path, required=True)
+    _ = discover_parser.add_argument("--github-output", type=Path, required=True)
     collect_parser = commands.add_parser("collect")
-    collect_parser.add_argument("--source-run", required=True)
-    collect_parser.add_argument("--source-attempt", required=True)
-    collect_parser.add_argument("--commit", required=True)
-    collect_parser.add_argument("--output-dir", type=Path, required=True)
-    collect_parser.add_argument("--github-output", type=Path, required=True)
+    _ = collect_parser.add_argument("--source-run", required=True)
+    _ = collect_parser.add_argument("--source-attempt", required=True)
+    _ = collect_parser.add_argument("--commit", required=True)
+    _ = collect_parser.add_argument("--output-dir", type=Path, required=True)
+    _ = collect_parser.add_argument("--github-output", type=Path, required=True)
     return root
 
 
@@ -646,7 +673,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser().parse_args(argv)
     try:
         if args.command == "discover":
-            discover(args.output_dir, args.github_output)
+            _ = discover(args.output_dir, args.github_output)
             return 0
         _, exit_code = collect_source(
             args.source_run,

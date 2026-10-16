@@ -6,7 +6,7 @@ import os
 from pathlib import Path
 import subprocess
 import sys
-from typing import Any
+from typing import Any, cast
 
 from tools import kaggle_ci
 import yaml
@@ -21,7 +21,7 @@ def load_workflow(name: str) -> dict[str, Any]:
         (WORKFLOWS / name).read_text(encoding="utf-8"), Loader=yaml.BaseLoader
     )
     assert isinstance(value, dict)
-    return value
+    return cast(dict[str, Any], value)
 
 
 def step_with_id(job: dict[str, Any], step_id: str) -> dict[str, Any]:
@@ -151,10 +151,10 @@ def test_release_tag_check_is_release_only_and_smoke_uses_frozen_version(
     site_packages = tmp_path / "site-packages"
     renderer = site_packages / "renderer"
     renderer.mkdir(parents=True)
-    (renderer / "__init__.py").write_text("", encoding="utf-8")
+    _ = (renderer / "__init__.py").write_text("", encoding="utf-8")
     distribution = site_packages / "jaxrenderer-1.2.3.dist-info"
     distribution.mkdir()
-    (distribution / "METADATA").write_text(
+    _ = (distribution / "METADATA").write_text(
         "Metadata-Version: 2.1\nName: jaxrenderer\nVersion: 1.2.3\n",
         encoding="utf-8",
     )
@@ -284,7 +284,7 @@ def test_cpu_reuse_requires_frozen_candidate_and_all_cpu_gates() -> None:
         ),
     )
 
-    for job_name, job in checks.items():
+    for job in checks.values():
         refs = [step["with"]["ref"] for step in checkout_steps(job)]
         assert refs and all(ref.startswith("${{ inputs.commit || ") for ref in refs)
 

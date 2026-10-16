@@ -10,7 +10,7 @@ import re
 import subprocess
 import sys
 import tempfile
-from typing import Any
+from typing import cast
 
 REPOSITORY = "JoeyTeng/jaxrenderer"
 BASE_BRANCH = "master"
@@ -32,7 +32,7 @@ class GateError(RuntimeError):
     """A validation or GitHub API error that must fail the gate closed."""
 
 
-def _run_id_from_env() -> str:
+def run_id_from_env() -> str:
     run_id = os.environ.get("GITHUB_RUN_ID", "")
     attempt = os.environ.get("GITHUB_RUN_ATTEMPT", "")
     if not run_id.isdigit() or int(run_id) <= 0:
@@ -42,7 +42,7 @@ def _run_id_from_env() -> str:
     return f"{int(run_id)}.{int(attempt)}"
 
 
-def _gh_api(route: str, body: dict[str, object] | None = None) -> Any:
+def gh_api(route: str, body: dict[str, object] | None = None) -> object:
     token = os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN")
     if not token:
         raise GateError("GH_TOKEN or GITHUB_TOKEN is required for GitHub API access")
@@ -75,7 +75,7 @@ def _gh_api(route: str, body: dict[str, object] | None = None) -> Any:
         raise GateError(f"gh api returned invalid JSON for {route}") from error
 
 
-def _require_dispatch_context() -> None:
+def require_dispatch_context() -> None:
     if os.environ.get("GITHUB_EVENT_NAME") != "workflow_dispatch":
         raise GateError("prepare must run from workflow_dispatch")
     if os.environ.get("GITHUB_REF") != "refs/heads/master":
@@ -85,10 +85,10 @@ def _require_dispatch_context() -> None:
 
 
 def _read_pr(pr_number: int) -> dict[str, object]:
-    value = _gh_api(f"repos/{REPOSITORY}/pulls/{pr_number}")
+    value = gh_api(f"repos/{REPOSITORY}/pulls/{pr_number}")
     if not isinstance(value, dict):
         raise GateError("GitHub returned a malformed pull request")
-    return value
+    return cast(dict[str, object], value)
 
 
 def _is_repository(value: object, expected: str) -> bool:
@@ -101,10 +101,14 @@ def _binding_from_pr(pr_number: int, run_id: str) -> dict[str, object]:
     head = pr.get("head")
     if not isinstance(base, dict) or not isinstance(head, dict):
         raise GateError("pull request is missing base or head metadata")
+    base = cast(dict[str, object], base)
+    head = cast(dict[str, object], head)
     base_repo = base.get("repo")
     head_repo = head.get("repo")
     if not isinstance(base_repo, dict) or not isinstance(head_repo, dict):
         raise GateError("pull request base or head repository is unavailable")
+    base_repo = cast(dict[str, object], base_repo)
+    head_repo = cast(dict[str, object], head_repo)
     base_ref = base.get("ref")
     base_sha = base.get("sha")
     head_sha = head.get("sha")
@@ -128,8 +132,10 @@ def _binding_from_pr(pr_number: int, run_id: str) -> dict[str, object]:
     if not isinstance(head_sha, str) or not SHA_RE.fullmatch(head_sha):
         raise GateError("pull request head SHA is malformed")
 
-    comparison = _gh_api(f"repos/{REPOSITORY}/compare/{base_sha}...{head_sha}")
-    if not isinstance(comparison, dict) or comparison.get("status") not in {
+    comparison = gh_api(f"repos/{REPOSITORY}/compare/{base_sha}...{head_sha}")
+    if not isinstance(comparison, dict) or cast(dict[str, object], comparison).get(
+        "status"
+    ) not in {
         "ahead",
         "identical",
     }:
@@ -144,8 +150,11 @@ def _binding_from_pr(pr_number: int, run_id: str) -> dict[str, object]:
     }
 
 
-def _validate_binding(value: object) -> dict[str, object]:
-    if not isinstance(value, dict) or set(value) != BINDING_FIELDS:
+def validate_binding(value: object) -> dict[str, object]:
+    if not isinstance(value, dict):
+        raise GateError("binding.json has missing or unexpected fields")
+    value = cast(dict[str, object], value)
+    if set(value) != BINDING_FIELDS:
         raise GateError("binding.json has missing or unexpected fields")
     pr = value["pr"]
     if type(pr) is not int or pr <= 0:
@@ -156,9 +165,10 @@ def _validate_binding(value: object) -> dict[str, object]:
             raise GateError(f"binding {name} is invalid")
     if value["base_ref"] != BASE_BRANCH:
         raise GateError("binding base_ref is not master")
-    if not isinstance(
-        value["head_repository"], str
-    ) or not REPOSITORY_NAME_RE.fullmatch(value["head_repository"]):
+    head_repository = value["head_repository"]
+    if not isinstance(head_repository, str) or not REPOSITORY_NAME_RE.fullmatch(
+        head_repository
+    ):
         raise GateError("binding head_repository is invalid")
     run_id = value["run_id"]
     if not isinstance(run_id, str) or not RUN_ID_RE.fullmatch(run_id):
@@ -166,7 +176,14 @@ def _validate_binding(value: object) -> dict[str, object]:
     return value
 
 
-def _atomic_write_json(path: Path, value: dict[str, object]) -> None:
+def _run_url_parts(run_id: str) -> tuple[str, str]:
+    match = RUN_ID_RE.fullmatch(run_id)
+    if match is None:
+        raise GateError("run ID is malformed")
+    return cast(tuple[str, str], match.groups())
+
+
+def atomic_write_json(path: Path, value: dict[str, object]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary_name: str | None = None
     try:
@@ -178,8 +195,8 @@ def _atomic_write_json(path: Path, value: dict[str, object]) -> None:
             delete=False,
         ) as temporary:
             temporary_name = temporary.name
-            json.dump(value, temporary, sort_keys=True)
-            temporary.write("\n")
+            _ = json.dump(value, temporary, sort_keys=True)
+            _ = temporary.write("\n")
         os.replace(temporary_name, path)
     finally:
         if temporary_name is not None and os.path.exists(temporary_name):
@@ -192,27 +209,27 @@ def _append_github_output(path: Path, values: dict[str, object]) -> None:
             rendered = str(value)
             if "\n" in rendered or "\r" in rendered:
                 raise GateError(f"unsafe multiline GitHub output: {name}")
-            output.write(f"{name}={rendered}\n")
+            _ = output.write(f"{name}={rendered}\n")
 
 
 def prepare(
     pr_number: int, backend_selection: str, output: Path, github_output: Path
 ) -> dict[str, object]:
-    _require_dispatch_context()
+    require_dispatch_context()
     if backend_selection != "gpu":
         raise GateError("PR accelerator gate only supports the GPU backend")
     if output.resolve() == github_output.resolve():
         raise GateError("binding output and GITHUB_OUTPUT must be different files")
-    run_id = _run_id_from_env()
+    run_id = run_id_from_env()
     binding = _binding_from_pr(pr_number, run_id)
-    _atomic_write_json(output, binding)
+    atomic_write_json(output, binding)
     backends = (backend_selection,)
-    run_number, attempt = RUN_ID_RE.fullmatch(run_id).groups()  # type: ignore[union-attr]
+    run_number, attempt = _run_url_parts(run_id)
     run_url = (
         f"https://github.com/{REPOSITORY}/actions/runs/{run_number}/attempts/{attempt}"
     )
     for backend in backends:
-        _gh_api(
+        _ = gh_api(
             f"repos/{REPOSITORY}/statuses/{binding['head_sha']}",
             {
                 "state": "pending",
@@ -238,7 +255,7 @@ def _load_binding(path: Path) -> dict[str, object]:
         value = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, UnicodeError, json.JSONDecodeError) as error:
         raise GateError(f"could not read binding file: {error}") from error
-    return _validate_binding(value)
+    return validate_binding(value)
 
 
 def _load_result(path: Path, binding: dict[str, object], backend: str) -> None:
@@ -258,7 +275,10 @@ def _load_result(path: Path, binding: dict[str, object], backend: str) -> None:
         "devices",
         "versions",
     }
-    if not isinstance(result, dict) or set(result) != fields:
+    if not isinstance(result, dict):
+        raise GateError("result.json has missing or unexpected fields")
+    result = cast(dict[str, object], result)
+    if set(result) != fields:
         raise GateError("result.json has missing or unexpected fields")
     for name in ("pr", "head_sha", "base_sha", "run_id"):
         if result[name] != binding[name] or type(result[name]) is not type(
@@ -274,12 +294,16 @@ def _load_result(path: Path, binding: dict[str, object], backend: str) -> None:
     devices = result["devices"]
     if not isinstance(devices, list) or not devices:
         raise GateError("result.json has no accelerator devices")
+    devices = cast(list[object], devices)
     if type(result["device_count"]) is not int or result["device_count"] != len(
         devices
     ):
         raise GateError("result.json device_count does not match its device list")
-    for device in devices:
-        if not isinstance(device, dict) or set(device) != {
+    for raw_device in devices:
+        if not isinstance(raw_device, dict):
+            raise GateError("result.json contains malformed device metadata")
+        device = cast(dict[str, object], raw_device)
+        if set(device) != {
             "platform",
             "device_kind",
             "id",
@@ -293,10 +317,10 @@ def _load_result(path: Path, binding: dict[str, object], backend: str) -> None:
         ):
             raise GateError("result.json contains incomplete device metadata")
     versions = result["versions"]
-    if not isinstance(versions, dict) or not all(
-        isinstance(key, str) and key and isinstance(value, str) and value
-        for key, value in versions.items()
-    ):
+    if not isinstance(versions, dict):
+        raise GateError("result.json versions must map non-empty names to versions")
+    versions = cast(dict[str, object], versions)
+    if not all(isinstance(value, str) and value for value in versions.values()):
         raise GateError("result.json versions must map non-empty names to versions")
 
 
@@ -306,13 +330,19 @@ def _current_pr_matches(binding: dict[str, object]) -> None:
     head = pr.get("head")
     if not isinstance(base, dict) or not isinstance(head, dict):
         raise GateError("current pull request is missing base or head metadata")
+    base = cast(dict[str, object], base)
+    head = cast(dict[str, object], head)
     head_repo = head.get("repo")
     if not isinstance(head_repo, dict):
         raise GateError("current pull request head repository is unavailable")
+    head_repo = cast(dict[str, object], head_repo)
+    base_repo_value = base.get("repo")
+    if not isinstance(base_repo_value, dict):
+        raise GateError("current pull request base repository is unavailable")
+    base_repo = cast(dict[str, object], base_repo_value)
     if (
         pr.get("state") != "open"
-        or not isinstance(base.get("repo"), dict)
-        or not _is_repository(base["repo"].get("full_name"), REPOSITORY)
+        or not _is_repository(base_repo.get("full_name"), REPOSITORY)
         or base.get("ref") != binding["base_ref"]
         or base.get("sha") != binding["base_sha"]
         or head.get("sha") != binding["head_sha"]
@@ -320,10 +350,12 @@ def _current_pr_matches(binding: dict[str, object]) -> None:
         or head_repo.get("private") is not False
     ):
         raise GateError("pull request identity or frozen head/base has changed")
-    comparison = _gh_api(
+    comparison = gh_api(
         f"repos/{REPOSITORY}/compare/{binding['base_sha']}...{binding['head_sha']}"
     )
-    if not isinstance(comparison, dict) or comparison.get("status") not in {
+    if not isinstance(comparison, dict) or cast(dict[str, object], comparison).get(
+        "status"
+    ) not in {
         "ahead",
         "identical",
     }:
@@ -333,14 +365,17 @@ def _current_pr_matches(binding: dict[str, object]) -> None:
 def _latest_status(
     binding: dict[str, object], backend: str
 ) -> dict[str, object] | None:
-    statuses = _gh_api(
+    statuses = gh_api(
         f"repos/{REPOSITORY}/commits/{binding['head_sha']}/statuses?per_page=100"
     )
     if not isinstance(statuses, list):
         raise GateError("GitHub returned malformed commit statuses")
-    for status in statuses:
-        if isinstance(status, dict) and status.get("context") == CONTEXTS[backend]:
-            return status
+    statuses = cast(list[object], statuses)
+    for raw_status in statuses:
+        if isinstance(raw_status, dict):
+            status = cast(dict[str, object], raw_status)
+            if status.get("context") == CONTEXTS[backend]:
+                return status
     return None
 
 
@@ -350,7 +385,7 @@ def finish(
     if backend not in CONTEXTS:
         raise GateError("backend must be gpu or tpu")
     binding = _load_binding(binding_path)
-    run_id = _run_id_from_env()
+    run_id = run_id_from_env()
     if binding["run_id"] != run_id:
         failure_reason = "binding belongs to a different workflow run or attempt"
     else:
@@ -374,7 +409,7 @@ def finish(
         or latest.get("description") != expected_pending
     ):
         # A later invocation may already own this context; do not clobber it.
-        run_number, attempt = RUN_ID_RE.fullmatch(binding["run_id"]).groups()  # type: ignore[union-attr]
+        run_number, attempt = _run_url_parts(cast(str, binding["run_id"]))
         return {
             "backend": backend,
             "state": "failure",
@@ -386,12 +421,12 @@ def finish(
             "status_updated": False,
         }
 
-    run_number, attempt = RUN_ID_RE.fullmatch(binding["run_id"]).groups()  # type: ignore[union-attr]
+    run_number, attempt = _run_url_parts(cast(str, binding["run_id"]))
     run_url = (
         f"https://github.com/{REPOSITORY}/actions/runs/{run_number}/attempts/{attempt}"
     )
     state = "failure" if failure_reason else "success"
-    _gh_api(
+    _ = gh_api(
         f"repos/{REPOSITORY}/statuses/{binding['head_sha']}",
         {
             "state": state,
@@ -425,15 +460,15 @@ def parser() -> argparse.ArgumentParser:
     root = argparse.ArgumentParser(description=__doc__)
     commands = root.add_subparsers(dest="command", required=True)
     prepare_parser = commands.add_parser("prepare")
-    prepare_parser.add_argument("--pr", required=True, type=_positive_pr)
-    prepare_parser.add_argument("--backend", choices=("gpu",), required=True)
-    prepare_parser.add_argument("--output", type=Path, required=True)
-    prepare_parser.add_argument("--github-output", type=Path, required=True)
+    _ = prepare_parser.add_argument("--pr", required=True, type=_positive_pr)
+    _ = prepare_parser.add_argument("--backend", choices=("gpu",), required=True)
+    _ = prepare_parser.add_argument("--output", type=Path, required=True)
+    _ = prepare_parser.add_argument("--github-output", type=Path, required=True)
     finish_parser = commands.add_parser("finish")
-    finish_parser.add_argument("--binding", type=Path, required=True)
-    finish_parser.add_argument("--backend", choices=tuple(CONTEXTS), required=True)
-    finish_parser.add_argument("--output-dir", type=Path, required=True)
-    finish_parser.add_argument(
+    _ = finish_parser.add_argument("--binding", type=Path, required=True)
+    _ = finish_parser.add_argument("--backend", choices=tuple(CONTEXTS), required=True)
+    _ = finish_parser.add_argument("--output-dir", type=Path, required=True)
+    _ = finish_parser.add_argument(
         "--provider-success", choices=("true", "false"), required=True
     )
     return root
