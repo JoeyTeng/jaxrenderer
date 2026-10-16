@@ -9,6 +9,7 @@ import jax.lax as lax
 import jax.numpy as jnp
 
 from renderer import Buffers, Camera, LightSource, render
+import renderer._jax_typing as jax_typing
 from renderer.shaders.gouraud import GouraudExtraInput, GouraudShader
 from renderer.types import FloatV
 
@@ -30,14 +31,14 @@ def _write_gradient_report(metrics: dict[str, float]) -> None:
     )
 
 
-eye = jnp.array((0.0, 0, 2))  # pyright: ignore[reportUnknownMemberType]
-center = jnp.array((0.0, 0, 0))  # pyright: ignore[reportUnknownMemberType]
-up = jnp.array((0.0, 1, 0))  # pyright: ignore[reportUnknownMemberType]
+eye = jax_typing.array((0.0, 0, 2))
+center = jax_typing.array((0.0, 0, 0))
+up = jax_typing.array((0.0, 1, 0))
 
 width = 84
 height = 84
-lowerbound = jnp.zeros(2, dtype=int)  # pyright: ignore[reportUnknownMemberType]
-dimension = jnp.array((width, height))  # pyright: ignore[reportUnknownMemberType]
+lowerbound = jax_typing.zeros(2, dtype=int)
+dimension = jax_typing.array((width, height))
 depth = 1
 
 camera: Camera = Camera.create(
@@ -67,7 +68,7 @@ buffers = Buffers(
         ),
     ),
 )
-face_indices = jnp.array(  # pyright: ignore[reportUnknownMemberType]
+face_indices = jax_typing.array(
     (
         (0, 1, 2),
         (1, 3, 2),
@@ -76,7 +77,7 @@ face_indices = jnp.array(  # pyright: ignore[reportUnknownMemberType]
         (2, 5, 1),
     )
 )
-position = jnp.array(  # pyright: ignore[reportUnknownMemberType]
+position = jax_typing.array(
     (
         (0.0, 0.0, 0.0),
         (2.0, 0.0, 0.0),
@@ -88,7 +89,7 @@ position = jnp.array(  # pyright: ignore[reportUnknownMemberType]
 )
 extra = GouraudExtraInput(
     position=position,
-    colour=jnp.array(  # pyright: ignore[reportUnknownMemberType]
+    colour=jax_typing.array(
         (
             (1.0, 0.0, 0.0),
             (0.0, 1.0, 0.0),
@@ -141,16 +142,13 @@ def test_grad_over_light():
 
     def loss_for_x(x: FloatV) -> FloatV:
         light = LightSource(
-            direction=jnp.array((x, 0.2, -1.0)),  # pyright: ignore[reportUnknownMemberType]
+            direction=jax_typing.array((x, 0.2, -1.0)),
         )
         return _render_light(light)
 
-    x = jnp.asarray(0.3)  # pyright: ignore[reportUnknownMemberType]
+    x = jax_typing.asarray(0.3)
     epsilon = 0.01
-    gradient: FloatV = cast(
-        FloatV,
-        jax.grad(loss_for_x)(x),  # pyright: ignore[reportUnknownMemberType]
-    )
+    gradient: FloatV = jax_typing.grad(loss_for_x)(x)
     finite_difference = (loss_for_x(x + epsilon) - loss_for_x(x - epsilon)) / (
         2 * epsilon
     )

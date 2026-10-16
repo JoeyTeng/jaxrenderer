@@ -8,6 +8,8 @@ The required Python 3.14 lint job runs `uv run --no-sync --python 3.14 pyright -
 
 The package combines the public `jax.Array` type, following the [JAX typing guidance](https://docs.jax.dev/en/latest/jax.typing.html), with jaxtyping's dtype and shape specifications. Geometry checks retain their runtime validation of shared dimensions, including during JIT tracing; passing Pyright alone does not verify these constraints. The shared `is_array_type` helper preserves these specifications during runtime checks, while `typed_jit` preserves callable signatures for Pyright.
 
+Private aliases in `renderer/_jax_typing.py` describe the small JAX API subset used by examples and tests. Protocols and two explicit casts retain the original functions; these manually maintained contracts require review when JAX is updated and do not validate array shapes, dtypes or differentiability.
+
 ## Provider checks
 
 The `Manual GPU regression` workflow runs the same test suite and render and gradient regressions on a Modal T4 GPU. A maintainer dispatches it from `master` once before merging, specifying a pull request number. The workflow freezes its head and base revisions and records `accelerator/gpu` on the PR head. New commits need new checks; results from a changed head or base are rejected.

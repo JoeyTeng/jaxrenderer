@@ -1,9 +1,9 @@
 from jax import Array
-import jax.numpy as jnp
 import numpy as np
 import numpy.typing as npt
 import pytest
 
+import renderer._jax_typing as jax_typing
 from renderer.utils import transpose_for_display
 
 
@@ -98,7 +98,7 @@ class TestTransposeForDisplay:
         flip_vertical: bool,
         expected: npt.ArrayLike,
     ):
-        input_array = jnp.asarray(matrix)  # pyright: ignore[reportUnknownMemberType]
+        input_array = jax_typing.asarray(matrix)
         expected_array = np.asarray(expected, dtype=input_array.dtype)
 
         actual = transpose_for_display(input_array, flip_vertical=flip_vertical)

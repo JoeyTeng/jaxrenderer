@@ -11,6 +11,7 @@ from jaxtyping import (
 )
 
 from renderer import jit
+import renderer._jax_typing as jax_typing
 from renderer._meta_utils import is_array_type
 from renderer.geometry import Camera, normalise, to_homogeneous
 from renderer.pipeline import render
@@ -30,14 +31,14 @@ from renderer.utils import transpose_for_display
 
 
 def test_render_batched_triangles():
-    eye = jnp.array((0.0, 0, 2))  # pyright: ignore[reportUnknownMemberType]
-    center = jnp.array((0.0, 0, 0))  # pyright: ignore[reportUnknownMemberType]
-    up = jnp.array((0.0, 1, 0))  # pyright: ignore[reportUnknownMemberType]
+    eye = jax_typing.array((0.0, 0, 2))
+    center = jax_typing.array((0.0, 0, 0))
+    up = jax_typing.array((0.0, 1, 0))
 
     width: int = 1920
     height: int = 1080
-    lowerbound = jnp.zeros(2, dtype=int)  # pyright: ignore[reportUnknownMemberType]
-    dimension = jnp.array((width, height))  # pyright: ignore[reportUnknownMemberType]
+    lowerbound = jax_typing.zeros(2, dtype=int)
+    dimension = jax_typing.array((width, height))
     depth: int = 255
     default_z: float = 1.0
     default_ch: float = 0.0
@@ -69,7 +70,7 @@ def test_render_batched_triangles():
             ),
         ),
     )
-    face_indices = jnp.array(  # pyright: ignore[reportUnknownMemberType]
+    face_indices = jax_typing.array(
         (
             (0, 1, 2),
             (1, 3, 2),
@@ -78,7 +79,7 @@ def test_render_batched_triangles():
             (2, 5, 1),
         )
     )
-    position = jnp.array(  # pyright: ignore[reportUnknownMemberType]
+    position = jax_typing.array(
         (
             (0.0, 0.0, 0.0),
             (2.0, 0.0, 0.0),
@@ -90,7 +91,7 @@ def test_render_batched_triangles():
     )
     extra = GouraudExtraInput(
         position=position,
-        colour=jnp.array(  # pyright: ignore[reportUnknownMemberType]
+        colour=jax_typing.array(
             (
                 (1.0, 0.0, 0.0),
                 (0.0, 1.0, 0.0),
@@ -132,7 +133,7 @@ def test_render_batched_triangles():
     )
 
     # test canvas
-    default_pixel = jnp.array([default_ch] * 3)  # pyright: ignore[reportUnknownMemberType]
+    default_pixel = jax_typing.array([default_ch] * 3)
     empty_pixels = (canvas == default_pixel).all(axis=2).sum()
     assert empty_pixels > (width * height // 2), "The canvas should be mostly empty"
     assert empty_pixels < (width * height), "The canvas should not be all empty"
@@ -148,10 +149,8 @@ class ExtraInput(NamedTuple):
 
 
 class ExtraFragmentData(NamedTuple):
-    colour: Colour = jnp.array(  # pyright: ignore[reportUnknownMemberType]
-        [0.0, 0.0, 0.0]
-    )
-    uv: Vec2f = jnp.zeros(2)  # pyright: ignore[reportUnknownMemberType]
+    colour: Colour = jax_typing.array([0.0, 0.0, 0.0])
+    uv: Vec2f = jax_typing.zeros(2)
 
 
 class ExtraMixerOutput(NamedTuple):
@@ -203,7 +202,7 @@ class _Shader(Shader[ExtraInput, ExtraFragmentData, ExtraMixerOutput]):
             ExtraInput, ExtraFragmentData, ExtraMixerOutput
         ].fragment(gl_FragCoord, gl_FrontFacing, gl_PointCoord, varying, extra)
         texture_colour: Colour = varying.colour
-        a = jnp.modf(varying.uv)[0] < 0.5  # pyright: ignore[reportUnknownMemberType]
+        a = jax_typing.modf(varying.uv)[0] < 0.5
         texture_colour = jnp.where(
             a[0] != a[1],
             texture_colour,
@@ -240,14 +239,14 @@ class _Shader(Shader[ExtraInput, ExtraFragmentData, ExtraMixerOutput]):
 
 
 def test_perspective_interpolation():
-    eye = jnp.array((0.0, 0, 1))  # pyright: ignore[reportUnknownMemberType]
-    center = jnp.array((0.0, 0, 0))  # pyright: ignore[reportUnknownMemberType]
-    up = jnp.array((0.0, 1, 0))  # pyright: ignore[reportUnknownMemberType]
+    eye = jax_typing.array((0.0, 0, 1))
+    center = jax_typing.array((0.0, 0, 0))
+    up = jax_typing.array((0.0, 1, 0))
 
     width: int = 1920
     height: int = 1080
-    lowerbound = jnp.zeros(2, dtype=int)  # pyright: ignore[reportUnknownMemberType]
-    dimension = jnp.array((width, height))  # pyright: ignore[reportUnknownMemberType]
+    lowerbound = jax_typing.zeros(2, dtype=int)
+    dimension = jax_typing.array((width, height))
     depth: int = 255
     default_z: float = 1.0
     default_ch: float = 0.0
@@ -279,8 +278,8 @@ def test_perspective_interpolation():
             ),
         ),
     )
-    face_indices = jnp.array(((0, 1, 2),))  # pyright: ignore[reportUnknownMemberType]
-    position = jnp.array(  # pyright: ignore[reportUnknownMemberType]
+    face_indices = jax_typing.array(((0, 1, 2),))
+    position = jax_typing.array(
         (
             (-1.0, -1.0, -2.0),
             (1.0, -1.0, -1.0),
@@ -289,14 +288,14 @@ def test_perspective_interpolation():
     )
     extra = ExtraInput(
         position=position,
-        colour=jnp.array(  # pyright: ignore[reportUnknownMemberType]
+        colour=jax_typing.array(
             (
                 (1.0, 0.0, 0.0),
                 (0.0, 1.0, 0.0),
                 (0.0, 0.0, 1.0),
             )
         ),
-        uv=jnp.array(  # pyright: ignore[reportUnknownMemberType]
+        uv=jax_typing.array(
             (
                 (0.0, 0.0),
                 (10.0, 0.0),
@@ -330,7 +329,7 @@ def test_perspective_interpolation():
     )
 
     # test canvas
-    default_pixel = jnp.array([default_ch] * 3)  # pyright: ignore[reportUnknownMemberType]
+    default_pixel = jax_typing.array([default_ch] * 3)
     empty_pixels = (canvas == default_pixel).all(axis=2).sum()
     assert empty_pixels > (width * height // 2), "The canvas should be mostly empty"
     assert empty_pixels < (width * height), "The canvas should not be all empty"

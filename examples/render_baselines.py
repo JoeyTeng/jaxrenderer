@@ -11,6 +11,7 @@ import jax.numpy as jnp
 import numpy as np
 
 import renderer
+import renderer._jax_typing as jax_typing
 from renderer.geometry import rotation_matrix
 
 _ROOT = Path(__file__).resolve().parents[1]
@@ -22,17 +23,17 @@ _HEAD_SPECULAR = _ROOT / "test_resources" / "tga" / "african_head_spec.tga"
 def render_cube(width: int = 640, height: int = 480) -> np.ndarray:
     """Render the blue cube example as H×W×RGB float values in [0, 1]."""
     cube = renderer.create_cube(
-        half_extents=jnp.ones(3, dtype=jnp.single),  # pyright: ignore[reportUnknownMemberType]
-        texture_scaling=jnp.ones(2, dtype=jnp.single),  # pyright: ignore[reportUnknownMemberType]
-        diffuse_map=jnp.zeros((2, 2, 3), dtype=jnp.single).at[..., 2].set(1),  # pyright: ignore[reportUnknownMemberType]
-        specular_map=jnp.ones((2, 2), dtype=jnp.single) * 2.0,  # pyright: ignore[reportUnknownMemberType]
+        half_extents=jax_typing.ones(3, dtype=jnp.single),
+        texture_scaling=jax_typing.ones(2, dtype=jnp.single),
+        diffuse_map=jax_typing.zeros((2, 2, 3), dtype=jnp.single).at[..., 2].set(1),
+        specular_map=jax_typing.ones((2, 2), dtype=jnp.single) * 2.0,
     )
     image = renderer.Renderer.get_camera_image(
         objects=[renderer.ModelObject(model=cube)],
         camera=renderer.CameraParameters(
             viewWidth=width,
             viewHeight=height,
-            position=jnp.array([2.0, 4.0, 1.0], dtype=jnp.single),  # pyright: ignore[reportUnknownMemberType]
+            position=jax_typing.array([2.0, 4.0, 1.0], dtype=jnp.single),
         ),
         light=renderer.LightParameters(),
         width=width,
@@ -90,17 +91,19 @@ def _load_head_model() -> renderer.Model:
     diffuse = np.asarray(Image.open(_HEAD_DIFFUSE).convert("RGB"), dtype=np.float32)
     specular = np.asarray(Image.open(_HEAD_SPECULAR).convert("RGB"), dtype=np.float32)
     # Match the original notebook's map transpose and horizontal UV flip.
-    diffuse_map = jnp.asarray(  # pyright: ignore[reportUnknownMemberType]
+    diffuse_map = jax_typing.asarray(
         diffuse.swapaxes(0, 1)[:, ::-1, :] / 255.0, dtype=jnp.single
     )
-    specular_map = jnp.asarray(specular.swapaxes(0, 1)[:, ::-1, 0], dtype=jnp.single)  # pyright: ignore[reportUnknownMemberType]
+    specular_map = jax_typing.asarray(
+        specular.swapaxes(0, 1)[:, ::-1, 0], dtype=jnp.single
+    )
     return renderer.Model(
-        verts=jnp.asarray(verts),  # pyright: ignore[reportUnknownMemberType]
-        norms=jnp.asarray(norms),  # pyright: ignore[reportUnknownMemberType]
-        uvs=jnp.asarray(uvs),  # pyright: ignore[reportUnknownMemberType]
-        faces=jnp.asarray(faces),  # pyright: ignore[reportUnknownMemberType]
-        faces_norm=jnp.asarray(faces_norm),  # pyright: ignore[reportUnknownMemberType]
-        faces_uv=jnp.asarray(faces_uv),  # pyright: ignore[reportUnknownMemberType]
+        verts=jax_typing.asarray(verts),
+        norms=jax_typing.asarray(norms),
+        uvs=jax_typing.asarray(uvs),
+        faces=jax_typing.asarray(faces),
+        faces_norm=jax_typing.asarray(faces_norm),
+        faces_uv=jax_typing.asarray(faces_uv),
         diffuse_map=diffuse_map,
         specular_map=specular_map,
     )
@@ -118,23 +121,23 @@ def render_head_frames(
         raise ValueError("frame_count must be positive")
 
     model = _load_head_model()
-    centre = jnp.array((0.0, 0.0, 0.0), dtype=jnp.single)  # pyright: ignore[reportUnknownMemberType]
+    centre = jax_typing.array((0.0, 0.0, 0.0), dtype=jnp.single)
     camera = renderer.CameraParameters(
         viewWidth=width,
         viewHeight=height,
-        position=jnp.array((0.0, 0.0, 3.0), dtype=jnp.single),  # pyright: ignore[reportUnknownMemberType]
+        position=jax_typing.array((0.0, 0.0, 3.0), dtype=jnp.single),
         target=centre,
-        up=jnp.array((0.0, 1.0, 0.0), dtype=jnp.single),  # pyright: ignore[reportUnknownMemberType]
+        up=jax_typing.array((0.0, 1.0, 0.0), dtype=jnp.single),
     )
     light = renderer.LightParameters(
-        direction=jnp.array((0.57735, -0.57735, 0.57735), dtype=jnp.single),  # pyright: ignore[reportUnknownMemberType]
-        ambient=jnp.full(3, 0.1, dtype=jnp.single),  # pyright: ignore[reportUnknownMemberType]
-        diffuse=jnp.full(3, 0.85, dtype=jnp.single),  # pyright: ignore[reportUnknownMemberType]
-        specular=jnp.full(3, 0.05, dtype=jnp.single),  # pyright: ignore[reportUnknownMemberType]
+        direction=jax_typing.array((0.57735, -0.57735, 0.57735), dtype=jnp.single),
+        ambient=jax_typing.full(3, 0.1, dtype=jnp.single),
+        diffuse=jax_typing.full(3, 0.85, dtype=jnp.single),
+        specular=jax_typing.full(3, 0.05, dtype=jnp.single),
     )
     shadow = renderer.ShadowParameters(centre=centre)
     base_instance = renderer.ModelObject(model=model)
-    axis = jnp.array((0.0, 1.0, 0.0), dtype=jnp.single)  # pyright: ignore[reportUnknownMemberType]
+    axis = jax_typing.array((0.0, 1.0, 0.0), dtype=jnp.single)
 
     for frame_index in range(frame_count):
         degrees = frame_index * 360.0 / frame_count
@@ -148,7 +151,7 @@ def render_head_frames(
             width=width,
             height=height,
             shadow_param=shadow,
-            colour_default=jnp.zeros(3, dtype=jnp.single),  # pyright: ignore[reportUnknownMemberType]
+            colour_default=jax_typing.zeros(3, dtype=jnp.single),
         )
         image = jnp.clip(image, 0.0, 1.0)
         yield np.asarray(jax.device_get(renderer.transpose_for_display(image)))
