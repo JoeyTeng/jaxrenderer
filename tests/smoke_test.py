@@ -11,8 +11,7 @@ from jaxtyping import (
 )
 
 from renderer import jit
-import renderer._jax_typing as jax_typing
-from renderer._meta_utils import is_array_type
+from renderer._meta_utils import is_array_type, typed_array, typed_modf, typed_zeros
 from renderer.geometry import Camera, normalise, to_homogeneous
 from renderer.pipeline import render
 from renderer.shader import ID, MixerOutput, PerFragment, PerVertex, Shader
@@ -31,14 +30,14 @@ from renderer.utils import transpose_for_display
 
 
 def test_render_batched_triangles():
-    eye = jax_typing.array((0.0, 0, 2))
-    center = jax_typing.array((0.0, 0, 0))
-    up = jax_typing.array((0.0, 1, 0))
+    eye = typed_array((0.0, 0, 2))
+    center = typed_array((0.0, 0, 0))
+    up = typed_array((0.0, 1, 0))
 
     width: int = 1920
     height: int = 1080
-    lowerbound = jax_typing.zeros(2, dtype=int)
-    dimension = jax_typing.array((width, height))
+    lowerbound = typed_zeros(2, dtype=int)
+    dimension = typed_array((width, height))
     depth: int = 255
     default_z: float = 1.0
     default_ch: float = 0.0
@@ -70,7 +69,7 @@ def test_render_batched_triangles():
             ),
         ),
     )
-    face_indices = jax_typing.array(
+    face_indices = typed_array(
         (
             (0, 1, 2),
             (1, 3, 2),
@@ -79,7 +78,7 @@ def test_render_batched_triangles():
             (2, 5, 1),
         )
     )
-    position = jax_typing.array(
+    position = typed_array(
         (
             (0.0, 0.0, 0.0),
             (2.0, 0.0, 0.0),
@@ -91,7 +90,7 @@ def test_render_batched_triangles():
     )
     extra = GouraudExtraInput(
         position=position,
-        colour=jax_typing.array(
+        colour=typed_array(
             (
                 (1.0, 0.0, 0.0),
                 (0.0, 1.0, 0.0),
@@ -133,7 +132,7 @@ def test_render_batched_triangles():
     )
 
     # test canvas
-    default_pixel = jax_typing.array([default_ch] * 3)
+    default_pixel = typed_array([default_ch] * 3)
     empty_pixels = (canvas == default_pixel).all(axis=2).sum()
     assert empty_pixels > (width * height // 2), "The canvas should be mostly empty"
     assert empty_pixels < (width * height), "The canvas should not be all empty"
@@ -149,8 +148,8 @@ class ExtraInput(NamedTuple):
 
 
 class ExtraFragmentData(NamedTuple):
-    colour: Colour = jax_typing.array([0.0, 0.0, 0.0])
-    uv: Vec2f = jax_typing.zeros(2)
+    colour: Colour = typed_array([0.0, 0.0, 0.0])
+    uv: Vec2f = typed_zeros(2)
 
 
 class ExtraMixerOutput(NamedTuple):
@@ -202,7 +201,7 @@ class _Shader(Shader[ExtraInput, ExtraFragmentData, ExtraMixerOutput]):
             ExtraInput, ExtraFragmentData, ExtraMixerOutput
         ].fragment(gl_FragCoord, gl_FrontFacing, gl_PointCoord, varying, extra)
         texture_colour: Colour = varying.colour
-        a = jax_typing.modf(varying.uv)[0] < 0.5
+        a = typed_modf(varying.uv)[0] < 0.5
         texture_colour = jnp.where(
             a[0] != a[1],
             texture_colour,
@@ -239,14 +238,14 @@ class _Shader(Shader[ExtraInput, ExtraFragmentData, ExtraMixerOutput]):
 
 
 def test_perspective_interpolation():
-    eye = jax_typing.array((0.0, 0, 1))
-    center = jax_typing.array((0.0, 0, 0))
-    up = jax_typing.array((0.0, 1, 0))
+    eye = typed_array((0.0, 0, 1))
+    center = typed_array((0.0, 0, 0))
+    up = typed_array((0.0, 1, 0))
 
     width: int = 1920
     height: int = 1080
-    lowerbound = jax_typing.zeros(2, dtype=int)
-    dimension = jax_typing.array((width, height))
+    lowerbound = typed_zeros(2, dtype=int)
+    dimension = typed_array((width, height))
     depth: int = 255
     default_z: float = 1.0
     default_ch: float = 0.0
@@ -278,8 +277,8 @@ def test_perspective_interpolation():
             ),
         ),
     )
-    face_indices = jax_typing.array(((0, 1, 2),))
-    position = jax_typing.array(
+    face_indices = typed_array(((0, 1, 2),))
+    position = typed_array(
         (
             (-1.0, -1.0, -2.0),
             (1.0, -1.0, -1.0),
@@ -288,14 +287,14 @@ def test_perspective_interpolation():
     )
     extra = ExtraInput(
         position=position,
-        colour=jax_typing.array(
+        colour=typed_array(
             (
                 (1.0, 0.0, 0.0),
                 (0.0, 1.0, 0.0),
                 (0.0, 0.0, 1.0),
             )
         ),
-        uv=jax_typing.array(
+        uv=typed_array(
             (
                 (0.0, 0.0),
                 (10.0, 0.0),
@@ -329,7 +328,7 @@ def test_perspective_interpolation():
     )
 
     # test canvas
-    default_pixel = jax_typing.array([default_ch] * 3)
+    default_pixel = typed_array([default_ch] * 3)
     empty_pixels = (canvas == default_pixel).all(axis=2).sum()
     assert empty_pixels > (width * height // 2), "The canvas should be mostly empty"
     assert empty_pixels < (width * height), "The canvas should not be all empty"
