@@ -19,13 +19,14 @@ from renderer import (
     build_texture_from_PyTinyrenderer,
     transpose_for_display,
 )
+from renderer._meta_utils import typed_array, typed_ones
 
 # PROCESS: Set up models and objects
 
 scene: Scene = Scene()
 texture: Texture = (
     build_texture_from_PyTinyrenderer(
-        jnp.array(  # pyright: ignore[reportUnknownMemberType]
+        typed_array(
             (
                 255,
                 255,
@@ -68,7 +69,7 @@ scene, capz_model_id = scene.add_capsule(
 
 scene, cube_model = scene.add_cube(
     half_extents=(1.5, 1.5, 0.03),
-    diffuse_map=jnp.ones((1, 1, 3)),  # pyright: ignore[reportUnknownMemberType]
+    diffuse_map=typed_ones((1, 1, 3)),
     texture_scaling=(16.0, 16.0),
 )
 

@@ -5,6 +5,7 @@ import jax.numpy as jnp
 import numpy as np
 
 from renderer import Buffers, Camera, render
+from renderer._meta_utils import typed_asarray, typed_full
 from renderer.geometry import Viewport
 from renderer.shader import ID, PerVertex, Shader
 from renderer.types import Canvas, ZBuffer
@@ -41,15 +42,15 @@ class _MultiTargetShader(Shader[_Inputs, _Varyings, _Varyings]):
 
 
 def _array(values: object) -> Array:
-    return jnp.asarray(values, dtype=jnp.float32)  # pyright: ignore[reportUnknownMemberType]
+    return typed_asarray(values, dtype=jnp.float32)
 
 
 def test_render_updates_multiple_targets_and_preserves_background() -> None:
     width = 10
     height = 10
     viewport: Viewport = Camera.viewport_matrix(
-        lowerbound=jnp.asarray((0, 0), dtype=int),  # pyright: ignore[reportUnknownMemberType]
-        dimension=jnp.asarray((width, height), dtype=int),  # pyright: ignore[reportUnknownMemberType]
+        lowerbound=typed_asarray((0, 0), dtype=int),
+        dimension=typed_asarray((width, height), dtype=int),
         depth=1,
     )
     camera = Camera.create(
@@ -62,12 +63,10 @@ def test_render_updates_multiple_targets_and_preserves_background() -> None:
     background_scalar = 7.0
     background_depth = 1.0
     buffers: Buffers[tuple[Canvas, ZBuffer]] = Buffers(
-        zbuffer=jnp.full((width, height), background_depth),  # pyright: ignore[reportUnknownMemberType]
+        zbuffer=typed_full((width, height), background_depth),
         targets=(
-            jnp.full(  # pyright: ignore[reportUnknownMemberType]
-                (width, height, 3), _array(background_colour)
-            ),
-            jnp.full((width, height), background_scalar),  # pyright: ignore[reportUnknownMemberType]
+            typed_full((width, height, 3), _array(background_colour)),
+            typed_full((width, height), background_scalar),
         ),
     )
     extra = _Inputs(
@@ -81,7 +80,7 @@ def test_render_updates_multiple_targets_and_preserves_background() -> None:
         colours=_array(((0.8, 0.4, 0.2),) * 3),
         scalar_values=_array((0.6,) * 3),
     )
-    face_indices = jnp.asarray(((0, 1, 2),), dtype=int)  # pyright: ignore[reportUnknownMemberType]
+    face_indices = typed_asarray(((0, 1, 2),), dtype=int)
 
     result = render(
         camera=camera,

@@ -15,19 +15,20 @@ from renderer import (
     build_texture_from_PyTinyrenderer,
     transpose_for_display,
 )
+from renderer._meta_utils import typed_array, typed_full, typed_zeros
 
 scene: Scene = Scene()
 
 width = 640
 height = 480
-eye: Vec3f = jnp.array([2.0, 4.0, 1.0])  # pyright: ignore[reportUnknownMemberType]
-target: Vec3f = jnp.array([0.0, 0.0, 0.0])  # pyright: ignore[reportUnknownMemberType]
+eye: Vec3f = typed_array([2.0, 4.0, 1.0])
+target: Vec3f = typed_array([0.0, 0.0, 0.0])
 
 light: LightParameters = LightParameters(
-    direction=jnp.array([2.0, 4.0, 1.0]),  # pyright: ignore[reportUnknownMemberType]
-    ambient=jnp.zeros(3),  # pyright: ignore[reportUnknownMemberType]
-    diffuse=jnp.full(3, 1.0),  # pyright: ignore[reportUnknownMemberType]
-    specular=jnp.full(3, 0.0),  # pyright: ignore[reportUnknownMemberType]
+    direction=typed_array([2.0, 4.0, 1.0]),
+    ambient=typed_zeros(3),
+    diffuse=typed_full(3, 1.0),
+    specular=typed_full(3, 0.0),
 )
 camera: CameraParameters = CameraParameters(
     viewWidth=width,
@@ -38,7 +39,7 @@ camera: CameraParameters = CameraParameters(
 
 texture: Texture = (
     build_texture_from_PyTinyrenderer(
-        jnp.array(  # pyright: ignore[reportUnknownMemberType]
+        typed_array(
             (
                 255,
                 255,

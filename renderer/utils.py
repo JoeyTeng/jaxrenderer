@@ -13,7 +13,7 @@ from jaxtyping import (
     jaxtyped,  # pyright: ignore[reportUnknownVariableType]
 )
 
-from ._meta_utils import add_tracing_name, is_array_type
+from ._meta_utils import add_tracing_name, is_array_type, typed_asarray
 from ._meta_utils import typed_jit as jit
 from .types import Canvas, IntV, Texture, ZBuffer
 
@@ -122,7 +122,7 @@ def build_texture_from_PyTinyrenderer(
     Returns: A texture with shape `(width, height, channels)`.
     """
     return jnp.reshape(
-        jnp.asarray(texture),  # pyright: ignore[reportUnknownMemberType]
+        typed_asarray(texture),
         (width, height, -1),
         order="C",
     ).swapaxes(0, 1)[:, ::-1, :]

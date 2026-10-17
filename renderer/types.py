@@ -12,6 +12,8 @@ from jaxtyping import (
     jaxtyped,  # pyright: ignore[reportUnknownVariableType]
 )
 
+from ._meta_utils import typed_array, typed_ones
+
 JaxFloating: TypeAlias = jnp.floating[Any]
 JaxInteger: TypeAlias = jnp.integer[Any]
 
@@ -148,13 +150,13 @@ class DtypeInfo(NamedTuple, Generic[_DtypeT]):
 
 
 class LightSource(NamedTuple):
-    direction: Vec3f = jax.numpy.array((0.0, 0.0, -1.0))  # pyright: ignore
+    direction: Vec3f = typed_array((0.0, 0.0, -1.0))
     """in world space, as it goes from that position to origin (camera).
 
     For example, if direction = camera's eye, full specular will be applied to
     triangles with normal towards camera.
     """
-    colour: Colour = jax.numpy.ones(3)  # pyright: ignore[reportUnknownMemberType]
+    colour: Colour = typed_ones(3)
 
 
 _TargetsT = TypeVar("_TargetsT", bound=tuple[Any, ...])

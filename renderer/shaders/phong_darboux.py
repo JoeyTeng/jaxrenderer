@@ -11,7 +11,13 @@ from jaxtyping import (
     jaxtyped,  # pyright: ignore[reportUnknownVariableType]
 )
 
-from .._meta_utils import add_tracing_name, is_array_type
+from .._meta_utils import (
+    add_tracing_name,
+    is_array_type,
+    typed_array,
+    typed_asarray,
+    typed_zeros,
+)
 from .._meta_utils import typed_jit as jit
 from ..geometry import (
     Camera,
@@ -81,18 +87,12 @@ class PhongTextureDarbouxExtraFragmentData(NamedTuple):
       - colour: colour when passing from FS to mixer.
     """
 
-    normal: Vec3f = jnp.array(  # pyright: ignore[reportUnknownMemberType]
-        [0.0, 0.0, 0.0]
-    )
-    uv: Vec2f = jnp.zeros(2)  # pyright: ignore[reportUnknownMemberType]
-    triangle: Triangle3f = jnp.zeros((3, 3))  # pyright: ignore[reportUnknownMemberType]
-    triangle_uv: Triangle2f = jnp.zeros(  # pyright: ignore[reportUnknownMemberType]
-        (3, 2)
-    )
+    normal: Vec3f = typed_array([0.0, 0.0, 0.0])
+    uv: Vec2f = typed_zeros(2)
+    triangle: Triangle3f = typed_zeros((3, 3))
+    triangle_uv: Triangle2f = typed_zeros((3, 2))
     """triangle in NDC, not interpolated."""
-    colour: Colour = jnp.array(  # pyright: ignore[reportUnknownMemberType]
-        [0.0, 0.0, 0.0]
-    )
+    colour: Colour = typed_array([0.0, 0.0, 0.0])
 
 
 class PhongTextureDarbouxExtraMixerOutput(NamedTuple):
@@ -235,7 +235,7 @@ class PhongTextureDarbouxShader(
 
         # repeat texture
         uv = lax.floor(varying.uv).astype(int)
-        uv = uv % jnp.asarray(extra.texture.shape[:2])  # pyright: ignore[reportUnknownMemberType]
+        uv = uv % typed_asarray(extra.texture.shape[:2])
 
         normal: Vec3f = normalise(varying.normal)
         A: Float[Array, "3 3"] = jnp.vstack(
@@ -247,12 +247,8 @@ class PhongTextureDarbouxShader(
         )
         AI = cast(Float[Array, "3 3"], jnp.linalg.inv(A))
         _uv: Triangle2f = varying.triangle_uv
-        i: Vec3f = AI @ jnp.array(  # pyright: ignore[reportUnknownMemberType]
-            [_uv[1, 0] - _uv[0, 0], _uv[2, 0] - _uv[0, 0], 0]
-        )
-        j: Vec3f = AI @ jnp.array(  # pyright: ignore[reportUnknownMemberType]
-            [_uv[1, 1] - _uv[0, 1], _uv[2, 1] - _uv[0, 1], 0]
-        )
+        i: Vec3f = AI @ typed_array([_uv[1, 0] - _uv[0, 0], _uv[2, 0] - _uv[0, 0], 0])
+        j: Vec3f = AI @ typed_array([_uv[1, 1] - _uv[0, 1], _uv[2, 1] - _uv[0, 1], 0])
 
         B = lax.concatenate(
             [
@@ -287,7 +283,7 @@ class PhongTextureDarbouxShader(
                 colour=lax.cond(  # pyright: ignore[reportUnknownMemberType]
                     jnp.all(light_colour >= 0),
                     lambda: texture_colour * light_colour,
-                    lambda: jnp.zeros(3),  # pyright: ignore[reportUnknownMemberType]
+                    lambda: typed_zeros(3),
                 )
             ),
         )

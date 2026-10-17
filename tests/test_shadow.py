@@ -6,12 +6,13 @@ import jax.numpy as jnp
 import numpy as np
 
 from renderer import Camera
+from renderer._meta_utils import typed_asarray
 from renderer.shadow import Shadow
 from renderer.types import FloatV, Vec2f, ZBuffer
 
 
 def test_shadow_get_rounding_fill_and_negative_index_wrapping() -> None:
-    shadow_map: ZBuffer = jnp.asarray(((0.0, 0.1, 0.2), (0.3, 0.4, 0.5)))  # pyright: ignore[reportUnknownMemberType]
+    shadow_map: ZBuffer = typed_asarray(((0.0, 0.1, 0.2), (0.3, 0.4, 0.5)))
     camera = Camera.create(
         view=jnp.eye(4),  # pyright: ignore[reportUnknownMemberType]
         projection=jnp.eye(4),  # pyright: ignore[reportUnknownMemberType]
@@ -19,13 +20,13 @@ def test_shadow_get_rounding_fill_and_negative_index_wrapping() -> None:
     )
     shadow = Shadow(
         shadow_map=shadow_map,
-        strength=jnp.asarray((0.5, 0.5, 0.5)),  # pyright: ignore[reportUnknownMemberType]
+        strength=typed_asarray((0.5, 0.5, 0.5)),
         camera=camera,
     )
     positions = (
-        jnp.asarray((0.6, 1.6)),  # pyright: ignore[reportUnknownMemberType]
-        jnp.asarray((2.0, 1.0)),  # pyright: ignore[reportUnknownMemberType]
-        jnp.asarray((-1.0, 0.0)),  # pyright: ignore[reportUnknownMemberType]
+        typed_asarray((0.6, 1.6)),
+        typed_asarray((2.0, 1.0)),
+        typed_asarray((-1.0, 0.0)),
     )
 
     eager_values = tuple(shadow.get(position) for position in positions)

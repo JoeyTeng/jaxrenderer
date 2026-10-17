@@ -3,7 +3,6 @@
 from typing import cast
 
 import jax
-import jax.numpy as jnp
 from jaxtyping import Array, Float
 import matplotlib.animation as animation
 import matplotlib.figure as figure
@@ -25,12 +24,13 @@ from renderer import (
     rotation_matrix,
     transpose_for_display,
 )
+from renderer._meta_utils import typed_array
 
 # PROCESS: Set up models and objects
 
 scene: Scene = Scene()
 texture: Texture = (
-    jnp.array(  # pyright: ignore[reportUnknownMemberType]
+    typed_array(
         (
             (255, 255, 255),  # White
             (255, 0, 0),  # Red

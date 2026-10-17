@@ -13,7 +13,13 @@ from jaxtyping import (
     jaxtyped,  # pyright: ignore[reportUnknownVariableType]
 )
 
-from ._meta_utils import add_tracing_name, is_array_type
+from ._meta_utils import (
+    add_tracing_name,
+    is_array_type,
+    typed_array,
+    typed_asarray,
+    typed_zeros,
+)
 from ._meta_utils import typed_jit as jit
 from .types import FloatV, JaxFloating, NumV, Triangle2Df, Vec2f, Vec2i, Vec3f, Vec4f
 
@@ -95,7 +101,7 @@ class Interpolation(enum.Enum):
         # branches are ok because `self` is static: decided at compile time
         if self == Interpolation.FLAT:
             with jax.ensure_compile_time_eval():
-                coef = jnp.array([1, 0, 0], dtype=dtype)  # pyright: ignore
+                coef = typed_array([1, 0, 0], dtype=dtype)
         elif self == Interpolation.NOPERSPECTIVE:
             coef = barycentric_screen
         elif self == Interpolation.SMOOTH:
@@ -150,7 +156,7 @@ def to_homogeneous(
     """Transform the coordinates to homogeneous coordinates by append a batch
     of `value`s (default 1.) in the last axis."""
     if not is_array_type(cast(object, value), Float[Array, "*batch"]):
-        value = jnp.array(value)  # pyright: ignore[reportUnknownMemberType]
+        value = typed_array(value)
 
     target_dtype = jax.dtypes.result_type(coordinates)
     paddings: Float[Array, "*batch 1"] = jnp.broadcast_to(
@@ -372,12 +378,9 @@ class Camera(NamedTuple):
         normalised_vectors = normalise(vectors)
         assert is_array_type(normalised_vectors, Num[Array, "*N 3"])
 
-        points_homo = cast(
-            Num[Array, "*N 4"],
-            to_homogeneous(
-                normalised_vectors,
-                jnp.zeros((), dtype=vectors.dtype),  # pyright: ignore
-            ),
+        points_homo = to_homogeneous(
+            normalised_vectors,
+            typed_zeros((), dtype=vectors.dtype),
         )
         assert is_array_type(points_homo, Num[Array, "*N 4"])
 
@@ -471,9 +474,9 @@ class Camera(NamedTuple):
         shuffle = lax.cond(  # pyright: ignore
             self.projection[3, 3] == 0,
             # perspective projection
-            lambda: jnp.array([0, 1, 3, 2]),  # pyright: ignore[reportUnknownMemberType]
+            lambda: typed_array([0, 1, 3, 2]),
             # orthographic projection
-            lambda: jnp.array([0, 1, 2, 3]),  # pyright: ignore[reportUnknownMemberType]
+            lambda: typed_array([0, 1, 2, 3]),
         )
         eye: Float[Array, "*N 4"] = lax.linalg.triangular_solve(
             self.projection[..., shuffle],
@@ -664,10 +667,10 @@ class Camera(NamedTuple):
         Reference:
           - [gluPerspective](https://registry.khronos.org/OpenGL-Refpages/gl2.1/xhtml/gluPerspective.xml)
         """
-        deg: FloatV = jnp.asarray(fovy, dtype=jnp.single)  # pyright: ignore
+        deg: FloatV = typed_asarray(fovy, dtype=jnp.single)
         f: FloatV = 1.0 / lax.tan(jnp.radians(deg) / 2.0)
         projection: Projection = (
-            jnp.zeros((4, 4), dtype=jnp.single)  # pyright: ignore
+            typed_zeros((4, 4), dtype=jnp.single)
             .at[0, 0]
             .set(f / aspect)
             .at[1, 1]
@@ -705,7 +708,7 @@ class Camera(NamedTuple):
         rows, instead).
         """
         with jax.ensure_compile_time_eval():
-            shuffle: Integer[Array, "4"] = jnp.array((0, 1, 3, 2))  # pyright: ignore
+            shuffle: Integer[Array, "4"] = typed_array((0, 1, 3, 2))
             assert is_array_type(shuffle, Integer[Array, "4"])
 
         inv = cls.inv_scale_translation_matrix(mat[:, shuffle])[shuffle, :]
@@ -744,10 +747,10 @@ class Camera(NamedTuple):
         Reference:
           - [glOrtho](https://registry.khronos.org/OpenGL-Refpages/gl2.1/xhtml/glOrtho.xml)
         """
-        l_op: Float[Array, "3"] = jnp.array([right, top, z_far])  # pyright: ignore
-        r_op: Float[Array, "3"] = jnp.array([left, bottom, z_near])  # pyright: ignore
+        l_op: Float[Array, "3"] = typed_array([right, top, z_far])
+        r_op: Float[Array, "3"] = typed_array([left, bottom, z_near])
         projection: Projection = (
-            jnp.zeros((4, 4), dtype=jnp.single)  # pyright: ignore
+            typed_zeros((4, 4), dtype=jnp.single)
             .at[0, 0]
             .set(2 / (right - left))
             .at[1, 1]
@@ -914,13 +917,13 @@ def quaternion(
 
     The resultant quaternion is in order of (w, x, y, z).
     """
-    axis = normalise(jnp.asarray(rotation_axis))  # pyright: ignore
-    angle = jnp.radians(jnp.asarray(rotation_angle))  # pyright: ignore
+    axis = normalise(typed_asarray(rotation_axis))
+    angle = jnp.radians(typed_asarray(rotation_angle))
     assert is_array_type(axis, Vec3f), f"{rotation_axis}"
     assert is_array_type(angle, FloatV), f"{rotation_angle}"
 
     quaternion: Vec4f = (
-        jnp.zeros(4)  # pyright: ignore[reportUnknownMemberType]
+        typed_zeros(4)
         .at[0]
         .set(jnp.cos(angle / 2))
         .at[1:]
@@ -945,12 +948,12 @@ def quaternion_mul(quatA: Vec4f, quatB: Vec4f) -> Vec4f:
     assert is_array_type(quatB, Vec4f)
 
     with jax.ensure_compile_time_eval():
-        idx103 = jnp.array((1, 0, 3))  # pyright: ignore[reportUnknownMemberType]
-        idx230 = jnp.array((2, 3, 0))  # pyright: ignore[reportUnknownMemberType]
-        idx013 = jnp.array((0, 1, 3))  # pyright: ignore[reportUnknownMemberType]
-        idx320 = jnp.array((3, 2, 0))  # pyright: ignore[reportUnknownMemberType]
+        idx103 = typed_array((1, 0, 3))
+        idx230 = typed_array((2, 3, 0))
+        idx013 = typed_array((0, 1, 3))
+        idx320 = typed_array((3, 2, 0))
 
-    return jnp.array(  # pyright: ignore[reportUnknownMemberType]
+    return typed_array(
         (
             quatA[0] * quatB[0] - quatA[1:] @ quatB[1:],
             quatA[:3] @ quatB[idx103] - quatA[3] * quatB[2],
@@ -975,8 +978,8 @@ def rotation_matrix(
     References:
       - [glRotated](https://registry.khronos.org/OpenGL-Refpages/gl2.1/xhtml/glRotate.xml)
     """
-    axis = normalise(jnp.asarray(rotation_axis))  # pyright: ignore
-    angle = jnp.radians(jnp.asarray(rotation_angle))  # pyright: ignore
+    axis = normalise(typed_asarray(rotation_axis))
+    angle = jnp.radians(typed_asarray(rotation_angle))
     assert is_array_type(axis, Vec3f), f"{rotation_axis}"
     assert is_array_type(angle, FloatV), f"{rotation_angle}"
 
@@ -1016,7 +1019,7 @@ def transform_matrix_from_rotation(rotation: Vec4f) -> Float[Array, "3 3"]:
     )
     zz = rotation[3] * rs[2]
 
-    mat: Float[Array, "3 3"] = jnp.array(  # pyright: ignore[reportUnknownMemberType]
+    mat: Float[Array, "3 3"] = typed_array(
         (
             (1.0 - (yy + zz), xy - wz, xz + wy),
             (xy + wz, 1.0 - (xx + zz), yz - wx),
@@ -1049,8 +1052,8 @@ def barycentric(pts: Triangle2Df, p: Vec2f) -> Vec3f:
         Vec3f,
         lax.cond(  # pyright: ignore[reportUnknownMemberType]
             jnp.abs(v[-1]) < 1e-10,
-            lambda: jnp.array((-1.0, 1.0, 1.0)),  # pyright: ignore
-            lambda: jnp.array(  # pyright: ignore[reportUnknownMemberType]
+            lambda: typed_array((-1.0, 1.0, 1.0)),
+            lambda: typed_array(
                 (
                     1 - (v[0] + v[1]) / v[2],
                     v[1] / v[2],
