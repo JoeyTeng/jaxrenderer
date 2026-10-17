@@ -8,7 +8,7 @@ import jax.numpy as jnp
 from jaxtyping import jaxtyped  # pyright: ignore[reportUnknownVariableType]
 import numpy as np
 
-from renderer._meta_utils import is_array_type
+from renderer._meta_utils import is_array_type, typed_array
 from renderer.types import FaceIndices, Normals, Texture, UVCoordinates, Vertices
 
 jax.config.update("jax_array", True)  # pyright: ignore[reportUnknownMemberType]
@@ -94,12 +94,12 @@ def make_model(fileContent: list[str]) -> Model:
             faces_uv.append(face_uv)
 
     return Model(
-        verts=jnp.array(verts),  # pyright: ignore[reportUnknownMemberType]
-        norms=jnp.array(norms),  # pyright: ignore[reportUnknownMemberType]
-        uv=jnp.array(uv),  # pyright: ignore[reportUnknownMemberType]
-        faces=jnp.array(faces),  # pyright: ignore[reportUnknownMemberType]
-        faces_norm=jnp.array(faces_norm),  # pyright: ignore[reportUnknownMemberType]
-        faces_uv=jnp.array(faces_uv),  # pyright: ignore[reportUnknownMemberType]
+        verts=typed_array(verts),
+        norms=typed_array(norms),
+        uv=typed_array(uv),
+        faces=typed_array(faces),
+        faces_norm=typed_array(faces_norm),
+        faces_uv=typed_array(faces_uv),
     )
 
 
@@ -112,7 +112,7 @@ def load_tga(path: str) -> Texture:
         for x in range(width):
             buffer[y, x] = np.array(image.getpixel((x, y)))
 
-    texture: Texture = jnp.array(  # pyright: ignore[reportUnknownMemberType]
+    texture: Texture = typed_array(
         buffer,
         dtype=jnp.single,
     )

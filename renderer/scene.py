@@ -1,14 +1,13 @@
 from typing import NamedTuple, NewType, Optional, Union
 
 import jax.lax as lax
-import jax.numpy as jnp
 from jaxtyping import (
     Array,
     Float,
     jaxtyped,  # pyright: ignore[reportUnknownVariableType]
 )
 
-from ._meta_utils import is_array_type
+from ._meta_utils import is_array_type, typed_asarray
 from .model import Model, ModelObject
 from .shapes.capsule import UpAxis, create_capsule
 from .shapes.cube import create_cube
@@ -68,16 +67,12 @@ class Scene(NamedTuple):
         # reference: https://github.com/erwincoumans/tinyrenderer/blob/89e8adafb35ecf5134e7b17b71b0f825939dc6d9/model.cpp#L215
         specular_map: SpecularMap = lax.full(diffuse_map.shape[:2], 2.0)
 
-        _half_extents = jnp.asarray(  # pyright: ignore[reportUnknownMemberType]
-            half_extents
-        )
+        _half_extents = typed_asarray(half_extents)
         assert is_array_type(_half_extents, Float[Array, "3"]), (
             f"Expected 2 floats in half_extends, got {half_extents}"
         )
 
-        _texture_scaling = jnp.asarray(  # pyright: ignore[reportUnknownMemberType]
-            texture_scaling
-        )
+        _texture_scaling = typed_asarray(texture_scaling)
         if _texture_scaling.size == 1:
             _texture_scaling = lax.full((2,), _texture_scaling)
         assert is_array_type(_texture_scaling, Float[Array, "2"]), (
@@ -115,10 +110,8 @@ class Scene(NamedTuple):
             2.0,
         )
         model: Model = create_capsule(
-            radius=jnp.asarray(radius),  # pyright: ignore[reportUnknownMemberType]
-            half_height=jnp.asarray(  # pyright: ignore[reportUnknownMemberType]
-                half_height
-            ),
+            radius=typed_asarray(radius),
+            half_height=typed_asarray(half_height),
             up_axis=up_axis,
             diffuse_map=diffuse_map,
             specular_map=specular_map,
@@ -213,7 +206,7 @@ class Scene(NamedTuple):
           - object_id: the unique identifier of the object.
           - position: the new position of the object.
         """
-        position = jnp.asarray(  # pyright: ignore[reportUnknownMemberType]
+        position = typed_asarray(
             position,
             dtype=float,
         )
@@ -241,13 +234,9 @@ class Scene(NamedTuple):
           - rotation_matrix: the new rotation matrix of the object, optional
         """
         if orientation is not None:
-            orientation = jnp.asarray(  # pyright: ignore[reportUnknownMemberType]
-                orientation
-            )
+            orientation = typed_asarray(orientation)
         if rotation_matrix is not None:
-            rotation_matrix = jnp.asarray(  # pyright: ignore[reportUnknownMemberType]
-                rotation_matrix
-            )
+            rotation_matrix = typed_asarray(rotation_matrix)
 
         new_obj = self.objects[object_id].replace_with_orientation(
             orientation=orientation,
@@ -268,7 +257,7 @@ class Scene(NamedTuple):
           - object_id: the unique identifier of the object.
           - local_scaling: the new local scaling of the object.
         """
-        scaling = jnp.asarray(  # pyright: ignore[reportUnknownMemberType]
+        scaling = typed_asarray(
             local_scaling,
             dtype=float,
         )
@@ -291,7 +280,7 @@ class Scene(NamedTuple):
           - double_sided: whether the object is double-sided.
         """
         new_obj = self.objects[object_id].replace_with_double_sided(
-            jnp.asarray(double_sided)  # pyright: ignore[reportUnknownMemberType]
+            typed_asarray(double_sided)
         )
 
         return self._replace_obj(object_id, new_obj)

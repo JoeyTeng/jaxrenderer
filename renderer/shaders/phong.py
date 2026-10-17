@@ -10,7 +10,13 @@ from jaxtyping import (
     jaxtyped,  # pyright: ignore[reportUnknownVariableType]
 )
 
-from .._meta_utils import add_tracing_name, is_array_type
+from .._meta_utils import (
+    add_tracing_name,
+    is_array_type,
+    typed_array,
+    typed_asarray,
+    typed_zeros,
+)
 from .._meta_utils import typed_jit as jit
 from ..geometry import Camera, normalise, to_homogeneous
 from ..shader import ID, MixerOutput, PerFragment, PerVertex, Shader
@@ -45,13 +51,9 @@ class PhongTextureExtraFragmentData(NamedTuple):
       - colour: colour when passing from FS to mixer.
     """
 
-    normal: Vec3f = jnp.array(  # pyright: ignore[reportUnknownMemberType]
-        [0.0, 0.0, 0.0]
-    )
-    uv: Vec2f = jnp.zeros(2)  # pyright: ignore[reportUnknownMemberType]
-    colour: Colour = jnp.array(  # pyright: ignore[reportUnknownMemberType]
-        [0.0, 0.0, 0.0]
-    )
+    normal: Vec3f = typed_array([0.0, 0.0, 0.0])
+    uv: Vec2f = typed_zeros(2)
+    colour: Colour = typed_array([0.0, 0.0, 0.0])
 
 
 class PhongTextureExtraMixerOutput(NamedTuple):
@@ -127,12 +129,7 @@ class PhongTextureShader(
 
         # repeat texture
         uv = lax.floor(varying.uv).astype(int)
-        uv = (
-            uv
-            % jnp.asarray(  # pyright: ignore[reportUnknownMemberType]
-                extra.texture.shape[:2]
-            )
-        )
+        uv = uv % typed_asarray(extra.texture.shape[:2])
         texture_colour: Colour = extra.texture[uv[0], uv[1]]
 
         # light colour * intensity
@@ -155,7 +152,7 @@ class PhongTextureShader(
                     lax.cond(  # pyright: ignore[reportUnknownMemberType]
                         jnp.all(light_colour >= 0),
                         lambda: texture_colour * light_colour,
-                        lambda: jnp.zeros(3),  # pyright: ignore[reportUnknownMemberType]
+                        lambda: typed_zeros(3),
                     ),
                 ),
                 uv=varying.uv,

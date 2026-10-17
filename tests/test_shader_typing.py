@@ -7,6 +7,7 @@ import jax.numpy as jnp
 import numpy as np
 import pytest
 
+from renderer._meta_utils import typed_asarray
 from renderer.shader import Shader
 
 
@@ -20,7 +21,7 @@ class _TestShader(Shader[tuple[Array, ...], _Varying, _Varying]):
 
 
 def _array(values: object, dtype: type[np.generic] = np.float32) -> Array:
-    return jnp.asarray(values, dtype=dtype)  # pyright: ignore[reportUnknownMemberType]
+    return typed_asarray(values, dtype=dtype)
 
 
 def test_primitive_chooser_keeps_nearest_front_facing_candidate_and_structure() -> None:

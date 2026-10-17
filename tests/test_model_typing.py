@@ -7,12 +7,13 @@ import jax.numpy as jnp
 from jaxtyping import TypeCheckError
 import pytest
 
+from renderer._meta_utils import typed_asarray
 from renderer.model import MergedModel, Model
 from renderer.types import FaceIndices, Normals, Texture, UVCoordinates, Vertices
 
 
 def _array(values: object, dtype: Any) -> Array:
-    return jnp.asarray(values, dtype=dtype)  # pyright: ignore[reportUnknownMemberType]
+    return typed_asarray(values, dtype=dtype)
 
 
 def _model_fields(

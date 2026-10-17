@@ -17,7 +17,15 @@ from jaxtyping import (
     jaxtyped,  # pyright: ignore[reportUnknownVariableType]
 )
 
-from ._meta_utils import add_tracing_name, is_array_type
+from ._meta_utils import (
+    add_tracing_name,
+    is_array_type,
+    typed_array,
+    typed_asarray,
+    typed_full,
+    typed_modf,
+    typed_ones,
+)
 from ._meta_utils import typed_jit as jit
 from .geometry import Camera, transform_matrix_from_rotation
 from .types import (
@@ -206,8 +214,8 @@ class MergedModel(NamedTuple):
             count: int,
             value: Union[int, Shaped[Array, "..."]],
         ) -> Array:
-            vertices: Array = jnp.full(  # pyright: ignore[reportUnknownMemberType]
-                (count, *jnp.asarray(value).shape),  # pyright: ignore[reportUnknownMemberType]
+            vertices: Array = typed_full(
+                (count, *typed_asarray(value).shape),
                 value,
             )
             return vertices
@@ -337,7 +345,7 @@ class MergedModel(NamedTuple):
         # since given uv are in [0, 1] (and may be scaled, if is cube),
         # we need to multiply it by (w, h) of the texture map first.
         # This is equivalent to just obtain the fractional part of uv.
-        fractional_uv: FloatV = jnp.modf(uv)[0]  # pyright: ignore[reportUnknownMemberType]
+        fractional_uv: FloatV = typed_modf(uv)[0]
         fractional_uv = jnp.where(
             fractional_uv < 0,
             fractional_uv + 1,
@@ -353,7 +361,7 @@ class ModelObject(NamedTuple):
 
     model: Model
     """Reference to the model, with mesh, attached maps, etc."""
-    local_scaling: Vec3f = jnp.ones(3)  # pyright: ignore[reportUnknownMemberType]
+    local_scaling: Vec3f = typed_ones(3)
     """Local scaling factors of the object, in x, y, z."""
     transform: ModelMatrix = jnp.identity(4)
     """Transform matrix (model matrix) of the model."""
@@ -391,7 +399,7 @@ class ModelObject(NamedTuple):
         """
         if rotation_matrix is None:
             if orientation is None:
-                orientation = jnp.array((0.0, 0.0, 0.0, 1.0))  # pyright: ignore
+                orientation = typed_array((0.0, 0.0, 0.0, 1.0))
 
             assert is_array_type(orientation, Vec4f), f"{orientation}"
             rotation_matrix = transform_matrix_from_rotation(orientation)
@@ -431,10 +439,7 @@ def batch_models(models: Sequence[MergedModel]) -> MergedModel:
     merged_model = MergedModel._make(
         (
             lax.concatenate(
-                [
-                    jnp.asarray(model[i])[None, ...]  # pyright: ignore
-                    for model in models
-                ],
+                [typed_asarray(model[i])[None, ...] for model in models],
                 dimension=0,
             )
             for i in range(len(models[0]))
@@ -467,9 +472,7 @@ def merge_objects(objects: Sequence[ModelObject]) -> MergedModel:
         )
         assert is_array_type(map_indices, Integer[Array, "vertices"])
 
-        map_wh_per_object = jnp.asarray(  # pyright: ignore[reportUnknownMemberType]
-            [m.diffuse_map.shape[:2] for m in models]
-        )
+        map_wh_per_object = typed_asarray([m.diffuse_map.shape[:2] for m in models])
         assert is_array_type(map_wh_per_object, Integer[Array, "objects 2"])
 
         double_sided: Bool[Array, "vertices"]

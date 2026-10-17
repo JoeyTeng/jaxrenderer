@@ -13,6 +13,7 @@ from renderer import (
     build_texture_from_PyTinyrenderer,
     transpose_for_display,
 )
+from renderer._meta_utils import typed_array
 
 scene: Scene = Scene()
 
@@ -51,7 +52,7 @@ texture: Texture = (
     / 255.0
 )
 
-vertices = jnp.array(  # pyright: ignore[reportUnknownMemberType]
+vertices = typed_array(
     [
         [100.000000, -100.000000, 0.000000],
         [100.000000, 100.000000, 0.000000],
@@ -60,7 +61,7 @@ vertices = jnp.array(  # pyright: ignore[reportUnknownMemberType]
     ]
 )
 vertices = vertices * 0.01
-normals = jnp.array(  # pyright: ignore[reportUnknownMemberType]
+normals = typed_array(
     [
         [0.000000, 0.000000, 1.000000],
         [0.000000, 0.000000, 1.000000],
@@ -69,7 +70,7 @@ normals = jnp.array(  # pyright: ignore[reportUnknownMemberType]
     ]
 )
 
-uvs = jnp.array(  # pyright: ignore[reportUnknownMemberType]
+uvs = typed_array(
     [
         [1.000000, 0.000000],
         [1.000000, 1.000000],
@@ -78,7 +79,7 @@ uvs = jnp.array(  # pyright: ignore[reportUnknownMemberType]
     ]
 )
 
-indices = jnp.array([[0, 1, 2], [0, 2, 3]])  # pyright: ignore[reportUnknownMemberType]
+indices = typed_array([[0, 1, 2], [0, 2, 3]])
 model: Model = Model.create(
     verts=vertices,
     norms=normals,

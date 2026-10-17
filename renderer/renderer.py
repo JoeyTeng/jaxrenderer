@@ -13,7 +13,15 @@ from jaxtyping import (
     jaxtyped,  # pyright: ignore[reportUnknownVariableType]
 )
 
-from ._meta_utils import add_tracing_name, is_array_type
+from ._meta_utils import (
+    add_tracing_name,
+    is_array_type,
+    typed_array,
+    typed_asarray,
+    typed_full,
+    typed_ones,
+    typed_zeros,
+)
 from ._meta_utils import typed_jit as jit
 from .geometry import Camera, Projection, View, Viewport, normalise
 from .model import MergedModel, ModelObject, merge_objects
@@ -66,13 +74,11 @@ class CameraParameters(NamedTuple):
     """horizontal field of view, in degrees."""
     vfov: float = 45.0
     """vertical field of view, in degrees."""
-    position: Union[Vec3f, tuple[float, float, float]] = jnp.ones(3)  # pyright: ignore
+    position: Union[Vec3f, tuple[float, float, float]] = typed_ones(3)
     """position of the camera in world space."""
-    target: Union[Vec3f, tuple[float, float, float]] = jnp.zeros(3)  # pyright: ignore
+    target: Union[Vec3f, tuple[float, float, float]] = typed_zeros(3)
     """target of the camera."""
-    up: Union[Vec3f, tuple[float, float, float]] = jnp.array(  # pyright: ignore
-        (0.0, 0.0, 1.0)
-    )
+    up: Union[Vec3f, tuple[float, float, float]] = typed_array((0.0, 0.0, 1.0))
     """up direction of the camera."""
 
 
@@ -82,31 +88,21 @@ class LightParameters(NamedTuple):
     Default values come from [erwincoumans/tinyrenderer::TinyRenderLight](https://github.com/erwincoumans/tinyrenderer/blob/89e8adafb35ecf5134e7b17b71b0f825939dc6d9/python/pytinyrenderer.cc#L74).
     """
 
-    direction: Vec3f = normalise(
-        jnp.array(  # pyright: ignore[reportUnknownMemberType]
-            (0.57735, 0.57735, 0.57735)
-        )
-    )
+    direction: Vec3f = normalise(typed_array((0.57735, 0.57735, 0.57735)))
     """in world space, as it goes from that position to origin (camera).
 
     For example, if direction = camera's eye, full specular will be applied to
     triangles with normal towards camera.
     """
-    colour: Colour = jnp.ones(3)  # pyright: ignore[reportUnknownMemberType]
+    colour: Colour = typed_ones(3)
     """Light source to render."""
-    ambient: Colour = jnp.array(  # pyright: ignore[reportUnknownMemberType]
-        (0.6, 0.6, 0.6)
-    )
+    ambient: Colour = typed_array((0.6, 0.6, 0.6))
     """Ambient colour. This is added to the final colour of the object."""
-    diffuse: Colour = jnp.array(  # pyright: ignore[reportUnknownMemberType]
-        (0.35, 0.35, 0.35)
-    )
+    diffuse: Colour = typed_array((0.35, 0.35, 0.35))
     """Diffuse coefficient per colour channel. This is multiplied to the
         diffuse texture colour of the object.
     """
-    specular: Colour = jnp.array(  # pyright: ignore[reportUnknownMemberType]
-        (0.05, 0.05, 0.05)
-    )
+    specular: Colour = typed_array((0.05, 0.05, 0.05))
     """Specular coefficient per colour channel. This is multiplied to the
         computed specular light colour.
     """
@@ -120,13 +116,11 @@ class ShadowParameters(NamedTuple):
       - for `up`, [erwincoumans/tinyrenderer::renderObject](https://github.com/erwincoumans/tinyrenderer/blob/89e8adafb35ecf5134e7b17b71b0f825939dc6d9/tinyrenderer.cpp#L372).
     """
 
-    centre: Vec3f = jnp.zeros(3)  # pyright: ignore[reportUnknownMemberType]
+    centre: Vec3f = typed_zeros(3)
     """centre of the scene, same as object's camera's centre."""
-    up: Vec3f = jnp.array((0.0, 0.0, 1.0))  # pyright: ignore[reportUnknownMemberType]
+    up: Vec3f = typed_array((0.0, 0.0, 1.0))
     """up direction of the scene, same as object's camera's up."""
-    strength: Colour = 1 - jnp.array(  # pyright: ignore[reportUnknownMemberType]
-        (0.4, 0.4, 0.4)
-    )
+    strength: Colour = 1 - typed_array((0.4, 0.4, 0.4))
     """Strength of shadow. Must be in [0, 1]. 0 means no shadow, 1 means fully
         black shadow.  See `Shadow.strength` for more details.
     """
@@ -143,17 +137,11 @@ class Renderer:
     @add_tracing_name
     def create_camera_from_parameters(camera: CameraParameters) -> Camera:
         """Create a camera from camera parameters."""
-        eye: Vec3f = jnp.asarray(  # pyright: ignore[reportUnknownMemberType]
-            camera.position, dtype=float
-        )
+        eye: Vec3f = typed_asarray(camera.position, dtype=float)
         assert is_array_type(eye, Vec3f), f"{eye}"
-        centre: Vec3f = jnp.asarray(  # pyright: ignore[reportUnknownMemberType]
-            camera.target, dtype=float
-        )
+        centre: Vec3f = typed_asarray(camera.target, dtype=float)
         assert is_array_type(centre, Vec3f), f"{centre}"
-        up: Vec3f = jnp.asarray(  # pyright: ignore[reportUnknownMemberType]
-            camera.up, dtype=float
-        )
+        up: Vec3f = typed_asarray(camera.up, dtype=float)
         assert is_array_type(up, Vec3f), f"{up}"
 
         view_mat: View = Camera.view_matrix(eye=eye, centre=centre, up=up)
@@ -171,16 +159,12 @@ class Renderer:
         )
         assert is_array_type(projection_mat, Projection), f"{projection_mat}"
         viewport_mat: Viewport = Camera.viewport_matrix(
-            lowerbound=jnp.zeros(  # pyright: ignore[reportUnknownMemberType]
+            lowerbound=typed_zeros(
                 2,
                 dtype=int,
             ),
-            dimension=jnp.array(  # pyright: ignore[reportUnknownMemberType]
-                (camera.viewWidth, camera.viewHeight)
-            ),
-            depth=jnp.array(  # pyright: ignore[reportUnknownMemberType]
-                camera.viewDepth
-            ),
+            dimension=typed_array((camera.viewWidth, camera.viewHeight)),
+            depth=typed_array(camera.viewDepth),
         )
         assert is_array_type(viewport_mat, Viewport), f"{viewport_mat}"
 
@@ -201,11 +185,11 @@ class Renderer:
         width: int,
         height: int,
         batch: Optional[int] = None,
-        colour_default: Colour = jnp.array(  # pyright: ignore[reportUnknownMemberType, reportCallInDefaultInitializer]
+        colour_default: Colour = typed_array(  # pyright: ignore[reportCallInDefaultInitializer]
             (1.0, 1.0, 1.0),
             dtype=jnp.single,
         ),
-        zbuffer_default: NumV = jnp.array(  # pyright: ignore[reportUnknownMemberType, reportCallInDefaultInitializer]
+        zbuffer_default: NumV = typed_array(  # pyright: ignore[reportCallInDefaultInitializer]
             1,
             dtype=jnp.single,
         ),
@@ -230,7 +214,7 @@ class Renderer:
             (*_batch, width, height),
             zbuffer_default,
         )
-        canvas: Canvas = jnp.full(  # pyright: ignore[reportUnknownMemberType]
+        canvas: Canvas = typed_full(
             (*_batch, width, height, colour_default.size),
             colour_default,
         )
@@ -306,7 +290,7 @@ class Renderer:
             light_dir_eye=light_dir_eye,
             texture_shape=model.texture_shape,
             texture_index=texture_index,
-            texture_offset=jnp.array(  # pyright: ignore[reportUnknownMemberType]
+            texture_offset=typed_array(
                 model.offset,
                 dtype=int,
             ),
@@ -388,11 +372,11 @@ class Renderer:
         camera: Union[Camera, CameraParameters],
         width: int,
         height: int,
-        colour_default: Colour = jnp.array(  # pyright: ignore[reportUnknownMemberType, reportCallInDefaultInitializer]
+        colour_default: Colour = typed_array(  # pyright: ignore[reportCallInDefaultInitializer]
             (1.0, 1.0, 1.0),
             dtype=jnp.single,
         ),
-        zbuffer_default: NumV = jnp.array(  # pyright: ignore[reportUnknownMemberType, reportCallInDefaultInitializer]
+        zbuffer_default: NumV = typed_array(  # pyright: ignore[reportCallInDefaultInitializer]
             1,
             dtype=jnp.single,
         ),
