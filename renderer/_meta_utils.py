@@ -6,8 +6,22 @@ from typing import Any, ParamSpec, Protocol, TypeVar, cast
 
 import jax
 from jax import Array
+import jax.numpy as jnp
+import jax.typing
 
-__all__ = ["add_tracing_name", "export", "is_array_type", "typed_jit"]
+__all__ = [
+    "add_tracing_name",
+    "export",
+    "is_array_type",
+    "typed_array",
+    "typed_asarray",
+    "typed_full",
+    "typed_grad",
+    "typed_jit",
+    "typed_modf",
+    "typed_ones",
+    "typed_zeros",
+]
 
 ArgT = ParamSpec("ArgT")
 RetT = TypeVar("RetT")
@@ -81,3 +95,68 @@ def typed_jit(
     )
 
     return jitted
+
+
+# These manually maintained aliases describe the JAX subset used here. The casts
+# do not validate upstream signatures, and Array does not prove shape or dtype.
+# typed_grad supports one Array argument, a scalar-Array loss and default options;
+# its type does not guarantee a particular shape. Check this subset against JAX
+# when upgrading the dependency.
+type _Shape = int | tuple[int, ...]
+
+
+class _ArrayFactory(Protocol):
+    def __call__(
+        self, value: object, /, dtype: jax.typing.DTypeLike | None = None
+    ) -> jax.Array: ...
+
+
+class _ShapeFactory(Protocol):
+    def __call__(
+        self, shape: _Shape, dtype: jax.typing.DTypeLike | None = None
+    ) -> jax.Array: ...
+
+
+class _FullFactory(Protocol):
+    def __call__(
+        self,
+        shape: _Shape,
+        fill_value: jax.typing.ArrayLike,
+        dtype: jax.typing.DTypeLike | None = None,
+    ) -> jax.Array: ...
+
+
+class _Modf(Protocol):
+    def __call__(self, x: jax.Array, /) -> tuple[jax.Array, jax.Array]: ...
+
+
+class _Grad(Protocol):
+    def __call__(
+        self, fun: Callable[[jax.Array], jax.Array], /
+    ) -> Callable[[jax.Array], jax.Array]: ...
+
+
+class _JaxAPI(Protocol):
+    grad: _Grad
+
+
+class _JaxNumpyAPI(Protocol):
+    array: _ArrayFactory
+    asarray: _ArrayFactory
+    ones: _ShapeFactory
+    zeros: _ShapeFactory
+    full: _FullFactory
+    modf: _Modf
+
+
+# These casts declare the subset used by this project; they do not wrap JAX.
+_jax_api = cast(_JaxAPI, jax)
+_jnp_api = cast(_JaxNumpyAPI, jnp)
+
+typed_array = _jnp_api.array
+typed_asarray = _jnp_api.asarray
+typed_ones = _jnp_api.ones
+typed_zeros = _jnp_api.zeros
+typed_full = _jnp_api.full
+typed_modf = _jnp_api.modf
+typed_grad = _jax_api.grad

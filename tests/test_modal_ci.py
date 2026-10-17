@@ -1,13 +1,70 @@
 from __future__ import annotations
 
+from collections.abc import Callable, Mapping
 import io
 import json
 from pathlib import Path
 import tarfile
-from typing import Any
+from typing import Protocol, cast
 
 import pytest
 from tools import modal_ci
+
+
+class _AppView(Protocol):
+    options: dict[str, object]
+
+
+class _ImageView(Protocol):
+    files: list[tuple[Path, str]]
+
+
+def _preflight_credentials(environment: Mapping[str, str] | None = None) -> None:
+    operation = cast(
+        Callable[[Mapping[str, str] | None], None],
+        getattr(modal_ci, "_preflight_credentials"),
+    )
+    operation(environment)
+
+
+def _validate_result(
+    result: object, binding: Mapping[str, object], backend: str = "gpu"
+) -> dict[str, object]:
+    operation = cast(
+        Callable[[object, Mapping[str, object], str], dict[str, object]],
+        getattr(modal_ci, "_validate_result"),
+    )
+    return operation(result, binding, backend)
+
+
+def _pack_artifacts(output_dir: Path) -> bytes:
+    operation = cast(Callable[[Path], bytes], getattr(modal_ci, "_pack_artifacts"))
+    return operation(output_dir)
+
+
+def _prepare_output(path: Path) -> tuple[Path, tuple[int, int, int]]:
+    operation = cast(
+        Callable[[Path], tuple[Path, tuple[int, int, int]]],
+        getattr(modal_ci, "_prepare_output"),
+    )
+    return operation(path)
+
+
+def _check_output_identity(path: Path, identity: tuple[int, int, int]) -> None:
+    operation = cast(
+        Callable[[Path, tuple[int, int, int]], None],
+        getattr(modal_ci, "_check_output_identity"),
+    )
+    operation(path, identity)
+
+
+def _create_modal_app(modal: object) -> tuple[object, object]:
+    operation = cast(
+        Callable[[object], tuple[object, object]],
+        getattr(modal_ci, "_create_modal_app"),
+    )
+    return operation(modal)
+
 
 GOOD_BINDING = {
     "pr": 24,
@@ -25,7 +82,7 @@ RELEASE_BINDING = {
 }
 
 
-def _result(**overrides: Any) -> dict[str, object]:
+def _result(**overrides: object) -> dict[str, object]:
     result: dict[str, object] = {
         "pr": 24,
         "head_sha": "a" * 40,
@@ -42,7 +99,7 @@ def _result(**overrides: Any) -> dict[str, object]:
     return result
 
 
-def _release_result(**overrides: Any) -> dict[str, object]:
+def _release_result(**overrides: object) -> dict[str, object]:
     result: dict[str, object] = {
         **RELEASE_BINDING,
         "backend": "gpu",
@@ -60,31 +117,43 @@ def test_preflight_requires_modal_credentials_without_importing_sdk(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     with pytest.raises(modal_ci.ModalCIError, match="Modal credentials"):
-        modal_ci._preflight_credentials({})
+        _preflight_credentials({})
 
 
 def test_result_must_match_frozen_binding_and_report_real_gpu() -> None:
-    accepted = modal_ci._validate_result(_result(), GOOD_BINDING)
+    accepted = _validate_result(_result(), GOOD_BINDING)
     assert accepted["success"] is True
     with pytest.raises(modal_ci.ModalCIError, match="head_sha"):
-        modal_ci._validate_result(_result(head_sha="c" * 40), GOOD_BINDING)
+        _ = _validate_result(_result(head_sha="c" * 40), GOOD_BINDING)
     with pytest.raises(modal_ci.ModalCIError, match="requested GPU"):
-        modal_ci._validate_result(
+        _ = _validate_result(
             _result(device_backend="cpu", devices=[], device_count=0), GOOD_BINDING
         )
 
 
 def test_result_accepts_exact_release_binding_and_requires_versions() -> None:
-    accepted = modal_ci._validate_result(_release_result(), RELEASE_BINDING)
+    accepted = _validate_result(_release_result(), RELEASE_BINDING)
     assert accepted["success"] is True
     with pytest.raises(modal_ci.ModalCIError, match="head_sha"):
-        modal_ci._validate_result(_release_result(head_sha="d" * 40), RELEASE_BINDING)
+        _ = _validate_result(_release_result(head_sha="d" * 40), RELEASE_BINDING)
     with pytest.raises(modal_ci.ModalCIError, match="unexpected fields"):
-        modal_ci._validate_result(
-            _release_result(pr=25, base_sha="b" * 40), RELEASE_BINDING
-        )
+        _ = _validate_result(_release_result(pr=25, base_sha="b" * 40), RELEASE_BINDING)
     with pytest.raises(modal_ci.ModalCIError, match="version metadata"):
-        modal_ci._validate_result(_release_result(versions={}), RELEASE_BINDING)
+        _ = _validate_result(_release_result(versions={}), RELEASE_BINDING)
+
+
+@pytest.mark.parametrize(
+    "versions",
+    [
+        {1: "0.11.2"},
+        {"": "0.11.2"},
+        {"jax": 0.11},
+        {"jax": ""},
+    ],
+)
+def test_result_rejects_malformed_remote_version_entries(versions: object) -> None:
+    with pytest.raises(modal_ci.ModalCIError, match="versions must map names"):
+        _ = _validate_result(_result(versions=versions), GOOD_BINDING)
 
 
 def test_failed_remote_result_is_preserved_for_controller_failure_status() -> None:
@@ -95,34 +164,35 @@ def test_failed_remote_result_is_preserved_for_controller_failure_status() -> No
         devices=[],
         versions={},
     )
-    assert modal_ci._validate_result(result, GOOD_BINDING)["success"] is False
+    assert _validate_result(result, GOOD_BINDING)["success"] is False
 
 
 def test_artifact_archive_contains_files_and_rejects_symlinks(tmp_path: Path) -> None:
     output = tmp_path / "remote-output"
-    output.mkdir()
-    (output / "result.json").write_text("{}\n", encoding="utf-8")
-    archive_bytes = modal_ci._pack_artifacts(output)
+    _ = output.mkdir()
+    _ = (output / "result.json").write_text("{}\n", encoding="utf-8")
+    archive_bytes = _pack_artifacts(output)
     with tarfile.open(fileobj=io.BytesIO(archive_bytes), mode="r:gz") as archive:
         assert [member.name for member in archive.getmembers()] == ["result.json"]
 
-    (output / "escape").symlink_to(tmp_path / "outside")
+    _ = (output / "escape").symlink_to(tmp_path / "outside")
     with pytest.raises(modal_ci.ModalCIError, match="symbolic links"):
-        modal_ci._pack_artifacts(output)
+        _ = _pack_artifacts(output)
 
 
 def test_output_identity_detects_replacement(tmp_path: Path) -> None:
-    output, identity = modal_ci._prepare_output(tmp_path / "out")
+    output, identity = _prepare_output(tmp_path / "out")
     moved = tmp_path / "old-out"
-    output.rename(moved)
-    output.mkdir()
+    _ = output.rename(moved)
+    _ = output.mkdir()
     with pytest.raises(modal_ci.ModalCIError, match="identity or ownership changed"):
-        modal_ci._check_output_identity(output, identity)
+        _check_output_identity(output, identity)
 
 
 def test_app_factory_requests_only_trusted_sources_and_one_t4() -> None:
     class FakeImage:
         def __init__(self) -> None:
+            super().__init__()
             self.files: list[tuple[Path, str]] = []
 
         @classmethod
@@ -143,14 +213,17 @@ def test_app_factory_requests_only_trusted_sources_and_one_t4() -> None:
 
     class FakeApp:
         def __init__(self, name: str, *, include_source: bool) -> None:
+            super().__init__()
             assert name == "jaxrenderer-accelerator-ci"
             assert include_source is False
             self.options: dict[str, object] = {}
 
-        def function(self, **options: object):
+        def function(
+            self, **options: object
+        ) -> Callable[[Callable[..., object]], Callable[..., object]]:
             self.options = options
 
-            def decorate(function):
+            def decorate(function: Callable[..., object]) -> Callable[..., object]:
                 return function
 
             return decorate
@@ -161,12 +234,14 @@ def test_app_factory_requests_only_trusted_sources_and_one_t4() -> None:
         def App(self, name: str, *, include_source: bool) -> FakeApp:
             return FakeApp(name, include_source=include_source)
 
-    app, function = modal_ci._create_modal_app(FakeModal())
+    app_value, function = _create_modal_app(FakeModal())
+    app = cast(_AppView, app_value)
     assert callable(function)
     assert app.options["gpu"] == "T4"
     assert app.options["timeout"] == 1_800
     assert app.options["include_source"] is False
-    source_files = dict(app.options["image"].files)
+    image = cast(_ImageView, app.options["image"])
+    source_files = dict(image.files)
     assert set(source_files.values()) == {
         "/root/tools/modal_ci.py",
         "/root/tools/accelerator_runner.py",
@@ -176,7 +251,7 @@ def test_app_factory_requests_only_trusted_sources_and_one_t4() -> None:
 
 def test_execute_records_credential_preflight_failure(tmp_path: Path) -> None:
     with pytest.raises(modal_ci.ModalCIError, match="Modal credentials"):
-        modal_ci.execute(GOOD_BINDING, tmp_path / "output")
+        _ = modal_ci.execute(GOOD_BINDING, tmp_path / "output")
     result = json.loads(
         (tmp_path / "output" / "result.json").read_text(encoding="utf-8")
     )
@@ -188,7 +263,7 @@ def test_release_execute_failure_manifest_keeps_release_identity(
     tmp_path: Path,
 ) -> None:
     with pytest.raises(modal_ci.ModalCIError, match="Modal credentials"):
-        modal_ci.execute(RELEASE_BINDING, tmp_path / "release-output")
+        _ = modal_ci.execute(RELEASE_BINDING, tmp_path / "release-output")
     result = json.loads(
         (tmp_path / "release-output" / "result.json").read_text(encoding="utf-8")
     )

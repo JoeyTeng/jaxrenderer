@@ -8,6 +8,7 @@ import jax.numpy as jnp
 from jaxtyping import jaxtyped  # pyright: ignore[reportUnknownVariableType]
 import numpy as np
 
+from renderer._meta_utils import is_array_type
 from renderer.types import FaceIndices, Normals, Texture, UVCoordinates, Vertices
 
 jax.config.update("jax_array", True)  # pyright: ignore[reportUnknownMemberType]
@@ -27,12 +28,12 @@ class Model:
 
     @jaxtyped
     def __post_init__(self) -> None:
-        assert isinstance(self.verts, Vertices), self.verts.shape
-        assert isinstance(self.norms, Vertices), self.norms.shape
-        assert isinstance(self.uv, UVCoordinates), self.uv.shape
-        assert isinstance(self.faces, FaceIndices), self.faces.shape
-        assert isinstance(self.faces_norm, FaceIndices), self.faces_norm.shape
-        assert isinstance(self.faces_uv, FaceIndices), self.faces_uv.shape
+        assert is_array_type(self.verts, Vertices), self.verts.shape
+        assert is_array_type(self.norms, Normals), self.norms.shape
+        assert is_array_type(self.uv, UVCoordinates), self.uv.shape
+        assert is_array_type(self.faces, FaceIndices), self.faces.shape
+        assert is_array_type(self.faces_norm, FaceIndices), self.faces_norm.shape
+        assert is_array_type(self.faces_uv, FaceIndices), self.faces_uv.shape
 
     @property
     def nverts(self) -> int:
@@ -56,13 +57,19 @@ def make_model(fileContent: list[str]) -> Model:
     _one_vertex = re.compile(r"\d+/\d*/\d*")
     for line in fileContent:
         if line.startswith("v "):
-            vert: T3f = tuple(map(float, _float.findall(line, 2)[:3]))
+            values = _float.findall(line, 2)[:3]
+            assert len(values) == 3
+            vert: T3f = (float(values[0]), float(values[1]), float(values[2]))
             verts.append(vert)
         elif line.startswith("vn "):
-            norm: T3f = tuple(map(float, _float.findall(line, 2)[:3]))
+            values = _float.findall(line, 2)[:3]
+            assert len(values) == 3
+            norm: T3f = (float(values[0]), float(values[1]), float(values[2]))
             norms.append(norm)
         elif line.startswith("vt "):
-            uv_coord: T2f = tuple(map(float, _float.findall(line, 2)[:2]))
+            values = _float.findall(line, 2)[:2]
+            assert len(values) == 2
+            uv_coord: T2f = (float(values[0]), float(values[1]))
             uv.append(uv_coord)
         elif line.startswith("f "):
             face: list[int] = []
@@ -103,7 +110,7 @@ def load_tga(path: str) -> Texture:
 
     for y in range(height):
         for x in range(width):
-            buffer[y, x] = np.array(image.getpixel((x, y)))  # pyright: ignore
+            buffer[y, x] = np.array(image.getpixel((x, y)))
 
     texture: Texture = jnp.array(  # pyright: ignore[reportUnknownMemberType]
         buffer,

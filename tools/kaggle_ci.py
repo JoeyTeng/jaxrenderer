@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+from collections.abc import Mapping
 from datetime import datetime, timezone
 import hashlib
 import json
@@ -15,7 +16,7 @@ import subprocess
 import sys
 import tempfile
 import time
-from typing import Any
+from typing import Any, cast
 
 QUEUE_TIMEOUT_SECONDS = 4 * 60 * 60
 EXECUTION_TIMEOUT_SECONDS = 45 * 60
@@ -53,13 +54,21 @@ class KaggleError(RuntimeError):
     """A Kaggle preflight, submission, polling, or output error."""
 
 
-def _redact(message: str, env: dict[str, str]) -> str:
+type JsonValue = (
+    None | bool | int | float | str | list[JsonValue] | dict[str, JsonValue]
+)
+
+
+def _redact(message: str, env: Mapping[str, str]) -> str:
     token = env.get("KAGGLE_API_TOKEN", "")
     return message.replace(token, "[redacted]") if token else message
 
 
-def _validate_binding(value: object) -> dict[str, object]:
-    if not isinstance(value, dict) or set(value) != BINDING_FIELDS:
+def validate_binding(value: object) -> dict[str, object]:
+    if not isinstance(value, dict):
+        raise KaggleError("binding has missing or unexpected fields")
+    value = cast(dict[str, object], value)
+    if set(value) != BINDING_FIELDS:
         raise KaggleError("binding has missing or unexpected fields")
     if value["kind"] != "release":
         raise KaggleError("binding kind is not release")
@@ -78,7 +87,7 @@ def _validate_binding(value: object) -> dict[str, object]:
 
 def _load_binding_file(path: Path) -> dict[str, object]:
     try:
-        return _validate_binding(json.loads(path.read_text(encoding="utf-8")))
+        return validate_binding(json.loads(path.read_text(encoding="utf-8")))
     except KaggleError:
         raise
     except (OSError, UnicodeError, json.JSONDecodeError) as error:
@@ -100,7 +109,7 @@ def _require_credentials(env: dict[str, str]) -> str:
 
 def _read_quota(raw: str) -> float:
     try:
-        rows = json.loads(raw)
+        rows = cast(JsonValue, json.loads(raw))
     except json.JSONDecodeError as error:
         raise KaggleError("Kaggle quota response was not valid JSON") from error
     if not isinstance(rows, list):
@@ -142,8 +151,8 @@ def _run_cli(
         raise KaggleError(f"could not start Kaggle CLI: {error}") from error
     assert process.stdout is not None and process.stderr is not None
     selector = selectors.DefaultSelector()
-    selector.register(process.stdout, selectors.EVENT_READ, "stdout")
-    selector.register(process.stderr, selectors.EVENT_READ, "stderr")
+    _ = selector.register(process.stdout, selectors.EVENT_READ, "stdout")
+    _ = selector.register(process.stderr, selectors.EVENT_READ, "stderr")
     captured = {"stdout": bytearray(), "stderr": bytearray()}
     total = 0
     deadline = time.monotonic() + timeout
@@ -153,25 +162,25 @@ def _run_cli(
             if remaining <= 0:
                 raise KaggleError("Kaggle CLI command exceeded its local timeout")
             for key, _ in selector.select(min(remaining, 1.0)):
-                chunk = os.read(key.fileobj.fileno(), 4096)
+                chunk = os.read(key.fd, 4096)
                 if not chunk:
-                    selector.unregister(key.fileobj)
+                    _ = selector.unregister(key.fileobj)
                     continue
                 total += len(chunk)
                 if total > MAX_CLI_OUTPUT_BYTES:
                     raise KaggleError("Kaggle CLI output exceeded the 64 KiB limit")
-                captured[key.data].extend(chunk)
+                captured[cast(str, key.data)].extend(chunk)
         remaining = deadline - time.monotonic()
         if remaining <= 0:
             raise KaggleError("Kaggle CLI command exceeded its local timeout")
         return_code = process.wait(timeout=remaining)
     except KaggleError:
         process.kill()
-        process.wait()
+        _ = process.wait()
         raise
     except subprocess.TimeoutExpired as error:
         process.kill()
-        process.wait()
+        _ = process.wait()
         raise KaggleError("Kaggle CLI command exceeded its local timeout") from error
     finally:
         selector.close()
@@ -218,7 +227,7 @@ def _write_controller_state(path: Path, value: dict[str, object]) -> None:
         ) as stream:
             temporary = stream.name
             json.dump(value, stream, sort_keys=True)
-            stream.write("\n")
+            _ = stream.write("\n")
         os.replace(temporary, path)
     finally:
         if temporary and os.path.exists(temporary):
@@ -228,7 +237,7 @@ def _write_controller_state(path: Path, value: dict[str, object]) -> None:
 def _append_controller_log(path: Path, value: dict[str, object]) -> None:
     """Append and flush one secret-free controller event immediately."""
     with path.open("a", encoding="utf-8") as stream:
-        stream.write(json.dumps(value, sort_keys=True) + "\n")
+        _ = stream.write(json.dumps(value, sort_keys=True) + "\n")
         stream.flush()
 
 
@@ -293,32 +302,35 @@ def _make_kernel(
         "machine_shape": "TpuV5E8",
     }
     folder.mkdir(parents=True, exist_ok=False)
-    (folder / "kernel-metadata.json").write_text(
+    _ = (folder / "kernel-metadata.json").write_text(
         json.dumps(metadata, sort_keys=True) + "\n", encoding="utf-8"
     )
     source = _bootstrap_source(binding, runner_path)
-    notebook = {
-        "cells": [
-            {
-                "cell_type": "code",
-                "id": "accelerator-ci",
-                "execution_count": None,
-                "metadata": {},
-                "outputs": [],
-                "source": source.splitlines(keepends=True),
-            }
-        ],
-        "metadata": {
-            "kernelspec": {
-                "display_name": "Python 3",
-                "language": "python",
-                "name": "python3",
-            }
+    notebook = cast(
+        JsonValue,
+        {
+            "cells": [
+                {
+                    "cell_type": "code",
+                    "id": "accelerator-ci",
+                    "execution_count": None,
+                    "metadata": {},
+                    "outputs": [],
+                    "source": source.splitlines(keepends=True),
+                }
+            ],
+            "metadata": {
+                "kernelspec": {
+                    "display_name": "Python 3",
+                    "language": "python",
+                    "name": "python3",
+                }
+            },
+            "nbformat": 4,
+            "nbformat_minor": 5,
         },
-        "nbformat": 4,
-        "nbformat_minor": 5,
-    }
-    (folder / "bootstrap.ipynb").write_text(
+    )
+    _ = (folder / "bootstrap.ipynb").write_text(
         json.dumps(notebook, sort_keys=True) + "\n", encoding="utf-8"
     )
 
@@ -335,11 +347,11 @@ def _status(stdout: str) -> str:
     return raw_status
 
 
-def _validate_downloaded_result(
+def validate_downloaded_result(
     path: Path, binding: dict[str, object]
 ) -> dict[str, Any]:
     try:
-        result = json.loads(path.read_text(encoding="utf-8"))
+        result = cast(JsonValue, json.loads(path.read_text(encoding="utf-8")))
     except (OSError, UnicodeError, json.JSONDecodeError) as error:
         raise KaggleError(
             f"Kaggle output did not contain a readable result.json: {error}"
@@ -391,17 +403,17 @@ def _validate_downloaded_result(
         not isinstance(versions, dict)
         or not versions
         or not all(
-            isinstance(name, str) and name and isinstance(version, str) and version
+            name and isinstance(version, str) and version
             for name, version in versions.items()
         )
     ):
         raise KaggleError("Kaggle result.json versions are invalid")
-    return result
+    return cast(dict[str, Any], result)
 
 
 def _run(binding: dict[str, object], backend: str, output_dir: Path) -> dict[str, Any]:
     """Submit one private TPU kernel and return its binding-checked result."""
-    binding = _validate_binding(binding)
+    binding = validate_binding(binding)
     if backend != "tpu":
         raise KaggleError("Kaggle adapter only supports the TPU backend")
     env = os.environ.copy()
@@ -434,6 +446,7 @@ def _run(binding: dict[str, object], backend: str, output_dir: Path) -> dict[str
     queue_started: float | None = None
     queue_finished: float | None = None
     execution_started: float | None = None
+    execution_started_at: str | None = None
     execution_finished: float | None = None
     last_logged_state: tuple[object, object, object] | None = None
 
@@ -511,7 +524,7 @@ def _run(binding: dict[str, object], backend: str, output_dir: Path) -> dict[str
         persist(status="not_submitted", phase="quota_preflight")
         try:
             quota = _command_ok(["kaggle", "quota", "--format", "json"], env=env)
-            _read_quota(quota.stdout)
+            _ = _read_quota(quota.stdout)
         except KaggleError as error:
             persist(
                 status="preflight_error",
@@ -753,7 +766,7 @@ def _run(binding: dict[str, object], backend: str, output_dir: Path) -> dict[str
         # CLI 2.2.4 accepts a version suffix but fetches output by slug. The
         # random one-use slug and verified first version bind it to this run.
         try:
-            _command_ok(
+            _ = _command_ok(
                 [
                     "kaggle",
                     "kernels",
@@ -788,7 +801,7 @@ def _run(binding: dict[str, object], backend: str, output_dir: Path) -> dict[str
         if remote_failure:
             raise KaggleError(remote_failure)
     try:
-        result = _validate_downloaded_result(output_dir / "result.json", binding)
+        result = validate_downloaded_result(output_dir / "result.json", binding)
     except KaggleError as error:
         persist(
             status=str(state["status"]),
@@ -827,18 +840,21 @@ def resume_status(
     binding: dict[str, object], resume_state_path: Path, output_dir: Path
 ) -> dict[str, object]:
     """Report one latest-status query without treating it as gate evidence."""
-    binding = _validate_binding(binding)
+    binding = validate_binding(binding)
     env = os.environ.copy()
     username = _require_credentials(env)
     try:
         if resume_state_path.resolve().parent == output_dir.resolve():
             raise KaggleError("resume output must use a separate collector directory")
-        stored = json.loads(resume_state_path.read_text(encoding="utf-8"))
+        stored: object = json.loads(resume_state_path.read_text(encoding="utf-8"))
     except KaggleError:
         raise
     except (OSError, UnicodeError, json.JSONDecodeError) as error:
         raise KaggleError(f"could not read resume state: {error}") from error
-    if not isinstance(stored, dict) or set(stored) not in (
+    if not isinstance(stored, dict):
+        raise KaggleError("resume state has an unsupported controller schema")
+    stored = cast(dict[str, object], stored)
+    if set(stored) not in (
         LEGACY_CONTROLLER_STATE_FIELDS,
         CONTROLLER_STATE_FIELDS,
     ):
@@ -928,9 +944,9 @@ def resume_status(
 
 def parser() -> argparse.ArgumentParser:
     root = argparse.ArgumentParser(description=__doc__)
-    root.add_argument("--binding", type=Path, required=True)
-    root.add_argument("--output-dir", type=Path, required=True)
-    root.add_argument("--resume-state", type=Path)
+    _ = root.add_argument("--binding", type=Path, required=True)
+    _ = root.add_argument("--output-dir", type=Path, required=True)
+    _ = root.add_argument("--resume-state", type=Path)
     return root
 
 

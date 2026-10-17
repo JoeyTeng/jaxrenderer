@@ -1,14 +1,66 @@
 from __future__ import annotations
 
+from collections.abc import Callable, Mapping
 import io
 import json
 import os
 from pathlib import Path
 import sys
 import tarfile
+from typing import NoReturn, cast
 
 import pytest
 from tools import accelerator_runner as runner
+
+
+def _extract_source_archive(data: bytes, destination: Path) -> Path:
+    operation = cast(
+        Callable[[bytes, Path], Path], getattr(runner, "_extract_source_archive")
+    )
+    return operation(data, destination)
+
+
+def _minimal_environment(
+    home: Path, venv: Path, backend: str, artifacts: Path
+) -> dict[str, str]:
+    operation = cast(
+        Callable[[Path, Path, str, Path], dict[str, str]],
+        getattr(runner, "_minimal_environment"),
+    )
+    return operation(home, venv, backend, artifacts)
+
+
+def _prepare_output(path: Path) -> tuple[Path, tuple[int, int, int]]:
+    operation = cast(
+        Callable[[Path], tuple[Path, tuple[int, int, int]]],
+        getattr(runner, "_prepare_output"),
+    )
+    return operation(path)
+
+
+def _check_output_identity(path: Path, identity: tuple[int, int, int]) -> None:
+    operation = cast(
+        Callable[[Path, tuple[int, int, int]], None],
+        getattr(runner, "_check_output_identity"),
+    )
+    operation(path, identity)
+
+
+def _run_command(
+    command: tuple[str, ...], cwd: Path, environment: Mapping[str, str], log: Path
+) -> str:
+    operation = cast(
+        Callable[[tuple[str, ...], Path, Mapping[str, str], Path], str],
+        getattr(runner, "_run_command"),
+    )
+    return operation(command, cwd, environment, log)
+
+
+def _version_report(manifest: Mapping[str, object]) -> dict[str, str]:
+    value = manifest["versions"]
+    assert isinstance(value, dict)
+    return cast(dict[str, str], value)
+
 
 # Synthetic fixture catalogue: access-a (active), joey-private-v3.
 SYNTHETIC_ACCESS = "codex_synth_v1_access_a"
@@ -47,15 +99,15 @@ def test_archive_url_is_derived_from_frozen_public_head() -> None:
     )
     invalid = {**GOOD_BINDING, "head_repository": "github.com/attacker/repo?token=x"}
     with pytest.raises(runner.RunnerError, match="owner/repository"):
-        runner.source_url_for_binding(invalid)
+        _ = runner.source_url_for_binding(invalid)
     assert runner.source_url_for_binding(RELEASE_BINDING) == (
         f"https://github.com/JoeyTeng/jaxrenderer/archive/{'c' * 40}.tar.gz"
     )
 
 
 def test_release_binding_and_manifest_have_no_pr_placeholders() -> None:
-    validated = runner._validate_binding(RELEASE_BINDING)
-    manifest = runner._initial_result(validated, "tpu")
+    validated = runner.validate_binding(RELEASE_BINDING)
+    manifest = runner.initial_result(validated, "tpu")
     assert manifest["kind"] == "release"
     assert manifest["head_sha"] == RELEASE_BINDING["head_sha"]
     assert manifest["head_repository"] == "JoeyTeng/jaxrenderer"
@@ -68,13 +120,13 @@ def test_release_binding_and_manifest_have_no_pr_placeholders() -> None:
         {**RELEASE_BINDING, "kind": "pr"},
     ):
         with pytest.raises(runner.RunnerError):
-            runner._validate_binding(invalid)
+            _ = runner.validate_binding(invalid)
 
 
 def test_archive_extraction_rejects_path_traversal(tmp_path: Path) -> None:
     archive = _archive({"project/../escape.txt": b"outside"})
     with pytest.raises(runner.RunnerError, match="unsafe path"):
-        runner._extract_source_archive(archive, tmp_path / "extract")
+        _ = _extract_source_archive(archive, tmp_path / "extract")
     assert not (tmp_path / "escape.txt").exists()
 
 
@@ -86,7 +138,7 @@ def test_minimal_environment_keeps_accelerator_runtime_and_drops_credentials(
     monkeypatch.setenv("GITHUB_TOKEN", SYNTHETIC_ACCESS)
     monkeypatch.setenv("KAGGLE_API_TOKEN", SYNTHETIC_KAGGLE_API_KEY)
     monkeypatch.setenv("KAGGLE_USERNAME", "test-user")
-    environment = runner._minimal_environment(
+    environment = _minimal_environment(
         tmp_path / "home", tmp_path / "venv", "tpu", tmp_path / "artifacts"
     )
     assert environment["TPU_WORKER_ID"] == "0"
@@ -100,7 +152,7 @@ def test_minimal_environment_keeps_accelerator_runtime_and_drops_credentials(
 
 
 def test_gpu_platform_selects_cuda_without_rocm_alias_expansion(tmp_path: Path) -> None:
-    environment = runner._minimal_environment(
+    environment = _minimal_environment(
         tmp_path / "home", tmp_path / "venv", "gpu", tmp_path / "artifacts"
     )
     assert environment["JAX_PLATFORMS"] == "cuda"
@@ -110,12 +162,12 @@ def test_gpu_platform_selects_cuda_without_rocm_alias_expansion(tmp_path: Path) 
 def test_output_directory_replacement_fails_identity_revalidation(
     tmp_path: Path,
 ) -> None:
-    output, identity = runner._prepare_output(tmp_path / "out")
+    output, identity = _prepare_output(tmp_path / "out")
     moved = tmp_path / "old-out"
-    output.rename(moved)
-    output.mkdir()
+    _ = output.rename(moved)
+    _ = output.mkdir()
     with pytest.raises(runner.RunnerError, match="identity or ownership changed"):
-        runner._check_output_identity(output, identity)
+        _check_output_identity(output, identity)
 
 
 def test_failed_archive_fetch_writes_failure_manifest_and_diagnostics(
@@ -144,7 +196,7 @@ def test_success_runs_both_suites_with_locked_jax_and_real_backend_probe(
     source_root = tmp_path / "source"
     source_root.mkdir()
     (source_root / ".venv" / "bin").mkdir(parents=True)
-    (source_root / ".venv" / "bin" / "python").touch()
+    _ = (source_root / ".venv" / "bin" / "python").touch()
     baseline = {
         "jax": "0.11.2",
         "jaxlib": "0.11.2",
@@ -158,14 +210,36 @@ def test_success_runs_both_suites_with_locked_jax_and_real_backend_probe(
     }
     calls: list[tuple[list[str], dict[str, str]]] = []
 
-    monkeypatch.setattr(runner, "_download_archive", lambda _: b"frozen-archive")
-    monkeypatch.setattr(
-        runner, "_extract_source_archive", lambda _data, _dest: source_root
-    )
-    monkeypatch.setattr(runner.shutil, "which", lambda _name, path=None: "/trusted/uv")
-    monkeypatch.setattr(runner, "_locked_jax_version", lambda _path: "0.11.2")
-    monkeypatch.setattr(runner, "_uv_version", lambda *_: "uv 0.12.20")
-    monkeypatch.setattr(runner, "_python_version", lambda *_: "3.14.1")
+    def download_archive(_url: str) -> bytes:
+        return b"frozen-archive"
+
+    def extract_source_archive(_data: bytes, _dest: Path) -> Path:
+        return source_root
+
+    monkeypatch.setattr(runner, "_download_archive", download_archive)
+    monkeypatch.setattr(runner, "_extract_source_archive", extract_source_archive)
+
+    def find_uv(_name: str, path: str | None = None) -> str:
+        return "/trusted/uv"
+
+    monkeypatch.setattr(runner.shutil, "which", find_uv)
+
+    def locked_jax_version(_path: Path) -> str:
+        return "0.11.2"
+
+    def uv_version(
+        _uv: str, _cwd: Path, _environment: Mapping[str, str], _log: Path
+    ) -> str:
+        return "uv 0.12.20"
+
+    def python_version(
+        _python: Path, _cwd: Path, _environment: Mapping[str, str], _log: Path
+    ) -> str:
+        return "3.14.1"
+
+    monkeypatch.setattr(runner, "_locked_jax_version", locked_jax_version)
+    monkeypatch.setattr(runner, "_uv_version", uv_version)
+    monkeypatch.setattr(runner, "_python_version", python_version)
 
     version_calls = 0
 
@@ -200,8 +274,8 @@ def test_success_runs_both_suites_with_locked_jax_and_real_backend_probe(
         log_path: Path,
     ) -> str:
         calls.append((argv, environment))
-        log_path.parent.mkdir(parents=True, exist_ok=True)
-        log_path.write_text("completed\n", encoding="utf-8")
+        _ = log_path.parent.mkdir(parents=True, exist_ok=True)
+        _ = log_path.write_text("completed\n", encoding="utf-8")
         return "completed\n"
 
     monkeypatch.setattr(runner, "_run_command", command)
@@ -209,8 +283,9 @@ def test_success_runs_both_suites_with_locked_jax_and_real_backend_probe(
 
     assert result["success"] is True
     assert result["device_count"] == 1
-    assert result["versions"]["python"] == "3.14.1"
-    assert result["versions"]["jax-cuda12-plugin"] == "0.11.2"
+    result_versions = _version_report(result)
+    assert result_versions["python"] == "3.14.1"
+    assert result_versions["jax-cuda12-plugin"] == "0.11.2"
     assert any("jax[cuda12]==0.11.2" in argv for argv, _ in calls)
     assert any("tests/" in argv and "--import-mode" in argv for argv, _ in calls)
     assert any("tests/render_regression.py" in argv for argv, _ in calls)
@@ -248,10 +323,15 @@ def test_release_run_uses_release_identity_and_selected_runtime(
     locked = {"jax": "0.11.2", "jaxlib": "0.11.2", "numpy": "2.5.3"}
     installed = {**locked, **accelerator_packages}
     calls: list[tuple[list[str], dict[str, str]]] = []
-    monkeypatch.setattr(runner, "_download_archive", lambda _: b"frozen-archive")
-    monkeypatch.setattr(
-        runner, "_extract_source_archive", lambda _data, _dest: source_root
-    )
+
+    def download_archive(_url: str) -> bytes:
+        return b"frozen-archive"
+
+    def extract_source_archive(_data: bytes, _dest: Path) -> Path:
+        return source_root
+
+    monkeypatch.setattr(runner, "_download_archive", download_archive)
+    monkeypatch.setattr(runner, "_extract_source_archive", extract_source_archive)
 
     def find_conda_uv(name: str, path: str | None = None) -> str | None:
         assert name == "uv"
@@ -260,9 +340,23 @@ def test_release_run_uses_release_identity_and_selected_runtime(
         return None
 
     monkeypatch.setattr(runner.shutil, "which", find_conda_uv)
-    monkeypatch.setattr(runner, "_locked_jax_version", lambda _path: "0.11.2")
-    monkeypatch.setattr(runner, "_uv_version", lambda uv, *_: f"{uv} 0.12.20")
-    monkeypatch.setattr(runner, "_python_version", lambda *_: python_version)
+
+    def locked_jax_version(_path: Path) -> str:
+        return "0.11.2"
+
+    def uv_version(
+        uv: str, _cwd: Path, _environment: Mapping[str, str], _log: Path
+    ) -> str:
+        return f"{uv} 0.12.20"
+
+    def python_version_value(
+        _python: Path, _cwd: Path, _environment: Mapping[str, str], _log: Path
+    ) -> str:
+        return python_version
+
+    monkeypatch.setattr(runner, "_locked_jax_version", locked_jax_version)
+    monkeypatch.setattr(runner, "_uv_version", uv_version)
+    monkeypatch.setattr(runner, "_python_version", python_version_value)
     version_calls = 0
 
     def versions(*_: object) -> dict[str, str]:
@@ -297,8 +391,8 @@ def test_release_run_uses_release_identity_and_selected_runtime(
         argv: list[str], _cwd: Path, environment: dict[str, str], log: Path
     ) -> str:
         calls.append((argv, environment))
-        log.parent.mkdir(parents=True, exist_ok=True)
-        log.write_text("completed\n", encoding="utf-8")
+        _ = log.parent.mkdir(parents=True, exist_ok=True)
+        _ = log.write_text("completed\n", encoding="utf-8")
         return "completed\n"
 
     monkeypatch.setattr(runner, "_run_command", command)
@@ -307,10 +401,11 @@ def test_release_run_uses_release_identity_and_selected_runtime(
     assert manifest["kind"] == "release"
     assert manifest["head_sha"] == RELEASE_BINDING["head_sha"]
     assert "pr" not in manifest and "base_sha" not in manifest
-    assert manifest["versions"]["python"] == python_version
-    assert manifest["versions"]["uv"] == "/opt/conda/bin/uv 0.12.20"
+    manifest_versions = _version_report(manifest)
+    assert manifest_versions["python"] == python_version
+    assert manifest_versions["uv"] == "/opt/conda/bin/uv 0.12.20"
     assert all(
-        manifest["versions"][name] == version
+        manifest_versions[name] == version
         for name, version in accelerator_packages.items()
     )
     assert any(f"jax[{extra}]==0.11.2" in argv for argv, _ in calls)
@@ -330,7 +425,7 @@ def test_command_stops_when_log_budget_is_exceeded(
     monkeypatch.setattr(runner, "MAX_LOG_BYTES", 64)
     log_path = tmp_path / "noisy.log"
     with pytest.raises(runner.RunnerError, match="log budget"):
-        runner._run_command(
+        _ = _run_command(
             (sys.executable, "-c", "print('x' * 1000)"),
             tmp_path,
             {"PATH": os.environ["PATH"]},
@@ -341,9 +436,11 @@ def test_command_stops_when_log_budget_is_exceeded(
 
 def test_runner_requires_frozen_binding_and_backend() -> None:
     with pytest.raises(runner.RunnerError, match="exact frozen PR or release"):
-        runner._validate_binding({**GOOD_BINDING, "source_url": "https://example.com"})
+        _ = runner.validate_binding(
+            {**GOOD_BINDING, "source_url": "https://example.com"}
+        )
     with pytest.raises(runner.RunnerError, match="run_id"):
-        runner._validate_binding({**GOOD_BINDING, "run_id": "0.1"})
+        _ = runner.validate_binding({**GOOD_BINDING, "run_id": "0.1"})
 
 
 @pytest.mark.parametrize(("binding", "backend"), [(GOOD_BINDING, "tpu")])
@@ -353,10 +450,13 @@ def test_runner_rejects_backend_binding_type_mismatch(
     binding: dict[str, object],
     backend: str,
 ) -> None:
+    def fail_download(_url: str) -> NoReturn:
+        raise AssertionError("backend mismatch reached remote source download")
+
     monkeypatch.setattr(
         runner,
         "_download_archive",
-        lambda _: pytest.fail("backend mismatch reached remote source download"),
+        fail_download,
     )
     with pytest.raises(runner.RunnerError, match="only backend allowed"):
-        runner.run(binding, backend, tmp_path / "output")
+        _ = runner.run(binding, backend, tmp_path / "output")

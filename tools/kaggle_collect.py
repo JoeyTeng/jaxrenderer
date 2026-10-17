@@ -3,22 +3,24 @@
 from __future__ import annotations
 
 import argparse
+from collections.abc import Mapping
 from datetime import datetime, timezone
 import hashlib
+import importlib
 import json
 import os
 from pathlib import Path, PurePosixPath
 import re
 import sys
-from typing import Any
+from typing import Any, cast
 from urllib.parse import urljoin, urlsplit
 
 from tools.kaggle_ci import (
     CONTROLLER_STATE_FIELDS,
     LEGACY_CONTROLLER_STATE_FIELDS,
     KaggleError,
-    _validate_binding,
-    _validate_downloaded_result,
+    validate_binding,
+    validate_downloaded_result,
 )
 
 VERSION = "v1"
@@ -65,19 +67,19 @@ def _redact(message: str, token: str) -> str:
 
 def _load_sdk(token: str) -> tuple[Any, Any, Any, Any]:
     """Import the installed Kaggle SDK only after all local identity checks."""
-    from kagglesdk.kaggle_client import KaggleClient
-    from kagglesdk.kaggle_env import KaggleEnv
-    from kagglesdk.kernels.types.kernels_api_service import (
-        ApiGetKernelRequest,
-        ApiGetKernelSessionStatusRequest,
-        ApiListKernelSessionOutputRequest,
+    kaggle_client = importlib.import_module("kagglesdk.kaggle_client")
+    kaggle_env = importlib.import_module("kagglesdk.kaggle_env")
+    kernel_service = importlib.import_module(
+        "kagglesdk.kernels.types.kernels_api_service"
     )
+    client_type = getattr(kaggle_client, "KaggleClient")
+    environment = getattr(kaggle_env, "KaggleEnv")
 
     return (
-        KaggleClient(env=KaggleEnv.PROD, api_token=token, verbose=False),
-        ApiGetKernelRequest,
-        ApiGetKernelSessionStatusRequest,
-        ApiListKernelSessionOutputRequest,
+        client_type(env=environment.PROD, api_token=token, verbose=False),
+        getattr(kernel_service, "ApiGetKernelRequest"),
+        getattr(kernel_service, "ApiGetKernelSessionStatusRequest"),
+        getattr(kernel_service, "ApiListKernelSessionOutputRequest"),
     )
 
 
@@ -90,7 +92,10 @@ def _bounded_client(client: Any) -> Any:
     original_send = session.send
 
     def bounded_send(request: Any, **kwargs: Any) -> Any:
-        parsed_request_url = urlsplit(request.url)
+        request_url = getattr(request, "url", None)
+        if not isinstance(request_url, str):
+            raise CollectionError("Kaggle API request URL was malformed")
+        parsed_request_url = urlsplit(request_url)
         if (
             parsed_request_url.scheme != "https"
             or parsed_request_url.hostname != "api.kaggle.com"
@@ -104,8 +109,12 @@ def _bounded_client(client: Any) -> Any:
         try:
             if response.is_redirect:
                 raise CollectionError("Kaggle API redirects are not permitted")
-            if response.url and urlsplit(response.url).hostname != "api.kaggle.com":
-                raise CollectionError("Kaggle API redirected to an unexpected host")
+            response_url = getattr(response, "url", None)
+            if response_url:
+                if not isinstance(response_url, str):
+                    raise CollectionError("Kaggle API response URL was malformed")
+                if urlsplit(response_url).hostname != "api.kaggle.com":
+                    raise CollectionError("Kaggle API redirected to an unexpected host")
             length = response.headers.get("Content-Length")
             if length:
                 try:
@@ -134,7 +143,7 @@ def _bounded_client(client: Any) -> Any:
     return client
 
 
-def _credentials(env: dict[str, str]) -> tuple[str, str]:
+def _credentials(env: Mapping[str, str]) -> tuple[str, str]:
     token = env.get("KAGGLE_API_TOKEN", "")
     username = env.get("KAGGLE_USERNAME", "")
     if not token or token.isspace():
@@ -150,10 +159,13 @@ def _controller_identity(
     binding: dict[str, object], state_path: Path, username: str
 ) -> tuple[str, int]:
     try:
-        state = json.loads(state_path.read_text(encoding="utf-8"))
+        state: object = json.loads(state_path.read_text(encoding="utf-8"))
     except (OSError, UnicodeError, json.JSONDecodeError) as error:
         raise CollectionError("could not read controller resume state") from error
-    if not isinstance(state, dict) or set(state) not in (
+    if not isinstance(state, dict):
+        raise CollectionError("resume state has an unsupported controller schema")
+    state = cast(dict[str, object], state)
+    if set(state) not in (
         LEGACY_CONTROLLER_STATE_FIELDS,
         CONTROLLER_STATE_FIELDS,
     ):
@@ -166,13 +178,13 @@ def _controller_identity(
     kernel_id = state.get("kernel_id")
     if not isinstance(kernel_id, str):
         raise CollectionError("resume state kernel identity is invalid")
-    owner, _ = _kernel_identity(binding, kernel_id)
+    owner, _ = kernel_identity(binding, kernel_id)
     if owner != username:
         raise CollectionError("resume state kernel identity does not match credentials")
     return kernel_id, submitted_version
 
 
-def _kernel_identity(binding: dict[str, object], kernel_id: object) -> tuple[str, str]:
+def kernel_identity(binding: dict[str, object], kernel_id: object) -> tuple[str, str]:
     """Validate the binding-derived kernel ID independently of submission state."""
     if not isinstance(kernel_id, str):
         raise CollectionError("resume state kernel identity is invalid")
@@ -211,7 +223,7 @@ def _remote_status(api: Any, request_type: Any, username: str, slug: str) -> str
     response = api.get_kernel_session_status(request)
     status = getattr(response, "status", None)
     if hasattr(status, "name"):
-        raw = status.name
+        raw = cast(str, getattr(status, "name"))
     else:
         raw = str(status)
     raw = raw.rsplit(".", maxsplit=1)[-1].strip().casefold()
@@ -321,7 +333,7 @@ def _download_file(url: str, destination: Path, remaining: int) -> int:
                             raise CollectionError(
                                 "Kaggle output file exceeded its size limit"
                             )
-                        output.write(chunk)
+                        _ = output.write(chunk)
                 return total
             finally:
                 response.close()
@@ -346,6 +358,7 @@ def _collect_pages(api: Any, request_type: Any, username: str, slug: str) -> lis
         page_files = getattr(response, "files", None)
         if not isinstance(page_files, list):
             raise CollectionError("Kaggle output listing was malformed")
+        page_files = cast(list[Any], page_files)
         if len(files) + len(page_files) > MAX_FILES:
             raise CollectionError("Kaggle output listing exceeded its file limit")
         for item in page_files:
@@ -354,7 +367,7 @@ def _collect_pages(api: Any, request_type: Any, username: str, slug: str) -> lis
                 raise CollectionError(
                     "Kaggle output listing contained duplicate file names"
                 )
-            _safe_download_url(getattr(item, "url", None))
+            _ = _safe_download_url(getattr(item, "url", None))
             seen_names.add(name)
             files.append(item)
         next_token = getattr(response, "next_page_token", "") or ""
@@ -373,11 +386,11 @@ def _write_report(output_dir: Path, report: dict[str, Any]) -> None:
     path = output_dir / "kaggle-collection-report.json"
     with path.open("x", encoding="utf-8") as stream:
         json.dump(report, stream, indent=2, sort_keys=True)
-        stream.write("\n")
+        _ = stream.write("\n")
 
 
 def collect(
-    binding: dict[str, object], resume_state_path: Path, output_dir: Path
+    binding: Mapping[str, object], resume_state_path: Path, output_dir: Path
 ) -> dict[str, Any]:
     """Collect only version 1 outputs from the frozen, already-submitted kernel."""
     output_dir = Path(output_dir)
@@ -405,7 +418,7 @@ def collect(
     token = ""
     client = None
     try:
-        binding = _validate_binding(binding)
+        binding = validate_binding(binding)
         token, username = _credentials(os.environ)
         if Path(resume_state_path).resolve() == output_dir.resolve() or (
             Path(resume_state_path).resolve().parent == output_dir.resolve()
@@ -426,7 +439,7 @@ def collect(
         client, get_request, status_request, output_request = _load_sdk(token)
         client = _bounded_client(client)
         api = client.kernels.kernels_api_client
-        _versioned_metadata(api, get_request, username, slug)
+        _ = _versioned_metadata(api, get_request, username, slug)
         status = _remote_status(api, status_request, username, slug)
         report.update(status=status, remote_status=status, version_verified=True)
         if status in {
@@ -466,7 +479,7 @@ def collect(
                 destination = output_dir.joinpath(*PurePosixPath(name).parts)
                 destination.parent.mkdir(parents=True, exist_ok=True)
                 total_bytes += _download_file(
-                    getattr(item, "url", None),
+                    _safe_download_url(getattr(item, "url", None)),
                     destination,
                     MAX_TOTAL_BYTES - total_bytes,
                 )
@@ -474,8 +487,8 @@ def collect(
                     raise CollectionError(
                         "Kaggle output exceeded its aggregate size limit"
                     )
-            _versioned_metadata(api, get_request, username, slug)
-            _validate_downloaded_result(output_dir / "result.json", binding)
+            _ = _versioned_metadata(api, get_request, username, slug)
+            _ = validate_downloaded_result(output_dir / "result.json", binding)
             report.update(outcome="success", success=True)
     except Exception as error:
         if isinstance(error, (CollectionError, KaggleError)):
@@ -496,9 +509,9 @@ def collect(
 
 def parser() -> argparse.ArgumentParser:
     root = argparse.ArgumentParser(description=__doc__)
-    root.add_argument("--binding", type=Path, required=True)
-    root.add_argument("--resume-state", type=Path, required=True)
-    root.add_argument("--output-dir", type=Path, required=True)
+    _ = root.add_argument("--binding", type=Path, required=True)
+    _ = root.add_argument("--resume-state", type=Path, required=True)
+    _ = root.add_argument("--output-dir", type=Path, required=True)
     return root
 
 
@@ -507,7 +520,7 @@ def main(argv: list[str] | None = None) -> int:
     token = os.environ.get("KAGGLE_API_TOKEN", "")
     try:
         try:
-            binding = _validate_binding(
+            binding = validate_binding(
                 json.loads(args.binding.read_text(encoding="utf-8"))
             )
         except (OSError, UnicodeError, json.JSONDecodeError) as error:

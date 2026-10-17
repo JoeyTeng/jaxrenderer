@@ -1,8 +1,9 @@
 from jax import Array
-import jax.numpy as jnp
 import numpy as np
+import numpy.typing as npt
 import pytest
 
+from renderer._meta_utils import typed_asarray
 from renderer.utils import transpose_for_display
 
 
@@ -93,11 +94,11 @@ class TestTransposeForDisplay:
     )
     def test_transpose_and_optional_vertical_flip_match_expected_values(
         self,
-        matrix: list,
+        matrix: npt.ArrayLike,
         flip_vertical: bool,
-        expected: list,
+        expected: npt.ArrayLike,
     ):
-        input_array = jnp.asarray(matrix)
+        input_array = typed_asarray(matrix)
         expected_array = np.asarray(expected, dtype=input_array.dtype)
 
         actual = transpose_for_display(input_array, flip_vertical=flip_vertical)

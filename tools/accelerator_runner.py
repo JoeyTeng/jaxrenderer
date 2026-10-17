@@ -18,6 +18,7 @@ import sys
 import tarfile
 import tempfile
 import time
+from typing import cast
 import urllib.request
 
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
@@ -44,7 +45,7 @@ class RunnerError(RuntimeError):
     """A closed-gate validation or accelerator execution error."""
 
 
-def _validate_binding(binding: Mapping[str, object]) -> dict[str, object]:
+def validate_binding(binding: Mapping[str, object]) -> dict[str, object]:
     fields = set(binding)
     if fields == PR_BINDING_FIELDS:
         if type(binding["pr"]) is not int or binding["pr"] <= 0:
@@ -73,7 +74,7 @@ def _validate_binding(binding: Mapping[str, object]) -> dict[str, object]:
 
 def source_url_for_binding(binding: Mapping[str, object]) -> str:
     """Return the only accepted unauthenticated archive URL for the frozen head."""
-    value = _validate_binding(binding)
+    value = validate_binding(binding)
     return (
         f"https://github.com/{value['head_repository']}/archive/"
         f"{value['head_sha']}.tar.gz"
@@ -242,7 +243,7 @@ def _run_command(
         deadline = time.monotonic() + COMMAND_TIMEOUT_SECONDS
         written = 0
         with selectors.DefaultSelector() as selector, log_path.open("ab") as log:
-            selector.register(process.stdout, selectors.EVENT_READ)
+            _ = selector.register(process.stdout, selectors.EVENT_READ)
             while selector.get_map():
                 time_left = deadline - time.monotonic()
                 if time_left <= 0:
@@ -251,10 +252,10 @@ def _run_command(
                 for key, _ in events:
                     chunk = os.read(key.fd, min(64 * 1024, remaining - written + 1))
                     if not chunk:
-                        selector.unregister(key.fileobj)
+                        _ = selector.unregister(key.fileobj)
                         continue
                     available = remaining - written
-                    log.write(chunk[:available])
+                    _ = log.write(chunk[:available])
                     written += min(len(chunk), available)
                     if len(chunk) > available:
                         raise RunnerError(
@@ -274,16 +275,13 @@ def _run_command(
         if process is not None:
             _terminate_process(process)
         raise RunnerError(f"could not start command {command[0]!r}: {error}") from error
-    if process is not None and process.stdout is not None:
-        process.stdout.close()
-    if return_code is None:
-        raise RunnerError("command did not return an exit status")
+    process.stdout.close()
     if return_code:
         raise RunnerError(
             f"command failed with exit {return_code}; see {log_path.name}"
         )
     with log_path.open("rb") as log:
-        log.seek(max(0, log_path.stat().st_size - LOG_TAIL_BYTES))
+        _ = log.seek(max(0, log_path.stat().st_size - LOG_TAIL_BYTES))
         return log.read(LOG_TAIL_BYTES).decode("utf-8", errors="replace")
 
 
@@ -298,7 +296,7 @@ def _terminate_process(process: subprocess.Popen[bytes]) -> None:
     except ProcessLookupError:
         pass
     try:
-        process.wait(timeout=5)
+        _ = process.wait(timeout=5)
     except subprocess.TimeoutExpired:
         try:
             if os.name == "posix":
@@ -307,7 +305,7 @@ def _terminate_process(process: subprocess.Popen[bytes]) -> None:
                 process.kill()
         except ProcessLookupError:
             pass
-        process.wait()
+        _ = process.wait()
 
 
 def _locked_jax_version(lock_path: Path) -> str:
@@ -317,11 +315,19 @@ def _locked_jax_version(lock_path: Path) -> str:
         lock = tomllib.loads(lock_path.read_text(encoding="utf-8"))
     except (OSError, UnicodeError, tomllib.TOMLDecodeError) as error:
         raise RunnerError(f"could not read uv.lock: {error}") from error
-    versions = {
-        package.get("version")
-        for package in lock.get("package", [])
-        if package.get("name") == "jax" and isinstance(package.get("version"), str)
-    }
+    raw_packages = lock.get("package", [])
+    if not isinstance(raw_packages, list):
+        raise RunnerError("uv.lock package list is malformed")
+    raw_packages = cast(list[object], raw_packages)
+    versions: set[str] = set()
+    for raw_package in raw_packages:
+        if not isinstance(raw_package, dict):
+            raise RunnerError("uv.lock package entry is malformed")
+        package = cast(dict[str, object], raw_package)
+        name = package.get("name")
+        version = package.get("version")
+        if name == "jax" and isinstance(version, str):
+            versions.add(version)
     if len(versions) != 1:
         raise RunnerError(
             "uv.lock must resolve exactly one JAX version for the accelerator runner"
@@ -342,12 +348,14 @@ def _installed_versions(
         value = json.loads(output.strip().splitlines()[-1])
     except (IndexError, json.JSONDecodeError) as error:
         raise RunnerError("could not read installed package versions") from error
-    if not isinstance(value, dict) or not all(
-        isinstance(name, str) and isinstance(version, str)
-        for name, version in value.items()
-    ):
+    if not isinstance(value, dict):
         raise RunnerError("installed package version report is malformed")
-    return value
+    value = cast(dict[str, object], value)
+    if not all(isinstance(version, str) for version in value.values()):
+        raise RunnerError("installed package version report is malformed")
+    return {
+        name: version for name, version in value.items() if isinstance(version, str)
+    }
 
 
 def _probe_accelerator(
@@ -380,25 +388,32 @@ def _probe_accelerator(
         report = json.loads(output.strip().splitlines()[-1])
     except (IndexError, json.JSONDecodeError) as error:
         raise RunnerError("accelerator probe returned malformed JSON") from error
+    if not isinstance(report, dict):
+        raise RunnerError("accelerator probe did not report the requested backend")
+    report = cast(dict[str, object], report)
+    raw_devices = report.get("devices")
     if (
-        not isinstance(report, dict)
-        or report.get("device_backend") != expected_backend
-        or not isinstance(report.get("devices"), list)
-        or not report["devices"]
+        report.get("device_backend") != expected_backend
+        or not isinstance(raw_devices, list)
+        or not raw_devices
     ):
         raise RunnerError("accelerator probe did not report the requested backend")
-    for device in report["devices"]:
-        if (
-            not isinstance(device, dict)
-            or set(device) != {"platform", "device_kind", "id"}
-            or device["platform"] != expected_backend
-            or not all(isinstance(device[key], str) and device[key] for key in device)
+    devices = cast(list[object], raw_devices)
+    for raw_device in devices:
+        if not isinstance(raw_device, dict):
+            raise RunnerError("accelerator probe returned malformed device metadata")
+        device = cast(dict[str, object], raw_device)
+        if set(device) != {"platform", "device_kind", "id"}:
+            raise RunnerError("accelerator probe returned malformed device metadata")
+        if device["platform"] != expected_backend or not all(
+            isinstance(device[key], str) and device[key] for key in device
         ):
             raise RunnerError("accelerator probe returned malformed device metadata")
+    report["devices"] = devices
     return report
 
 
-def _initial_result(binding: Mapping[str, object], backend: str) -> dict[str, object]:
+def initial_result(binding: Mapping[str, object], backend: str) -> dict[str, object]:
     identity = (
         {
             "pr": binding["pr"],
@@ -426,7 +441,7 @@ def _initial_result(binding: Mapping[str, object], backend: str) -> dict[str, ob
 
 
 def _write_json(path: Path, value: Mapping[str, object]) -> None:
-    path.write_text(
+    _ = path.write_text(
         json.dumps(value, indent=2, sort_keys=True) + "\n", encoding="utf-8"
     )
 
@@ -435,7 +450,7 @@ def run(
     binding: Mapping[str, object], backend: str, output_dir: Path
 ) -> dict[str, object]:
     """Run the locked suite on a verified GPU or TPU and write its manifest."""
-    frozen = _validate_binding(binding)
+    frozen = validate_binding(binding)
     if backend not in {"gpu", "tpu"}:
         raise RunnerError("backend must be gpu or tpu")
     expected_backend = "gpu" if "pr" in frozen else backend
@@ -444,7 +459,7 @@ def run(
             f"{expected_backend.upper()} is the only backend allowed for this binding type"
         )
     output, output_identity = _prepare_output(Path(output_dir))
-    result = _initial_result(frozen, backend)
+    result = initial_result(frozen, backend)
     diagnostics: list[str] = []
     diagnostics_path = output / "diagnostics.log"
     try:
@@ -455,13 +470,13 @@ def run(
         ) as temporary:
             temporary_root = Path(temporary)
             home = temporary_root / "home"
-            home.mkdir()
+            _ = home.mkdir()
             work = temporary_root / "work"
             source_root = _extract_source_archive(_download_archive(source_url), work)
             python_version = "3.14" if backend == "gpu" else "3.13"
             venv = source_root / ".venv"
             artifacts = output / "render-artifacts"
-            artifacts.mkdir(exist_ok=True)
+            _ = artifacts.mkdir(exist_ok=True)
             environment = _minimal_environment(home, venv, backend, artifacts)
             uv = shutil.which("uv", path=environment["PATH"])
             if uv is None:
@@ -469,13 +484,13 @@ def run(
                     "uv executable is required in the trusted accelerator image"
                 )
             setup_log = output / "setup.log"
-            _run_command(
+            _ = _run_command(
                 (uv, "python", "install", python_version),
                 source_root,
                 environment,
                 setup_log,
             )
-            _run_command(
+            _ = _run_command(
                 (
                     uv,
                     "sync",
@@ -511,7 +526,7 @@ def run(
                 "numpy": baseline_versions.get("numpy", "unknown"),
             }
             extra = "cuda12" if backend == "gpu" else "tpu"
-            _run_command(
+            _ = _run_command(
                 (
                     uv,
                     "pip",
@@ -578,9 +593,10 @@ def run(
             )
             result["device_backend"] = probe["device_backend"]
             result["devices"] = probe["devices"]
-            result["device_count"] = len(probe["devices"])
+            probe_devices = cast(list[object], probe["devices"])
+            result["device_count"] = len(probe_devices)
 
-            _run_command(
+            _ = _run_command(
                 (
                     str(venv_python),
                     "-m",
@@ -593,7 +609,7 @@ def run(
                 environment,
                 output / "full-tests.log",
             )
-            _run_command(
+            _ = _run_command(
                 (
                     str(venv_python),
                     "-m",
@@ -610,7 +626,9 @@ def run(
     except Exception as error:
         diagnostics.append(f"{type(error).__name__}: {error}")
         try:
-            diagnostics_path.write_text("\n".join(diagnostics) + "\n", encoding="utf-8")
+            _ = diagnostics_path.write_text(
+                "\n".join(diagnostics) + "\n", encoding="utf-8"
+            )
         except OSError:
             pass
 
@@ -638,14 +656,15 @@ def _python_version(
 
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--backend", choices=("gpu", "tpu"), required=True)
-    parser.add_argument("--binding", type=Path, required=True)
-    parser.add_argument("--output-dir", type=Path, required=True)
+    _ = parser.add_argument("--backend", choices=("gpu", "tpu"), required=True)
+    _ = parser.add_argument("--binding", type=Path, required=True)
+    _ = parser.add_argument("--output-dir", type=Path, required=True)
     arguments = parser.parse_args(argv)
     try:
         binding = json.loads(arguments.binding.read_text(encoding="utf-8"))
         if not isinstance(binding, dict):
             raise RunnerError("binding JSON must be an object")
+        binding = cast(dict[str, object], binding)
         result = run(binding, arguments.backend, arguments.output_dir)
     except (OSError, UnicodeError, json.JSONDecodeError, RunnerError) as error:
         print(f"accelerator runner: {error}", file=sys.stderr)

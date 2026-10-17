@@ -1,12 +1,11 @@
-# pyright: reportPrivateUsage=false, reportUnknownLambdaType=false, reportUnknownArgumentType=false, reportUnknownMemberType=false
-
 from __future__ import annotations
 
+from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
 import hashlib
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol, cast
 
 import pytest
 from tools import accelerator_gate, kaggle_ci, kaggle_collect, release_tpu_gate
@@ -15,10 +14,120 @@ from tools import tpu_collection_periodic as periodic
 
 SOURCE_SHA = "a" * 40
 COLLECTOR_SHA = "b" * 40
-SOURCE_RUN = "789"
-SOURCE_ATTEMPT = "3"
-COLLECTOR_RUN = "990"
-COLLECTOR_ATTEMPT = "2"
+SOURCE_RUN_ID = 789
+SOURCE_ATTEMPT_ID = 3
+COLLECTOR_RUN_ID = 990
+COLLECTOR_ATTEMPT_ID = 2
+SOURCE_RUN = str(SOURCE_RUN_ID)
+SOURCE_ATTEMPT = str(SOURCE_ATTEMPT_ID)
+COLLECTOR_RUN = str(COLLECTOR_RUN_ID)
+COLLECTOR_ATTEMPT = str(COLLECTOR_ATTEMPT_ID)
+
+
+class _BudgetLike(Protocol):
+    def check(self) -> None: ...
+
+
+NoTerminal = Callable[[str, str, str, Path, _BudgetLike], dict[str, object] | None]
+Revalidate = Callable[
+    [Path], tuple[dict[str, object], dict[str, object], dict[str, object]]
+]
+CollectResult = Callable[[dict[str, object], Path, Path], dict[str, object]]
+
+
+def _require_periodic_context() -> str:
+    helper = cast(Callable[[], str], getattr(periodic, "_require_context"))
+    return helper()
+
+
+def _new_budget() -> _BudgetLike:
+    factory = cast(Callable[[], _BudgetLike], getattr(periodic, "_Budget"))
+    return factory()
+
+
+def _read_periodic_terminal(
+    artifact: dict[str, object],
+    *,
+    source_run_id: str,
+    source_attempt: str,
+    commit: str,
+    binding: dict[str, object],
+    kernel_id: str,
+    budget: _BudgetLike,
+) -> dict[str, object]:
+    helper = cast(Callable[..., dict[str, object]], getattr(periodic, "_read_terminal"))
+    return helper(
+        artifact,
+        source_run_id=source_run_id,
+        source_attempt=source_attempt,
+        commit=commit,
+        binding=binding,
+        kernel_id=kernel_id,
+        budget=budget,
+    )
+
+
+def _source_expired(
+    source_run_id: str,
+    source_attempt: str,
+    commit: str,
+    budget: _BudgetLike,
+) -> bool:
+    helper = cast(
+        Callable[[str, str, str, _BudgetLike], bool],
+        getattr(periodic, "_source_expired"),
+    )
+    return helper(source_run_id, source_attempt, commit, budget)
+
+
+def _validate_source_files(
+    source_dir: Path, source: dict[str, object]
+) -> dict[str, object]:
+    helper = cast(
+        Callable[[Path, dict[str, object]], dict[str, object]],
+        getattr(collection_gate, "_validate_source_files"),
+    )
+    return helper(source_dir, source)
+
+
+def _write_record(record: dict[str, object]) -> Callable[[int, str, Path], None]:
+    def download(artifact_id: int, member: str, destination: Path) -> None:
+        del artifact_id, member
+        _ = destination.write_text(json.dumps(record), encoding="utf-8")
+
+    return download
+
+
+def _no_master_history(commit: str) -> None:
+    del commit
+
+
+def _not_expired(
+    source_run: str, source_attempt: str, commit: str, budget: _BudgetLike
+) -> bool:
+    del source_run, source_attempt, commit, budget
+    return False
+
+
+def _has_expired(
+    source_run: str, source_attempt: str, commit: str, budget: _BudgetLike
+) -> bool:
+    del source_run, source_attempt, commit, budget
+    return True
+
+
+def _raise_provider_not_called(
+    binding: dict[str, object], resume_state_path: Path, output_dir: Path
+) -> dict[str, object]:
+    del binding, resume_state_path, output_dir
+    pytest.fail("provider must not be queried")
+
+
+def _raise_terminal_provider_not_called(
+    binding: dict[str, object], resume_state_path: Path, output_dir: Path
+) -> dict[str, object]:
+    del binding, resume_state_path, output_dir
+    pytest.fail("must not query provider after terminal evidence")
 
 
 def _binding(
@@ -62,18 +171,18 @@ def _source_record() -> dict[str, object]:
 
 def _prepare_source(output: Path) -> None:
     output.mkdir(parents=True)
-    (output / "binding.json").write_text(json.dumps(_binding()), encoding="utf-8")
-    (output / "kaggle-controller-state.json").write_text(
+    _ = (output / "binding.json").write_text(json.dumps(_binding()), encoding="utf-8")
+    _ = (output / "kaggle-controller-state.json").write_text(
         json.dumps(_controller_state()), encoding="utf-8"
     )
-    (output / "collection-source.json").write_text(
+    _ = (output / "collection-source.json").write_text(
         json.dumps(_source_record()), encoding="utf-8"
     )
 
 
 def _run(
-    run_id: int = int(SOURCE_RUN),
-    attempt: int = int(SOURCE_ATTEMPT),
+    run_id: int = SOURCE_RUN_ID,
+    attempt: int = SOURCE_ATTEMPT_ID,
     *,
     created_at: datetime | None = None,
 ) -> dict[str, object]:
@@ -95,7 +204,7 @@ def _run(
 
 
 def _collector_run(
-    *, attempt: int = int(COLLECTOR_ATTEMPT), path: str = periodic.WORKFLOW_PATH
+    *, attempt: int = COLLECTOR_ATTEMPT_ID, path: str = periodic.WORKFLOW_PATH
 ) -> dict[str, object]:
     return {
         "id": int(COLLECTOR_RUN),
@@ -125,7 +234,13 @@ def _set_periodic_context(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def _patch_prepare(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(periodic, "_source_expired", lambda *args: False)
+    def not_expired(
+        source_run: str, source_attempt: str, commit: str, budget: _BudgetLike
+    ) -> bool:
+        del source_run, source_attempt, commit, budget
+        return False
+
+    monkeypatch.setattr(periodic, "_source_expired", not_expired)
 
     def prepare(
         source_run: str,
@@ -138,7 +253,7 @@ def _patch_prepare(monkeypatch: pytest.MonkeyPatch) -> None:
         assert source_attempt == SOURCE_ATTEMPT
         assert commit == SOURCE_SHA
         _prepare_source(output)
-        github_output.write_text("", encoding="utf-8")
+        _ = github_output.write_text("", encoding="utf-8")
         return _source_record()
 
     monkeypatch.setattr(collection_gate, "prepare", prepare)
@@ -190,9 +305,9 @@ def test_periodic_context_is_exact_and_manual_event_is_supported(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _set_periodic_context(monkeypatch)
-    assert periodic._require_context() == f"{COLLECTOR_RUN}.1"
+    assert _require_periodic_context() == f"{COLLECTOR_RUN}.1"
     monkeypatch.setenv("GITHUB_EVENT_NAME", "workflow_dispatch")
-    assert periodic._require_context() == f"{COLLECTOR_RUN}.1"
+    assert _require_periodic_context() == f"{COLLECTOR_RUN}.1"
 
     for name, value in (
         ("GITHUB_REF", "refs/heads/feature"),
@@ -205,7 +320,7 @@ def test_periodic_context_is_exact_and_manual_event_is_supported(
         _set_periodic_context(monkeypatch)
         monkeypatch.setenv(name, value)
         with pytest.raises(periodic.PeriodicError, match="canonical master workflow"):
-            periodic._require_context()
+            _ = _require_periodic_context()
 
 
 def test_discover_returns_exact_candidates_and_matrix(
@@ -225,7 +340,7 @@ def test_discover_returns_exact_candidates_and_matrix(
             return {"total_count": 0, "artifacts": []}
         raise AssertionError(route)
 
-    monkeypatch.setattr(accelerator_gate, "_gh_api", api)
+    monkeypatch.setattr(accelerator_gate, "gh_api", api)
     output = tmp_path / "discovery"
     github_output = tmp_path / "github-output"
     result = periodic.discover(output, github_output)
@@ -249,14 +364,19 @@ def test_discover_fails_on_incomplete_run_inventory(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     _set_periodic_context(monkeypatch)
+
+    def api(route: str, body: dict[str, object] | None = None) -> Any:
+        del body
+        return {"total_count": 2, "workflow_runs": [_run()]}
+
     monkeypatch.setattr(
         accelerator_gate,
-        "_gh_api",
-        lambda route, body=None: {"total_count": 2, "workflow_runs": [_run()]},
+        "gh_api",
+        api,
     )
 
     with pytest.raises(periodic.PeriodicError, match="inventory is incomplete"):
-        periodic.discover(tmp_path / "discovery", tmp_path / "github-output")
+        _ = periodic.discover(tmp_path / "discovery", tmp_path / "github-output")
 
 
 def test_discover_ignores_sources_older_than_seven_days(
@@ -269,7 +389,7 @@ def test_discover_ignores_sources_older_than_seven_days(
         assert "actions/workflows/pypi.yml/runs?" in route
         return {"total_count": 1, "workflow_runs": [old]}
 
-    monkeypatch.setattr(accelerator_gate, "_gh_api", api)
+    monkeypatch.setattr(accelerator_gate, "gh_api", api)
     result = periodic.discover(tmp_path / "discovery", tmp_path / "github-output")
 
     assert result["has_sources"] is False
@@ -290,11 +410,22 @@ def test_discover_skips_non_master_manual_source_after_identity_check(
             return run
         raise AssertionError(route)
 
-    monkeypatch.setattr(accelerator_gate, "_gh_api", api)
+    monkeypatch.setattr(accelerator_gate, "gh_api", api)
+
+    def ineligible_prepare(
+        source_run: str,
+        source_attempt: str,
+        commit: str,
+        output: Path,
+        github_output: Path,
+    ) -> dict[str, object]:
+        del source_run, source_attempt, commit, output, github_output
+        pytest.fail("feature branch must be known ineligible")
+
     monkeypatch.setattr(
         collection_gate,
         "prepare",
-        lambda *args: pytest.fail("feature branch must be known ineligible"),
+        ineligible_prepare,
     )
 
     result = periodic.discover(tmp_path / "discovery", tmp_path / "github-output")
@@ -318,20 +449,28 @@ def test_discover_skips_only_explicitly_ineligible_sources(
     def ineligible(*args: Any, **kwargs: Any) -> None:
         raise collection_gate.IneligibleSource("known CPU failure")
 
-    monkeypatch.setattr(accelerator_gate, "_gh_api", api)
+    monkeypatch.setattr(accelerator_gate, "gh_api", api)
     monkeypatch.setattr(collection_gate, "prepare", ineligible)
     result = periodic.discover(tmp_path / "discovery", tmp_path / "github-output")
     assert result["has_sources"] is False
 
+    def fail_prepare(
+        source_run: str,
+        source_attempt: str,
+        commit: str,
+        output: Path,
+        github_output: Path,
+    ) -> dict[str, object]:
+        del source_run, source_attempt, commit, output, github_output
+        raise collection_gate.CollectionGateError("GitHub artefact lookup failed")
+
     monkeypatch.setattr(
         collection_gate,
         "prepare",
-        lambda *args, **kwargs: (_ for _ in ()).throw(
-            collection_gate.CollectionGateError("GitHub artefact lookup failed")
-        ),
+        fail_prepare,
     )
     with pytest.raises(collection_gate.CollectionGateError, match="lookup failed"):
-        periodic.discover(
+        _ = periodic.discover(
             tmp_path / "discovery-error", tmp_path / "github-output-error"
         )
 
@@ -386,14 +525,14 @@ def test_discover_skips_valid_legacy_source_and_keeps_timeout_candidate(
             "controller_artifact_id": 102,
         }
         output.mkdir(parents=True)
-        (output / "binding.json").write_text(json.dumps(binding), encoding="utf-8")
+        _ = (output / "binding.json").write_text(json.dumps(binding), encoding="utf-8")
         state_path = output / "kaggle-controller-state.json"
-        state_path.write_text(json.dumps(state), encoding="utf-8")
-        collection_gate._validate_source_files(output, source)
-        (output / "collection-source.json").write_text(
+        _ = state_path.write_text(json.dumps(state), encoding="utf-8")
+        _ = _validate_source_files(output, source)
+        _ = (output / "collection-source.json").write_text(
             json.dumps(source), encoding="utf-8"
         )
-        github_output.write_text("", encoding="utf-8")
+        _ = github_output.write_text("", encoding="utf-8")
         return source
 
     def legacy_kernel_id(binding: dict[str, object]) -> str:
@@ -401,9 +540,9 @@ def test_discover_skips_valid_legacy_source_and_keeps_timeout_candidate(
         run_tag = hashlib.sha256(encoded.encode()).hexdigest()[:16]
         return f"joey/jaxr-{run_tag}-0123456789"
 
-    monkeypatch.setattr(accelerator_gate, "_gh_api", api)
+    monkeypatch.setattr(accelerator_gate, "gh_api", api)
     monkeypatch.setattr(collection_gate, "prepare", prepare)
-    monkeypatch.setattr(periodic, "_source_expired", lambda *args: False)
+    monkeypatch.setattr(periodic, "_source_expired", _not_expired)
 
     report = periodic.discover(tmp_path / "discovery", tmp_path / "github-output")
 
@@ -435,13 +574,18 @@ def test_discover_rejects_foreign_or_wrong_workflow_inventory(
     _set_periodic_context(monkeypatch)
     bad_run = _run()
     bad_run[field] = value
+
+    def api(route: str, body: dict[str, object] | None = None) -> Any:
+        del body
+        return {"total_count": 1, "workflow_runs": [bad_run]}
+
     monkeypatch.setattr(
         accelerator_gate,
-        "_gh_api",
-        lambda route, body=None: {"total_count": 1, "workflow_runs": [bad_run]},
+        "gh_api",
+        api,
     )
     with pytest.raises(periodic.PeriodicError, match="identity is not canonical"):
-        periodic.discover(tmp_path / "discovery", tmp_path / "github-output")
+        _ = periodic.discover(tmp_path / "discovery", tmp_path / "github-output")
 
 
 @pytest.mark.parametrize("owner_conclusion", ["cancelled", "timed_out"])
@@ -472,20 +616,20 @@ def test_terminal_marker_accepts_post_upload_owner_cancellation_and_timeout(
     def download(artifact_id: int, member: str, destination: Path) -> None:
         assert artifact_id == 500
         assert member == "periodic-terminal.json"
-        destination.write_text(json.dumps(record), encoding="utf-8")
+        _ = destination.write_text(json.dumps(record), encoding="utf-8")
 
-    monkeypatch.setattr(accelerator_gate, "_gh_api", api)
-    monkeypatch.setattr(collection_gate, "_download_member", download)
-    monkeypatch.setattr(release_tpu_gate, "_verify_master_history", lambda commit: None)
+    monkeypatch.setattr(accelerator_gate, "gh_api", api)
+    monkeypatch.setattr(collection_gate, "download_member", download)
+    monkeypatch.setattr(release_tpu_gate, "verify_master_history", _no_master_history)
 
-    loaded = periodic._read_terminal(
+    loaded = _read_periodic_terminal(
         _terminal_artifact(),
         source_run_id=SOURCE_RUN,
         source_attempt=SOURCE_ATTEMPT,
         commit=SOURCE_SHA,
         binding=_binding(),
         kernel_id=str(_controller_state()["kernel_id"]),
-        budget=periodic._Budget(),
+        budget=_new_budget(),
     )
     assert loaded["outcome"] == outcome
 
@@ -513,24 +657,22 @@ def test_terminal_marker_rejects_running_or_mismatched_owner_attempt(
             return exact_attempt
         raise AssertionError(f"unexpected API route: {route}")
 
-    monkeypatch.setattr(accelerator_gate, "_gh_api", api)
+    monkeypatch.setattr(accelerator_gate, "gh_api", api)
     monkeypatch.setattr(
         collection_gate,
-        "_download_member",
-        lambda artifact_id, member, destination: destination.write_text(
-            json.dumps(_terminal_record()), encoding="utf-8"
-        ),
+        "download_member",
+        _write_record(_terminal_record()),
     )
-    monkeypatch.setattr(release_tpu_gate, "_verify_master_history", lambda commit: None)
+    monkeypatch.setattr(release_tpu_gate, "verify_master_history", _no_master_history)
     with pytest.raises(periodic.PeriodicError):
-        periodic._read_terminal(
+        _ = _read_periodic_terminal(
             _terminal_artifact(),
             source_run_id=SOURCE_RUN,
             source_attempt=SOURCE_ATTEMPT,
             commit=SOURCE_SHA,
             binding=_binding(),
             kernel_id=str(_controller_state()["kernel_id"]),
-            budget=periodic._Budget(),
+            budget=_new_budget(),
         )
 
 
@@ -549,24 +691,22 @@ def test_terminal_marker_uses_recorded_attempt_after_owner_was_rerun(
             return {"status": "ahead", "base_commit": {"sha": COLLECTOR_SHA}}
         raise AssertionError(f"unexpected or latest-run query: {route}")
 
-    monkeypatch.setattr(accelerator_gate, "_gh_api", api)
+    monkeypatch.setattr(accelerator_gate, "gh_api", api)
     monkeypatch.setattr(
         collection_gate,
-        "_download_member",
-        lambda artifact_id, member, destination: destination.write_text(
-            json.dumps(record), encoding="utf-8"
-        ),
+        "download_member",
+        _write_record(record),
     )
-    monkeypatch.setattr(release_tpu_gate, "_verify_master_history", lambda commit: None)
+    monkeypatch.setattr(release_tpu_gate, "verify_master_history", _no_master_history)
 
-    periodic._read_terminal(
+    _ = _read_periodic_terminal(
         _terminal_artifact(),
         source_run_id=SOURCE_RUN,
         source_attempt=SOURCE_ATTEMPT,
         commit=SOURCE_SHA,
         binding=_binding(),
         kernel_id=str(_controller_state()["kernel_id"]),
-        budget=periodic._Budget(),
+        budget=_new_budget(),
     )
     assert any(route.endswith("/attempts/2") for route in called)
     assert not any(route.endswith(f"/actions/runs/{COLLECTOR_RUN}") for route in called)
@@ -594,24 +734,22 @@ def test_terminal_marker_rejects_attempt_or_sha_mismatch(
             return {"status": "ahead", "base_commit": {"sha": COLLECTOR_SHA}}
         raise AssertionError(route)
 
-    monkeypatch.setattr(accelerator_gate, "_gh_api", api)
+    monkeypatch.setattr(accelerator_gate, "gh_api", api)
     monkeypatch.setattr(
         collection_gate,
-        "_download_member",
-        lambda artifact_id, member, destination: destination.write_text(
-            json.dumps(record), encoding="utf-8"
-        ),
+        "download_member",
+        _write_record(record),
     )
-    monkeypatch.setattr(release_tpu_gate, "_verify_master_history", lambda commit: None)
+    monkeypatch.setattr(release_tpu_gate, "verify_master_history", _no_master_history)
     with pytest.raises(periodic.PeriodicError, match=message):
-        periodic._read_terminal(
+        _ = _read_periodic_terminal(
             _terminal_artifact(),
             source_run_id=SOURCE_RUN,
             source_attempt=SOURCE_ATTEMPT,
             commit=SOURCE_SHA,
             binding=_binding(),
             kernel_id=str(_controller_state()["kernel_id"]),
-            budget=periodic._Budget(),
+            budget=_new_budget(),
         )
 
 
@@ -623,31 +761,59 @@ def test_collect_source_terminal_outcomes(
 ) -> None:
     _set_periodic_context(monkeypatch)
     _patch_prepare(monkeypatch)
-    monkeypatch.setattr(periodic, "_has_terminal", lambda *args: None)
+
+    def no_terminal(
+        source_run: str,
+        attempt: str,
+        commit: str,
+        source: Path,
+        budget: _BudgetLike,
+    ) -> dict[str, object] | None:
+        del source_run, attempt, commit, source, budget
+        return None
+
+    monkeypatch.setattr(periodic, "_has_terminal", no_terminal)
     finish_calls: list[bool] = []
+
+    def finish(source: dict[str, object], output: Path, provider_success: bool) -> None:
+        del source, output
+        finish_calls.append(provider_success)
+
     monkeypatch.setattr(
         collection_gate,
         "finish",
-        lambda source, output, provider_success: finish_calls.append(provider_success),
+        finish,
     )
+
+    def revalidate(
+        source: Path,
+    ) -> tuple[dict[str, object], dict[str, object], dict[str, object]]:
+        del source
+        return _source_record(), _binding(), _controller_state()
+
     monkeypatch.setattr(
         collection_gate,
         "revalidate",
-        lambda source: (_source_record(), _binding(), _controller_state()),
+        revalidate,
     )
+
+    def collect_result(
+        binding: dict[str, object], resume_state_path: Path, output_dir: Path
+    ) -> dict[str, object]:
+        del binding, resume_state_path, output_dir
+        status = (
+            "queued"
+            if outcome == "pending"
+            else "failed"
+            if outcome == "remote_failure"
+            else "complete"
+        )
+        return _report(outcome, status=status)
+
     monkeypatch.setattr(
         kaggle_collect,
         "collect",
-        lambda binding, resume_state_path, output_dir: _report(
-            outcome,
-            status=(
-                "queued"
-                if outcome == "pending"
-                else "failed"
-                if outcome == "remote_failure"
-                else "complete"
-            ),
-        ),
+        collect_result,
     )
     output = tmp_path / "artifacts"
     github_output = tmp_path / "github-output"
@@ -679,11 +845,12 @@ def test_collect_source_expires_before_provider_query(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     _set_periodic_context(monkeypatch)
-    monkeypatch.setattr(periodic, "_source_expired", lambda *args: True)
+    monkeypatch.setattr(periodic, "_source_expired", _has_expired)
+    fail_collect: CollectResult = _raise_provider_not_called
     monkeypatch.setattr(
         kaggle_collect,
         "collect",
-        lambda *args: pytest.fail("expired source must not query the provider"),
+        fail_collect,
     )
 
     report, exit_code = periodic.collect_source(
@@ -713,10 +880,10 @@ def test_source_expiry_uses_exact_attempt_metadata(
             return old
         raise AssertionError(route)
 
-    monkeypatch.setattr(accelerator_gate, "_gh_api", api)
-    budget = periodic._Budget()
+    monkeypatch.setattr(accelerator_gate, "gh_api", api)
+    budget = _new_budget()
 
-    assert periodic._source_expired(SOURCE_RUN, SOURCE_ATTEMPT, SOURCE_SHA, budget)
+    assert _source_expired(SOURCE_RUN, SOURCE_ATTEMPT, SOURCE_SHA, budget)
     assert routes[0].endswith(f"/actions/runs/{SOURCE_RUN}/attempts/{SOURCE_ATTEMPT}")
 
 
@@ -725,24 +892,42 @@ def test_collect_source_remote_failure_revalidates_original_evidence(
 ) -> None:
     _set_periodic_context(monkeypatch)
     _patch_prepare(monkeypatch)
-    monkeypatch.setattr(periodic, "_has_terminal", lambda *args: None)
+
+    def no_terminal(
+        source_run: str,
+        attempt: str,
+        commit: str,
+        source: Path,
+        budget: _BudgetLike,
+    ) -> dict[str, object] | None:
+        del source_run, attempt, commit, source, budget
+        return None
+
+    monkeypatch.setattr(periodic, "_has_terminal", no_terminal)
     revalidate_calls: list[Path] = []
+
+    def revalidate(
+        source: Path,
+    ) -> tuple[dict[str, object], dict[str, object], dict[str, object]]:
+        revalidate_calls.append(source)
+        return _source_record(), _binding(), _controller_state()
+
     monkeypatch.setattr(
         collection_gate,
         "revalidate",
-        lambda source: (
-            revalidate_calls.append(source),
-            _source_record(),
-            _binding(),
-            _controller_state(),
-        )[1:],
+        revalidate,
     )
+
+    def collect_result(
+        binding: dict[str, object], state_path: Path, output: Path
+    ) -> dict[str, object]:
+        del binding, state_path, output
+        return _report("remote_failure", status="failed")
+
     monkeypatch.setattr(
         kaggle_collect,
         "collect",
-        lambda binding, resume_state_path, output_dir: _report(
-            "remote_failure", status="failed"
-        ),
+        collect_result,
     )
 
     _, exit_code = periodic.collect_source(
@@ -762,7 +947,18 @@ def test_collect_source_collection_error_writes_no_terminal_and_can_retry(
 ) -> None:
     _set_periodic_context(monkeypatch)
     _patch_prepare(monkeypatch)
-    monkeypatch.setattr(periodic, "_has_terminal", lambda *args: None)
+
+    def no_terminal(
+        source_run: str,
+        attempt: str,
+        commit: str,
+        source: Path,
+        budget: _BudgetLike,
+    ) -> dict[str, object] | None:
+        del source_run, attempt, commit, source, budget
+        return None
+
+    monkeypatch.setattr(periodic, "_has_terminal", no_terminal)
     attempts = 0
 
     def collection_error(
@@ -776,7 +972,7 @@ def test_collect_source_collection_error_writes_no_terminal_and_can_retry(
     for suffix in ("first", "retry"):
         output = tmp_path / suffix
         with pytest.raises(periodic.PeriodicError, match="verified terminal result"):
-            periodic.collect_source(
+            _ = periodic.collect_source(
                 SOURCE_RUN,
                 SOURCE_ATTEMPT,
                 SOURCE_SHA,
@@ -812,24 +1008,30 @@ def test_collect_source_skips_provider_when_terminal_marker_exists(
             return {"status": "ahead", "base_commit": {"sha": COLLECTOR_SHA}}
         raise AssertionError(f"unexpected API route: {route}")
 
-    monkeypatch.setattr(accelerator_gate, "_gh_api", api)
+    monkeypatch.setattr(accelerator_gate, "gh_api", api)
+
+    def terminal_artifact(
+        source_run: int, name: str, budget: _BudgetLike
+    ) -> dict[str, object] | None:
+        del source_run, name, budget
+        return _terminal_artifact()
+
     monkeypatch.setattr(
         periodic,
         "_terminal_artifact",
-        lambda source_run, name, budget: _terminal_artifact(),
+        terminal_artifact,
     )
     monkeypatch.setattr(
         collection_gate,
-        "_download_member",
-        lambda artifact_id, member, destination: destination.write_text(
-            json.dumps(terminal), encoding="utf-8"
-        ),
+        "download_member",
+        _write_record(terminal),
     )
-    monkeypatch.setattr(release_tpu_gate, "_verify_master_history", lambda commit: None)
+    monkeypatch.setattr(release_tpu_gate, "verify_master_history", _no_master_history)
+    fail_collect: CollectResult = _raise_terminal_provider_not_called
     monkeypatch.setattr(
         kaggle_collect,
         "collect",
-        lambda *args: pytest.fail("must not query provider after terminal evidence"),
+        fail_collect,
     )
 
     report, exit_code = periodic.collect_source(

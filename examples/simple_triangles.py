@@ -12,6 +12,7 @@ from jaxtyping import (
 import matplotlib.pyplot as plt
 
 from renderer import jit
+from renderer._meta_utils import is_array_type, typed_array, typed_modf, typed_zeros
 from renderer.geometry import Camera, normalise, to_homogeneous
 from renderer.pipeline import render
 from renderer.shader import ID, MixerOutput, PerFragment, PerVertex, Shader
@@ -28,15 +29,15 @@ from renderer.types import (
 )
 from renderer.utils import transpose_for_display
 
-eye = jnp.array((0.0, 0, 2))  # pyright: ignore[reportUnknownMemberType]
-center = jnp.array((0.0, 0, 0))  # pyright: ignore[reportUnknownMemberType]
-up = jnp.array((0.0, 1, 0))  # pyright: ignore[reportUnknownMemberType]
+eye = typed_array((0.0, 0, 2))
+center = typed_array((0.0, 0, 0))
+up = typed_array((0.0, 1, 0))
 
 width = 1920
 height = 1080
-lowerbound = jnp.zeros(2, dtype=int)  # pyright: ignore[reportUnknownMemberType]
-dimension = jnp.array((width, height))  # pyright: ignore[reportUnknownMemberType]
-depth = jnp.array(255)  # pyright: ignore[reportUnknownMemberType]
+lowerbound = typed_zeros(2, dtype=int)
+dimension = typed_array((width, height))
+depth = typed_array(255)
 
 camera: Camera = Camera.create(
     view=Camera.view_matrix(eye=eye, centre=center, up=up),
@@ -54,12 +55,10 @@ camera: Camera = Camera.create(
 )
 
 buffers = Buffers(
-    zbuffer=lax.full((width, height), 1.0),  # pyright: ignore[reportUnknownMemberType]
-    targets=(
-        lax.full((width, height, 3), 0.0),  # pyright: ignore[reportUnknownMemberType]
-    ),
+    zbuffer=lax.full((width, height), 1.0),
+    targets=(lax.full((width, height, 3), 0.0),),
 )
-face_indices = jnp.array(  # pyright: ignore[reportUnknownMemberType]
+face_indices = typed_array(
     (
         (0, 1, 2),
         (1, 3, 2),
@@ -68,7 +67,7 @@ face_indices = jnp.array(  # pyright: ignore[reportUnknownMemberType]
         (2, 5, 1),
     )
 )
-position = jnp.array(  # pyright: ignore[reportUnknownMemberType]
+position = typed_array(
     (
         (0.0, 0.0, 0.0),
         (2.0, 0.0, 0.0),
@@ -80,7 +79,7 @@ position = jnp.array(  # pyright: ignore[reportUnknownMemberType]
 )
 extra = GouraudExtraInput(
     position=position,
-    colour=jnp.array(  # pyright: ignore[reportUnknownMemberType]
+    colour=typed_array(
         (
             (1.0, 0.0, 0.0),
             (0.0, 1.0, 0.0),
@@ -107,10 +106,8 @@ class ExtraInput(NamedTuple):
 
 
 class ExtraFragmentData(NamedTuple):
-    colour: Colour = jnp.array(  # pyright: ignore[reportUnknownMemberType]
-        [0.0, 0.0, 0.0]
-    )
-    uv: Vec2f = jnp.zeros(2)  # pyright: ignore[reportUnknownMemberType]
+    colour: Colour = typed_array([0.0, 0.0, 0.0])
+    uv: Vec2f = typed_zeros(2)
 
 
 class ExtraMixerOutput(NamedTuple):
@@ -130,17 +127,14 @@ class _Shader(Shader[ExtraInput, ExtraFragmentData, ExtraMixerOutput]):
         # Use gl_VertexID to index in `extra` buffer.
         position: Vec4f = to_homogeneous(extra.position[gl_VertexID])
         gl_Position: Vec4f = camera.to_clip(position)
-        assert isinstance(gl_Position, Vec4f)
+        assert is_array_type(gl_Position, Vec4f)
 
         normal: Vec3f = normalise(extra.normal[gl_VertexID])
-        intensity = cast(
-            FloatV,
-            jnp.dot(
-                normal,
-                normalise(extra.light.direction),
-            ),
+        intensity: FloatV = jnp.dot(
+            normal,
+            normalise(extra.light.direction),
         )
-        assert isinstance(intensity, FloatV)
+        assert is_array_type(intensity, FloatV)
 
         light_colour: Colour
         light_colour = extra.light.colour * intensity
@@ -163,16 +157,13 @@ class _Shader(Shader[ExtraInput, ExtraFragmentData, ExtraMixerOutput]):
         varying: ExtraFragmentData,
         extra: ExtraInput,
     ) -> tuple[PerFragment, ExtraFragmentData]:
-        built_in: PerFragment = Shader.fragment(
-            gl_FragCoord,
-            gl_FrontFacing,
-            gl_PointCoord,
-            varying,
-            extra,
-        )[0]
+        built_in: PerFragment
+        built_in, _varying = Shader[
+            ExtraInput, ExtraFragmentData, ExtraMixerOutput
+        ].fragment(gl_FragCoord, gl_FrontFacing, gl_PointCoord, varying, extra)
         texture_colour: Colour = varying.colour
-        a = cast(BoolV, jnp.modf(varying.uv)[0] < 0.5)
-        texture_colour = jnp.where(  # pyright: ignore[reportUnknownMemberType]
+        a = typed_modf(varying.uv)[0] < 0.5
+        texture_colour = jnp.where(
             a[0] != a[1],
             texture_colour,
             texture_colour * 0.5,
@@ -191,7 +182,14 @@ class _Shader(Shader[ExtraInput, ExtraFragmentData, ExtraMixerOutput]):
         keeps: Bool[Array, "primitives"],
         extra: ExtraFragmentData,
     ) -> tuple[MixerOutput, ExtraMixerOutput]:
-        mixer_output, extra_output = Shader.mix(gl_FragDepth, keeps, extra)
+        mixer_output: MixerOutput
+        extra_output: ExtraFragmentData
+        mixer_output, extra_output = cast(
+            tuple[MixerOutput, ExtraFragmentData],
+            Shader[ExtraInput, ExtraFragmentData, ExtraMixerOutput].mix(
+                gl_FragDepth, keeps, extra
+            ),
+        )
         assert isinstance(extra_output, ExtraFragmentData)
 
         return (
@@ -200,9 +198,9 @@ class _Shader(Shader[ExtraInput, ExtraFragmentData, ExtraMixerOutput]):
         )
 
 
-eye = jnp.array((0.0, 0, 1))  # pyright: ignore[reportUnknownMemberType]
-center = jnp.array((0.0, 0, 0))  # pyright: ignore[reportUnknownMemberType]
-up = jnp.array((0.0, 1, 0))  # pyright: ignore[reportUnknownMemberType]
+eye = typed_array((0.0, 0, 1))
+center = typed_array((0.0, 0, 0))
+up = typed_array((0.0, 1, 0))
 
 camera: Camera = Camera.create(
     view=Camera.view_matrix(eye=eye, centre=center, up=up),
@@ -220,13 +218,11 @@ camera: Camera = Camera.create(
 )
 
 buffers = Buffers(
-    zbuffer=lax.full((width, height), 1.0),  # pyright: ignore[reportUnknownMemberType]
-    targets=(
-        lax.full((width, height, 3), 0.0),  # pyright: ignore[reportUnknownMemberType]
-    ),
+    zbuffer=lax.full((width, height), 1.0),
+    targets=(lax.full((width, height, 3), 0.0),),
 )
-face_indices = jnp.array(((0, 1, 2),))  # pyright: ignore[reportUnknownMemberType]
-position = jnp.array(  # pyright: ignore[reportUnknownMemberType]
+face_indices = typed_array(((0, 1, 2),))
+position = typed_array(
     (
         (-1.0, -1.0, -2.0),
         (1.0, -1.0, -1.0),
@@ -235,14 +231,14 @@ position = jnp.array(  # pyright: ignore[reportUnknownMemberType]
 )
 extra = ExtraInput(
     position=position,
-    colour=jnp.array(  # pyright: ignore[reportUnknownMemberType]
+    colour=typed_array(
         (
             (1.0, 0.0, 0.0),
             (0.0, 1.0, 0.0),
             (0.0, 0.0, 1.0),
         )
     ),
-    uv=jnp.array(  # pyright: ignore[reportUnknownMemberType]
+    uv=typed_array(
         (
             (0.0, 0.0),
             (10.0, 0.0),

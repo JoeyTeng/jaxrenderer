@@ -117,7 +117,7 @@ img = Renderer.get_camera_image(
     height=height,
     shadow_param=shadow_param,
 )
-rgb_array = lax.clamp(0.0, img * 255, 255.0).astype(jnp.uint8)  # pyright: ignore
+rgb_array = lax.clamp(0.0, img * 255, 255.0).astype(jnp.uint8)
 images.append(rgb_array)
 
 img = Renderer.get_camera_image(
@@ -135,26 +135,7 @@ img = Renderer.get_camera_image(
     height=height,
     shadow_param=shadow_param,
 )
-rgb_array = lax.clamp(0.0, img * 255, 255.0).astype(jnp.uint8)  # pyright: ignore
-images.append(rgb_array)
-
-img = Renderer.get_camera_image(
-    objects=[
-        scene.objects[obj_id]
-        for obj_id in [
-            cube_instance_id,
-            capsulex_instance_id,
-            capsuley_instance_id,
-            capsulez_instance_id,
-        ]
-    ],
-    light=light,
-    camera=camera,
-    width=width,
-    height=height,
-    shadow_param=shadow_param,
-)
-rgb_array = lax.clamp(0.0, img * 255, 255.0).astype(jnp.uint8)  # pyright: ignore
+rgb_array = lax.clamp(0.0, img * 255, 255.0).astype(jnp.uint8)
 images.append(rgb_array)
 
 img = Renderer.get_camera_image(
@@ -173,7 +154,26 @@ img = Renderer.get_camera_image(
     height=height,
     shadow_param=shadow_param,
 )
-rgb_array = lax.clamp(0.0, img * 255, 255.0).astype(jnp.uint8)  # pyright: ignore
+rgb_array = lax.clamp(0.0, img * 255, 255.0).astype(jnp.uint8)
+images.append(rgb_array)
+
+img = Renderer.get_camera_image(
+    objects=[
+        scene.objects[obj_id]
+        for obj_id in [
+            cube_instance_id,
+            capsulex_instance_id,
+            capsuley_instance_id,
+            capsulez_instance_id,
+        ]
+    ],
+    light=light,
+    camera=camera,
+    width=width,
+    height=height,
+    shadow_param=shadow_param,
+)
+rgb_array = lax.clamp(0.0, img * 255, 255.0).astype(jnp.uint8)
 images.append(rgb_array)
 
 # PROCESS: show

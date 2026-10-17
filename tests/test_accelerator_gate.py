@@ -5,8 +5,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 import subprocess
-from typing import Any
-from unittest.mock import patch
+from typing import ContextManager, NotRequired, TypedDict
+from unittest.mock import MagicMock, patch
 
 import pytest
 from tools import accelerator_gate as gate
@@ -19,7 +19,29 @@ SYNTHETIC_ACCESS_A = "codex_synth_v1_access_a"
 SYNTHETIC_ACCESS_B = "codex_synth_v1_access_b"
 
 
-def pull_request() -> dict[str, Any]:
+class Repository(TypedDict):
+    full_name: str
+    private: NotRequired[bool]
+
+
+class PullRequestBase(TypedDict):
+    ref: str
+    sha: str
+    repo: Repository
+
+
+class PullRequestHead(TypedDict):
+    sha: str
+    repo: Repository
+
+
+class PullRequest(TypedDict):
+    state: str
+    base: PullRequestBase
+    head: PullRequestHead
+
+
+def pull_request() -> PullRequest:
     return {
         "state": "open",
         "base": {
@@ -64,6 +86,7 @@ def result(**overrides: object) -> dict[str, object]:
 
 class FakeGitHub:
     def __init__(self) -> None:
+        super().__init__()
         self.pr = pull_request()
         self.compare_status = "ahead"
         self.statuses: list[dict[str, object]] = []
@@ -109,18 +132,18 @@ def github(monkeypatch: pytest.MonkeyPatch) -> FakeGitHub:
     return FakeGitHub()
 
 
-def install_fake_github(github: FakeGitHub) -> patch:
+def install_fake_github(github: FakeGitHub) -> ContextManager[MagicMock]:
     return patch.object(gate.subprocess, "run", side_effect=github)
 
 
 def write_binding(path: Path) -> Path:
-    path.write_text(json.dumps(binding()), encoding="utf-8")
+    _ = path.write_text(json.dumps(binding()), encoding="utf-8")
     return path
 
 
 def write_result(directory: Path, data: dict[str, object]) -> None:
-    directory.mkdir(parents=True, exist_ok=True)
-    (directory / "result.json").write_text(json.dumps(data), encoding="utf-8")
+    _ = directory.mkdir(parents=True, exist_ok=True)
+    _ = (directory / "result.json").write_text(json.dumps(data), encoding="utf-8")
 
 
 def add_pending_status(github: FakeGitHub, backend: str = "gpu") -> None:
@@ -162,7 +185,7 @@ def test_prepare_rejects_non_default_dispatch_before_api(
     monkeypatch.setenv("GITHUB_REF", "refs/heads/feature")
     with install_fake_github(github) as api:
         with pytest.raises(gate.GateError, match="default master"):
-            gate.prepare(24, "gpu", tmp_path / "binding.json", tmp_path / "out")
+            _ = gate.prepare(24, "gpu", tmp_path / "binding.json", tmp_path / "out")
     api.assert_not_called()
 
 
@@ -172,7 +195,7 @@ def test_prepare_rejects_head_that_is_behind_base(
     github.compare_status = "behind"
     with install_fake_github(github):
         with pytest.raises(gate.GateError, match="up to date"):
-            gate.prepare(24, "gpu", tmp_path / "binding.json", tmp_path / "out")
+            _ = gate.prepare(24, "gpu", tmp_path / "binding.json", tmp_path / "out")
     assert github.posts == []
 
 
@@ -182,14 +205,14 @@ def test_prepare_rejects_non_gpu_backends(
 ) -> None:
     with install_fake_github(github) as api:
         with pytest.raises(gate.GateError, match="only supports the GPU"):
-            gate.prepare(24, backend, tmp_path / "binding.json", tmp_path / "out")
+            _ = gate.prepare(24, backend, tmp_path / "binding.json", tmp_path / "out")
     api.assert_not_called()
 
 
 @pytest.mark.parametrize("value", ["025", "+25", " 25", "25 ", "0", "-25", ""])
 def test_pr_cli_value_requires_canonical_positive_decimal(value: str) -> None:
     with pytest.raises(SystemExit):
-        gate.parser().parse_args(
+        _ = gate.parser().parse_args(
             [
                 "prepare",
                 "--pr",
@@ -211,7 +234,7 @@ def test_gh_api_prefers_gh_token_and_bounds_calls(
     monkeypatch.setenv("GH_TOKEN", SYNTHETIC_ACCESS_B)
     completed = subprocess.CompletedProcess(["gh"], 0, "{}", "")
     with patch.object(gate.subprocess, "run", return_value=completed) as run:
-        assert gate._gh_api("repos/example/project") == {}
+        assert gate.gh_api("repos/example/project") == {}
 
     assert run.call_args.kwargs["env"]["GH_TOKEN"] == SYNTHETIC_ACCESS_B
     assert run.call_args.kwargs["timeout"] == 45
@@ -229,7 +252,9 @@ def test_finish_posts_success_only_for_exact_accelerator_result(
         actual = gate.finish(binding_path, "gpu", output_dir, provider_success=True)
 
     assert actual["state"] == "success"
-    assert actual["run_url"].endswith("/actions/runs/456/attempts/2")
+    run_url = actual["run_url"]
+    assert isinstance(run_url, str)
+    assert run_url.endswith("/actions/runs/456/attempts/2")
     assert github.posts[-1][1]["state"] == "success"
     assert github.posts[-1][1]["context"] == "accelerator/gpu"
 
@@ -265,7 +290,7 @@ def test_finish_fails_closed_for_missing_cpu_stale_or_changed_run(
     if result_value is not None:
         write_result(output_dir, result_value)
     if change_base:
-        github.pr["base"]["sha"] = "c" * 40  # type: ignore[index]
+        github.pr["base"]["sha"] = "c" * 40
     add_pending_status(github)
 
     with install_fake_github(github):

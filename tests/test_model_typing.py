@@ -29,10 +29,10 @@ def _model_fields(
 
 def test_model_create_rejects_vertex_dtype_and_shape_mismatches() -> None:
     with pytest.raises((AssertionError, TypeCheckError)):
-        Model.create(*_model_fields(_array(((1, 2, 3),) * 3, jnp.int32)))
+        _ = Model.create(*_model_fields(_array(((1, 2, 3),) * 3, jnp.int32)))
 
     with pytest.raises((AssertionError, TypeCheckError)):
-        Model.create(*_model_fields(_array(((1.0, 2.0),) * 3, jnp.float32)))
+        _ = Model.create(*_model_fields(_array(((1.0, 2.0),) * 3, jnp.float32)))
 
 
 def test_merge_maps_preserves_padding_and_returns_map_dimensions() -> None:

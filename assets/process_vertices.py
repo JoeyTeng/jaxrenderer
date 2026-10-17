@@ -16,10 +16,10 @@ if __name__ == "__main__":
             floats = [float(v) for v in strs]
             assert len(floats) == 9, f"{len(floats)}"
 
-            vertices.append(tuple(strs[:3]))
+            vertices.append((strs[0], strs[1], strs[2]))
             # skip floats[3] which is unused w component.
-            normal.append(tuple(strs[4:7]))
-            uv.append(tuple(strs[7:9]))
+            normal.append((strs[4], strs[5], strs[6]))
+            uv.append((strs[7], strs[8]))
 
     with open(args.output, "w") as file:
         _ = file.write("vertices = (\n")

@@ -12,6 +12,7 @@ from pathlib import Path
 import subprocess
 import sys
 import tempfile
+from typing import cast
 import zipfile
 
 PYRIGHT_TIMEOUT_SECONDS = 60
@@ -41,14 +42,16 @@ def _check_installed_marker() -> None:
     )
     if marker is None:
         raise RuntimeError(f"installed distribution is missing {MARKER_PATH}")
-    marker_path = Path(distribution.locate_file(marker)).resolve()
+    marker_path = Path(str(distribution.locate_file(marker))).resolve()
     if not marker_path.is_file():
         raise RuntimeError(f"installed marker is not a file: {marker_path}")
 
     package_spec = importlib.util.find_spec("renderer")
     if package_spec is None or package_spec.origin is None:
         raise RuntimeError("could not locate the installed renderer package")
-    installed_init = Path(distribution.locate_file("renderer/__init__.py")).resolve()
+    installed_init = Path(
+        str(distribution.locate_file("renderer/__init__.py"))
+    ).resolve()
     if Path(package_spec.origin).resolve() != installed_init:
         raise RuntimeError(
             "renderer resolves outside the installed distribution: "
@@ -67,11 +70,11 @@ invalid_bits: str = info.bits
     python_version = f"{sys.version_info.major}.{sys.version_info.minor}"
 
     with tempfile.TemporaryDirectory(prefix="jaxrenderer-typing-") as temp_name:
-        temp_dir = Path(temp_name)
+        temp_dir = Path(str(temp_name))
         consumer_path = temp_dir / "consumer.py"
-        consumer_path.write_text(consumer_source, encoding="utf-8")
+        _ = consumer_path.write_text(consumer_source, encoding="utf-8")
         config_path = temp_dir / "pyrightconfig.json"
-        config_path.write_text(
+        _ = config_path.write_text(
             json.dumps(
                 {
                     "include": ["consumer.py"],
@@ -83,7 +86,7 @@ invalid_bits: str = info.bits
         )
 
         environment = os.environ.copy()
-        environment.pop("PYTHONPATH", None)
+        _ = environment.pop("PYTHONPATH", None)
         result = subprocess.run(
             [
                 sys.executable,
@@ -108,21 +111,38 @@ invalid_bits: str = info.bits
     if result.stderr.strip():
         raise RuntimeError(f"Pyright wrote to stderr: {result.stderr.strip()}")
     try:
-        report = json.loads(result.stdout)
+        report: object = json.loads(result.stdout)
     except json.JSONDecodeError as error:
         raise RuntimeError("Pyright did not return valid JSON diagnostics") from error
 
-    diagnostics = report.get("generalDiagnostics")
+    if not isinstance(report, dict):
+        raise RuntimeError("Pyright JSON report must be an object")
+    report_object = cast(dict[str, object], report)
+    diagnostics = report_object.get("generalDiagnostics")
     if not isinstance(diagnostics, list):
         raise RuntimeError("Pyright JSON omitted generalDiagnostics")
-    expected = [
-        diagnostic
-        for diagnostic in diagnostics
-        if diagnostic.get("rule") == "reportAssignmentType"
-        and diagnostic.get("range", {}).get("start", {}).get("line") == 4
-    ]
-    if len(expected) != 1 or len(diagnostics) != 1:
-        rendered = json.dumps(diagnostics, sort_keys=True)
+    diagnostic_values = cast(list[object], diagnostics)
+    expected: list[dict[str, object]] = []
+    for diagnostic_value in diagnostic_values:
+        diagnostic: object = diagnostic_value
+        if not isinstance(diagnostic, dict):
+            raise RuntimeError("Pyright JSON contains a malformed diagnostic")
+        diagnostic_object = cast(dict[str, object], diagnostic)
+        location = diagnostic_object.get("range")
+        if not isinstance(location, dict):
+            continue
+        location_object = cast(dict[str, object], location)
+        start = location_object.get("start")
+        if not isinstance(start, dict):
+            continue
+        start_object = cast(dict[str, object], start)
+        if (
+            diagnostic_object.get("rule") == "reportAssignmentType"
+            and start_object.get("line") == 4
+        ):
+            expected.append(diagnostic_object)
+    if len(expected) != 1 or len(diagnostic_values) != 1:
+        rendered = json.dumps(diagnostic_values, sort_keys=True)
         raise RuntimeError(
             "expected exactly one reportAssignmentType diagnostic on the "
             f"intentional invalid assignment; got {rendered}"
@@ -136,7 +156,7 @@ invalid_bits: str = info.bits
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("wheel", type=Path, help="built jaxrenderer wheel")
+    _ = parser.add_argument("wheel", type=Path, help="built jaxrenderer wheel")
     args = parser.parse_args()
 
     _check_wheel(args.wheel)
