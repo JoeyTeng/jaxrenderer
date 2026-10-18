@@ -3,6 +3,7 @@
 from typing import cast
 
 import jax
+import jax.numpy as jnp
 from jaxtyping import Array, Float
 import matplotlib.animation as animation
 import matplotlib.figure as figure
