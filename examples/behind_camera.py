@@ -21,7 +21,7 @@ from renderer import (
 # PROCESS: Set up models and objects
 
 scene: Scene = Scene()
-texture: Texture = jnp.array(
+texture: Texture = jnp.array(  # pyright: ignore[reportUnknownMemberType]
     [
         [1.0, 0.0, 0.0],
         [0.0, 1.0, 0.0],
@@ -52,7 +52,7 @@ scene = scene.set_object_orientation(cube_2, (1.0, 0.0, 0.0, 0.0))
 
 width = 640
 height = 480
-eye = jnp.asarray([2.5894797, -2.5876467, 1.9174135])
+eye = jnp.asarray([2.5894797, -2.5876467, 1.9174135])  # pyright: ignore[reportUnknownMemberType]
 target = (0.0, 0.0, 0.0)
 
 light: LightParameters = LightParameters()
@@ -95,7 +95,7 @@ images.append(rgb_array)
 # PROCESS: show
 
 fig: figure.Figure
-fig, ax = plt.subplots()
+fig, ax = plt.subplots()  # pyright: ignore
 
 # ims is a list of lists, each row is a list of artists to draw in the
 # current frame; here we are just animating one artist, the image, in
@@ -104,11 +104,11 @@ ims: list[list[mimage.AxesImage]] = []
 for i, img in enumerate(images):
     im = cast(
         mimage.AxesImage,
-        ax.imshow(transpose_for_display(img), animated=True),
+        ax.imshow(transpose_for_display(img), animated=True),  # pyright: ignore[reportUnknownMemberType]
     )
     if i == 0:
         # show an initial one first
-        ax.imshow(transpose_for_display(img))
+        ax.imshow(transpose_for_display(img))  # pyright: ignore[reportUnknownMemberType]
 
     ims.append([im])
 
@@ -120,4 +120,4 @@ ani = animation.ArtistAnimation(
     repeat_delay=0,
 )
 
-plt.show()
+plt.show()  # pyright: ignore[reportUnknownMemberType]

@@ -93,10 +93,8 @@ known-first-party = ["renderer", "examples", "test_resources"]
 order-by-type = true
 
 [tool.pyright]
-include = ["assets", "renderer", "test_resources", "tests", "tools"]
+include = ["assets", "renderer", "examples", "test_resources", "tests", "tools"]
 exclude = ["typings/**", ".*/**", "**/node_modules", "**/__pycache__"]
-# Examples may still be imported by regression tests.
-ignore = ["examples/**"]
 typeCheckingMode = "strict"
 venvPath = "."
 venv = ".venv"
