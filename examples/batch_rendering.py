@@ -112,15 +112,11 @@ for i in range(cast(Float[Array, "_b _w _h _c"], images).shape[0]):
     img = cast(Float[Array, "_w _h _c"], images[i])
     im = cast(
         mimage.AxesImage,
-        ax.imshow(  # pyright: ignore[reportUnknownMemberType]
-            transpose_for_display(img), animated=True
-        ),
+        ax.imshow(transpose_for_display(img), animated=True),  # pyright: ignore[reportUnknownMemberType]
     )
     if i == 0:
         # show an initial one first
-        ax.imshow(  # pyright: ignore[reportUnknownMemberType]
-            transpose_for_display(img)
-        )
+        ax.imshow(transpose_for_display(img))  # pyright: ignore[reportUnknownMemberType]
 
     ims.append([im])
 

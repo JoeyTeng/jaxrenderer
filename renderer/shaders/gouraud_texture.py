@@ -10,7 +10,13 @@ from jaxtyping import (
     jaxtyped,  # pyright: ignore[reportUnknownVariableType]
 )
 
-from .._meta_utils import add_tracing_name, is_array_type
+from .._meta_utils import (
+    add_tracing_name,
+    is_array_type,
+    typed_array,
+    typed_asarray,
+    typed_zeros,
+)
 from .._meta_utils import typed_jit as jit
 from ..geometry import Camera, normalise, to_homogeneous
 from ..shader import ID, MixerOutput, PerFragment, PerVertex, Shader
@@ -36,12 +42,10 @@ class GouraudTextureExtraInput(NamedTuple):
 
 
 class GouraudTextureExtraFragmentData(NamedTuple):
-    colour: Colour = jnp.array(  # pyright: ignore[reportUnknownMemberType]
-        [0.0, 0.0, 0.0]
-    )
+    colour: Colour = typed_array([0.0, 0.0, 0.0])
     """light colour when passing from vertex shader to fragment shader;
     canvas colour when passing from fragment shader to mixer."""
-    uv: Vec2f = jnp.zeros(2)  # pyright: ignore[reportUnknownMemberType]
+    uv: Vec2f = typed_zeros(2)
 
 
 class GouraudTextureExtraMixerOutput(NamedTuple):
@@ -121,18 +125,13 @@ class GouraudTextureShader(
 
         # repeat texture
         uv = lax.floor(varying.uv).astype(int)
-        uv = (
-            uv
-            % jnp.asarray(  # pyright: ignore[reportUnknownMemberType]
-                extra.texture.shape[:2]
-            )
-        )
+        uv = uv % typed_asarray(extra.texture.shape[:2])
         texture_colour: Colour = extra.texture[uv[0], uv[1]]
         light_colour: Colour = varying.colour
 
         return (
             PerFragment(
-                keeps=jnp.array(  # pyright: ignore[reportUnknownMemberType]
+                keeps=typed_array(
                     (
                         built_in.keeps,
                         gl_FrontFacing,

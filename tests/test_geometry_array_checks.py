@@ -13,11 +13,11 @@ from jaxtyping import (
 )
 import pytest
 
-from renderer._meta_utils import is_array_type
+from renderer._meta_utils import is_array_type, typed_ones
 
 
 def _array(shape: tuple[int, ...], dtype: Any) -> Array:
-    return jnp.ones(shape, dtype=dtype)  # pyright: ignore[reportUnknownMemberType]
+    return typed_ones(shape, dtype=dtype)
 
 
 @jaxtyped(typechecker=None)

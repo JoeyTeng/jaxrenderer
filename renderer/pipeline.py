@@ -14,7 +14,7 @@ from jaxtyping import (
     jaxtyped,  # pyright: ignore[reportUnknownVariableType]
 )
 
-from ._meta_utils import add_tracing_name, is_array_type
+from ._meta_utils import add_tracing_name, is_array_type, typed_array
 from ._meta_utils import typed_jit as jit
 from .geometry import Camera, Interpolation, Viewport, interpolate
 from .shader import (
@@ -84,7 +84,7 @@ class PerPrimitive(NamedTuple):
         clip: Triangle = per_vertex.gl_Position
         assert is_array_type(clip, Triangle)
         # matrix with x, y, w
-        matrix: Float[Array, "3 3"] = clip[:, jnp.array((0, 1, 3))]  # pyright: ignore
+        matrix: Float[Array, "3 3"] = clip[:, typed_array((0, 1, 3))]
         # If == 0, the matrix inverse does not exist, should use another
         # interpolation method. Early exit for now.
         # `jnp.linalg.det` has built-in 3x3 det optimisation
@@ -179,9 +179,7 @@ def _postprocessing(
                 _idx = jnp.arange(2)  # pyright: ignore[reportUnknownMemberType]
                 xy: Float[Array, "2"] = (coord - viewport[:2, 3]) / viewport[_idx, _idx]
                 xy1_ndc: Float[Array, "3"]
-                xy1_ndc = jnp.array(  # pyright: ignore[reportUnknownMemberType]
-                    (xy[0], xy[1], 1)
-                )
+                xy1_ndc = typed_array((xy[0], xy[1], 1))
 
                 # As the interpolation formula is `xy1_ndc @ (mat_inv @ values)`
                 # we can utilise associativity to generate a set of fixed Vec3f
@@ -220,7 +218,7 @@ def _postprocessing(
                 )
                 # viewport transform for z, from clip space to window space
                 z = z * viewport[2, 2] + viewport[2, 3]
-                gl_FragCoord: Vec4f = jnp.array(  # pyright: ignore[reportUnknownMemberType]
+                gl_FragCoord: Vec4f = typed_array(
                     (
                         coord[0],
                         coord[1],
@@ -516,7 +514,7 @@ def render(
         assert is_array_type(extra_items[0], Num[Array, "*"])
         vertices: Num[Array, "*"] = cast(Num[Array, "*"], extra_items[0])
         vertices_count: int = vertices.shape[0]
-        gl_InstanceID = jnp.array(0, dtype=int)  # pyright: ignore
+        gl_InstanceID = typed_array(0, dtype=int)
         assert isinstance(vertices_count, int)
         assert is_array_type(gl_InstanceID, ID)
 

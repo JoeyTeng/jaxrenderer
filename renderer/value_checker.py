@@ -7,6 +7,7 @@ from jaxtyping import (
     jaxtyped,  # pyright: ignore[reportUnknownVariableType]
 )
 
+from ._meta_utils import typed_asarray
 from .types import BoolV, IntV
 
 
@@ -22,7 +23,7 @@ def index_in_bound(
       - bound: bound to check against, assumed to be [min, max)
         (half-open interval) or [0, max) if only one value is given.
     """
-    bound = jnp.asarray(bound).flatten()  # pyright: ignore[reportUnknownMemberType]
+    bound = typed_asarray(bound).flatten()
     _min: Union[int, IntV]
     _max: Union[int, IntV]
     if bound.size == 2:

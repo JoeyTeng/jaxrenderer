@@ -11,7 +11,7 @@ from jaxtyping import (
     jaxtyped,  # pyright: ignore[reportUnknownVariableType]
 )
 
-from .._meta_utils import add_tracing_name, is_array_type
+from .._meta_utils import add_tracing_name, is_array_type, typed_array, typed_zeros
 from .._meta_utils import typed_jit as jit
 from ..geometry import Camera, normalise, normalise_homogeneous, to_homogeneous
 from ..model import MergedModel
@@ -81,11 +81,11 @@ class PhongReflectionShadowTextureExtraFragmentData(NamedTuple):
       - colour: colour when passing from FS to mixer.
     """
 
-    normal: Vec3f = jnp.zeros(3)  # pyright: ignore[reportUnknownMemberType]
-    uv: Vec2f = jnp.zeros(2)  # pyright: ignore[reportUnknownMemberType]
-    texture_index: IntV = jnp.array(0)  # pyright: ignore
-    shadow_coord: Vec4f = jnp.zeros(4)  # pyright: ignore[reportUnknownMemberType]
-    colour: Colour = jnp.zeros(3)  # pyright: ignore[reportUnknownMemberType]
+    normal: Vec3f = typed_zeros(3)
+    uv: Vec2f = typed_zeros(2)
+    texture_index: IntV = typed_array(0)
+    shadow_coord: Vec4f = typed_zeros(4)
+    colour: Colour = typed_zeros(3)
 
 
 class PhongReflectionShadowTextureExtraMixerOutput(NamedTuple):

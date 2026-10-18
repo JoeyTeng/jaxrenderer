@@ -8,7 +8,7 @@ from jaxtyping import (
     jaxtyped,  # pyright: ignore[reportUnknownVariableType]
 )
 
-from .._meta_utils import is_array_type
+from .._meta_utils import is_array_type, typed_array
 from ..model import Model
 from ..types import (
     FaceIndices,
@@ -1761,7 +1761,7 @@ with jax.ensure_compile_time_eval():
             (0.500144, 0.583887),
         )
     )
-    _faces: FaceIndices = jnp.array(  # pyright: ignore[reportUnknownMemberType]
+    _faces: FaceIndices = typed_array(
         (
             (0, 1, 2),
             (3, 4, 5),
@@ -1986,7 +1986,7 @@ def create_capsule(
       - [create_capsule](https://github.com/erwincoumans/tinyrenderer/blob/89e8adafb35ecf5134e7b17b71b0f825939dc6d9/tinyrenderer.cpp#L914)
     """
     shuffled: Integer[Array, "3"]
-    shuffled = jnp.array(  # pyright: ignore[reportUnknownMemberType]
+    shuffled = typed_array(
         (
             (1, 2, 0),
             (0, 1, 2),

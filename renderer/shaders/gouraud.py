@@ -8,7 +8,7 @@ from jaxtyping import (
     jaxtyped,  # pyright: ignore[reportUnknownVariableType]
 )
 
-from .._meta_utils import add_tracing_name, is_array_type
+from .._meta_utils import add_tracing_name, is_array_type, typed_array
 from .._meta_utils import typed_jit as jit
 from ..geometry import Camera, normalise, to_homogeneous
 from ..shader import ID, PerFragment, PerVertex, Shader
@@ -32,9 +32,7 @@ class GouraudExtraInput(NamedTuple):
 
 
 class GouraudExtraFragmentData(NamedTuple):
-    colour: Colour = jnp.array(  # pyright: ignore[reportUnknownMemberType]
-        [0.0, 0.0, 0.0]
-    )
+    colour: Colour = typed_array([0.0, 0.0, 0.0])
 
 
 class GouraudExtraMixerOutput(NamedTuple):
@@ -107,7 +105,7 @@ class GouraudShader(
 
         return (
             PerFragment(
-                keeps=jnp.array(  # pyright: ignore[reportUnknownMemberType]
+                keeps=typed_array(
                     (
                         built_in.keeps,
                         gl_FrontFacing,

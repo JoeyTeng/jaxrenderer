@@ -2,6 +2,7 @@ from jax import Array
 import jax.numpy as jnp
 
 from renderer import Buffers, Camera, render
+from renderer._meta_utils import typed_asarray, typed_zeros
 from renderer.geometry import Viewport
 from renderer.shaders.phong_darboux import (
     PhongTextureDarbouxExtraInput,
@@ -22,7 +23,7 @@ from renderer.types import (
 
 
 def _array(values: object) -> Array:
-    return jnp.asarray(values, dtype=jnp.float32)  # pyright: ignore[reportUnknownMemberType]
+    return typed_asarray(values, dtype=jnp.float32)
 
 
 def test_darboux_shader_renders_nontrivial_normal_map() -> None:
@@ -32,8 +33,8 @@ def test_darboux_shader_renders_nontrivial_normal_map() -> None:
     centre: Vec3f = _array((0.0, 0.0, 0.0))
     up: Vec3f = _array((0.0, 1.0, 0.0))
     viewport: Viewport = Camera.viewport_matrix(
-        lowerbound=jnp.zeros(2, dtype=int),  # pyright: ignore[reportUnknownMemberType]
-        dimension=jnp.asarray((width, height), dtype=int),  # pyright: ignore[reportUnknownMemberType]
+        lowerbound=typed_zeros(2, dtype=int),
+        dimension=typed_asarray((width, height), dtype=int),
         depth=1,
     )
     camera = Camera.create(
@@ -50,9 +51,7 @@ def test_darboux_shader_renders_nontrivial_normal_map() -> None:
     position: Vertices = _array(((-0.7, -0.7, 0.0), (0.7, -0.7, 0.0), (-0.7, 0.7, 0.0)))
     uv: UVCoordinates = _array(((0.0, 0.0), (2.0, 0.0), (0.0, 2.0)))
     normals: Normals = _array(((0.0, 0.0, 1.0),) * 3)
-    face_indices: FaceIndices = jnp.asarray(  # pyright: ignore[reportUnknownMemberType]
-        ((0, 1, 2),), dtype=int
-    )
+    face_indices: FaceIndices = typed_asarray(((0, 1, 2),), dtype=int)
     texture: Texture = _array((((1.0, 1.0, 1.0),) * 2,) * 2)
     normal_map: NormalMap = _array(
         (
@@ -67,11 +66,11 @@ def test_darboux_shader_renders_nontrivial_normal_map() -> None:
         light=LightSource(direction=_array((0.0, 0.0, 1.0))),
         texture=texture,
         normal_map=normal_map,
-        id_to_face=jnp.zeros(3, dtype=int),  # pyright: ignore[reportUnknownMemberType]
+        id_to_face=typed_zeros(3, dtype=int),
         faces_indices=face_indices,
     )
-    zbuffer: ZBuffer = jnp.zeros((width, height))  # pyright: ignore[reportUnknownMemberType]
-    canvas: Canvas = jnp.zeros((width, height, 3))  # pyright: ignore[reportUnknownMemberType]
+    zbuffer: ZBuffer = typed_zeros((width, height))
+    canvas: Canvas = typed_zeros((width, height, 3))
     buffers: Buffers[tuple[Canvas]] = Buffers(
         zbuffer=zbuffer,
         targets=(canvas,),

@@ -52,9 +52,7 @@ scene = scene.set_object_orientation(cube_2, (1.0, 0.0, 0.0, 0.0))
 
 width = 640
 height = 480
-eye = jnp.asarray(  # pyright: ignore[reportUnknownMemberType]
-    [2.5894797, -2.5876467, 1.9174135]
-)
+eye = jnp.asarray([2.5894797, -2.5876467, 1.9174135])  # pyright: ignore[reportUnknownMemberType]
 target = (0.0, 0.0, 0.0)
 
 light: LightParameters = LightParameters()
@@ -106,15 +104,11 @@ ims: list[list[mimage.AxesImage]] = []
 for i, img in enumerate(images):
     im = cast(
         mimage.AxesImage,
-        ax.imshow(  # pyright: ignore[reportUnknownMemberType]
-            transpose_for_display(img), animated=True
-        ),
+        ax.imshow(transpose_for_display(img), animated=True),  # pyright: ignore[reportUnknownMemberType]
     )
     if i == 0:
         # show an initial one first
-        ax.imshow(  # pyright: ignore[reportUnknownMemberType]
-            transpose_for_display(img)
-        )
+        ax.imshow(transpose_for_display(img))  # pyright: ignore[reportUnknownMemberType]
 
     ims.append([im])
 
