@@ -2,12 +2,13 @@ from collections.abc import Callable
 import functools
 import inspect
 import sys
-from typing import Any, ParamSpec, Protocol, TypeVar, cast
+from typing import Any, ParamSpec, Protocol, TypeVar, cast, overload
 
 import jax
 from jax import Array
 import jax.numpy as jnp
 import jax.typing
+import jaxtyping
 
 __all__ = [
     "add_tracing_name",
@@ -18,6 +19,7 @@ __all__ = [
     "typed_full",
     "typed_grad",
     "typed_jit",
+    "typed_jaxtyped",
     "typed_modf",
     "typed_ones",
     "typed_zeros",
@@ -152,6 +154,31 @@ class _JaxNumpyAPI(Protocol):
 # These casts declare the subset used by this project; they do not wrap JAX.
 _jax_api = cast(_JaxAPI, jax)
 _jnp_api = cast(_JaxNumpyAPI, jnp)
+
+
+_DecoratedTarget = TypeVar("_DecoratedTarget", bound=Callable[..., object])
+
+
+class _JaxtypedIdentityDecorator(Protocol):
+    def __call__(self, target: _DecoratedTarget, /) -> _DecoratedTarget: ...
+
+
+class _JaxtypedFactory(Protocol):
+    @overload
+    def __call__(self, target: _DecoratedTarget, /) -> _DecoratedTarget: ...
+
+    @overload
+    def __call__(self, *, typechecker: None) -> _JaxtypedIdentityDecorator: ...
+
+
+class _JaxtypingAPI(Protocol):
+    jaxtyped: _JaxtypedFactory
+
+
+# This manually maintained alias covers bare function/class decoration and the
+# typechecker=None factory form. It does not wrap jaxtyping; check this subset
+# against jaxtyping when upgrading the dependency.
+typed_jaxtyped = cast(_JaxtypingAPI, jaxtyping).jaxtyped
 
 typed_array = _jnp_api.array
 typed_asarray = _jnp_api.asarray

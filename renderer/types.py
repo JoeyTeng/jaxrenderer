@@ -9,10 +9,10 @@ from jaxtyping import (
     Float,
     Integer,
     Num,
-    jaxtyped,  # pyright: ignore[reportUnknownVariableType]
 )
 
 from ._meta_utils import typed_array, typed_ones
+from ._meta_utils import typed_jaxtyped as jaxtyped
 
 JaxFloating: TypeAlias = jnp.floating[Any]
 JaxInteger: TypeAlias = jnp.integer[Any]

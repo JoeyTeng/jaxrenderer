@@ -8,10 +8,10 @@ from jaxtyping import (
     Bool,
     Float,
     Integer,
-    jaxtyped,  # pyright: ignore[reportUnknownVariableType]
 )
 
 from .._meta_utils import add_tracing_name, is_array_type, typed_array, typed_zeros
+from .._meta_utils import typed_jaxtyped as jaxtyped
 from .._meta_utils import typed_jit as jit
 from ..geometry import Camera, normalise, to_homogeneous
 from ..model import MergedModel

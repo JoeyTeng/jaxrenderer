@@ -9,11 +9,11 @@ from jax import Array
 import jax.numpy as jnp
 from jaxtyping import (
     Float,
-    jaxtyped,  # pyright: ignore[reportUnknownVariableType]
 )
 import pytest
 
 from renderer._meta_utils import is_array_type, typed_ones
+from renderer._meta_utils import typed_jaxtyped as jaxtyped
 
 
 def _array(shape: tuple[int, ...], dtype: Any) -> Array:

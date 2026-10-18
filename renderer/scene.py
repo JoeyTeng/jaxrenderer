@@ -4,10 +4,10 @@ import jax.lax as lax
 from jaxtyping import (
     Array,
     Float,
-    jaxtyped,  # pyright: ignore[reportUnknownVariableType]
 )
 
 from ._meta_utils import is_array_type, typed_asarray
+from ._meta_utils import typed_jaxtyped as jaxtyped
 from .model import Model, ModelObject
 from .shapes.capsule import UpAxis, create_capsule
 from .shapes.cube import create_cube

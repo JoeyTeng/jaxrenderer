@@ -14,7 +14,6 @@ from jaxtyping import (
     Integer,
     Num,
     Shaped,
-    jaxtyped,  # pyright: ignore[reportUnknownVariableType]
 )
 
 from ._meta_utils import (
@@ -26,6 +25,7 @@ from ._meta_utils import (
     typed_modf,
     typed_ones,
 )
+from ._meta_utils import typed_jaxtyped as jaxtyped
 from ._meta_utils import typed_jit as jit
 from .geometry import Camera, transform_matrix_from_rotation
 from .types import (

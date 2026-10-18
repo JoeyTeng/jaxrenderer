@@ -7,7 +7,6 @@ from jaxtyping import (
     Array,
     Bool,
     Float,
-    jaxtyped,  # pyright: ignore[reportUnknownVariableType]
 )
 
 from .._meta_utils import (
@@ -17,6 +16,7 @@ from .._meta_utils import (
     typed_asarray,
     typed_zeros,
 )
+from .._meta_utils import typed_jaxtyped as jaxtyped
 from .._meta_utils import typed_jit as jit
 from ..geometry import Camera, normalise, to_homogeneous
 from ..shader import ID, MixerOutput, PerFragment, PerVertex, Shader

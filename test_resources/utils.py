@@ -5,10 +5,10 @@ from typing import TypeAlias
 from PIL import Image
 import jax
 import jax.numpy as jnp
-from jaxtyping import jaxtyped  # pyright: ignore[reportUnknownVariableType]
 import numpy as np
 
 from renderer._meta_utils import is_array_type, typed_array
+from renderer._meta_utils import typed_jaxtyped as jaxtyped
 from renderer.types import FaceIndices, Normals, Texture, UVCoordinates, Vertices
 
 jax.config.update("jax_array", True)  # pyright: ignore[reportUnknownMemberType]
