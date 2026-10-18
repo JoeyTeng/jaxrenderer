@@ -11,6 +11,6 @@ from examples.render_baselines import render_cube
 
 image = render_cube()
 
-fig, ax = plt.subplots()  # pyright: ignore
-ax.imshow(image)  # pyright: ignore[reportUnknownMemberType]
-plt.show()  # pyright: ignore[reportUnknownMemberType]
+fig, ax = plt.subplots()
+ax.imshow(image)
+plt.show()

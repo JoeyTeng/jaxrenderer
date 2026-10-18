@@ -24,13 +24,12 @@ from renderer import (
     rotation_matrix,
     transpose_for_display,
 )
-from renderer._meta_utils import typed_array
 
 # PROCESS: Set up models and objects
 
 scene: Scene = Scene()
 texture: Texture = (
-    typed_array(
+    jnp.array(
         (
             (255, 255, 255),  # White
             (255, 0, 0),  # Red
@@ -89,12 +88,12 @@ merged_models = [merge_objects([scene.objects[obj_id]]) for obj_id in capsule_ob
 buffers = Renderer.create_buffers(width, height, len(capsule_obj_ids))
 camera = Renderer.create_camera_from_parameters(camera_params)
 
-_, (images,) = jax.vmap(  # pyright: ignore[reportUnknownVariableType]
-    lambda model, buffer: Renderer.render(  # pyright: ignore
-        model=model,  # pyright: ignore[reportUnknownArgumentType]
+_, (images,) = jax.vmap(
+    lambda model, buffer: Renderer.render(
+        model=model,
         light=light,
         camera=camera,
-        buffers=buffer,  # pyright: ignore[reportUnknownArgumentType]
+        buffers=buffer,
         shadow_param=shadow_param,
     )
 )(batch_models(merged_models), buffers)
@@ -102,7 +101,7 @@ _, (images,) = jax.vmap(  # pyright: ignore[reportUnknownVariableType]
 # PROCESS: show
 
 fig: figure.Figure
-fig, ax = plt.subplots()  # pyright: ignore
+fig, ax = plt.subplots()
 
 # ims is a list of lists, each row is a list of artists to draw in the
 # current frame; here we are just animating one artist, the image, in
@@ -112,15 +111,11 @@ for i in range(cast(Float[Array, "_b _w _h _c"], images).shape[0]):
     img = cast(Float[Array, "_w _h _c"], images[i])
     im = cast(
         mimage.AxesImage,
-        ax.imshow(  # pyright: ignore[reportUnknownMemberType]
-            transpose_for_display(img), animated=True
-        ),
+        ax.imshow(transpose_for_display(img), animated=True),
     )
     if i == 0:
         # show an initial one first
-        ax.imshow(  # pyright: ignore[reportUnknownMemberType]
-            transpose_for_display(img)
-        )
+        ax.imshow(transpose_for_display(img))
 
     ims.append([im])
 
@@ -132,4 +127,4 @@ ani = animation.ArtistAnimation(
     repeat_delay=0,
 )
 
-plt.show()  # pyright: ignore[reportUnknownMemberType]
+plt.show()

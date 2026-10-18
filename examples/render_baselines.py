@@ -11,13 +11,6 @@ import jax.numpy as jnp
 import numpy as np
 
 import renderer
-from renderer._meta_utils import (
-    typed_array,
-    typed_asarray,
-    typed_full,
-    typed_ones,
-    typed_zeros,
-)
 from renderer.geometry import rotation_matrix
 
 _ROOT = Path(__file__).resolve().parents[1]
@@ -29,17 +22,17 @@ _HEAD_SPECULAR = _ROOT / "test_resources" / "tga" / "african_head_spec.tga"
 def render_cube(width: int = 640, height: int = 480) -> np.ndarray:
     """Render the blue cube example as H×W×RGB float values in [0, 1]."""
     cube = renderer.create_cube(
-        half_extents=typed_ones(3, dtype=jnp.single),
-        texture_scaling=typed_ones(2, dtype=jnp.single),
-        diffuse_map=typed_zeros((2, 2, 3), dtype=jnp.single).at[..., 2].set(1),
-        specular_map=typed_ones((2, 2), dtype=jnp.single) * 2.0,
+        half_extents=jnp.ones(3, dtype=jnp.single),
+        texture_scaling=jnp.ones(2, dtype=jnp.single),
+        diffuse_map=jnp.zeros((2, 2, 3), dtype=jnp.single).at[..., 2].set(1),
+        specular_map=jnp.ones((2, 2), dtype=jnp.single) * 2.0,
     )
     image = renderer.Renderer.get_camera_image(
         objects=[renderer.ModelObject(model=cube)],
         camera=renderer.CameraParameters(
             viewWidth=width,
             viewHeight=height,
-            position=typed_array([2.0, 4.0, 1.0], dtype=jnp.single),
+            position=jnp.array([2.0, 4.0, 1.0], dtype=jnp.single),
         ),
         light=renderer.LightParameters(),
         width=width,
@@ -97,17 +90,17 @@ def _load_head_model() -> renderer.Model:
     diffuse = np.asarray(Image.open(_HEAD_DIFFUSE).convert("RGB"), dtype=np.float32)
     specular = np.asarray(Image.open(_HEAD_SPECULAR).convert("RGB"), dtype=np.float32)
     # Match the original notebook's map transpose and horizontal UV flip.
-    diffuse_map = typed_asarray(
+    diffuse_map = jnp.asarray(
         diffuse.swapaxes(0, 1)[:, ::-1, :] / 255.0, dtype=jnp.single
     )
-    specular_map = typed_asarray(specular.swapaxes(0, 1)[:, ::-1, 0], dtype=jnp.single)
+    specular_map = jnp.asarray(specular.swapaxes(0, 1)[:, ::-1, 0], dtype=jnp.single)
     return renderer.Model(
-        verts=typed_asarray(verts),
-        norms=typed_asarray(norms),
-        uvs=typed_asarray(uvs),
-        faces=typed_asarray(faces),
-        faces_norm=typed_asarray(faces_norm),
-        faces_uv=typed_asarray(faces_uv),
+        verts=jnp.asarray(verts),
+        norms=jnp.asarray(norms),
+        uvs=jnp.asarray(uvs),
+        faces=jnp.asarray(faces),
+        faces_norm=jnp.asarray(faces_norm),
+        faces_uv=jnp.asarray(faces_uv),
         diffuse_map=diffuse_map,
         specular_map=specular_map,
     )
@@ -125,23 +118,23 @@ def render_head_frames(
         raise ValueError("frame_count must be positive")
 
     model = _load_head_model()
-    centre = typed_array((0.0, 0.0, 0.0), dtype=jnp.single)
+    centre = jnp.array((0.0, 0.0, 0.0), dtype=jnp.single)
     camera = renderer.CameraParameters(
         viewWidth=width,
         viewHeight=height,
-        position=typed_array((0.0, 0.0, 3.0), dtype=jnp.single),
+        position=jnp.array((0.0, 0.0, 3.0), dtype=jnp.single),
         target=centre,
-        up=typed_array((0.0, 1.0, 0.0), dtype=jnp.single),
+        up=jnp.array((0.0, 1.0, 0.0), dtype=jnp.single),
     )
     light = renderer.LightParameters(
-        direction=typed_array((0.57735, -0.57735, 0.57735), dtype=jnp.single),
-        ambient=typed_full(3, 0.1, dtype=jnp.single),
-        diffuse=typed_full(3, 0.85, dtype=jnp.single),
-        specular=typed_full(3, 0.05, dtype=jnp.single),
+        direction=jnp.array((0.57735, -0.57735, 0.57735), dtype=jnp.single),
+        ambient=jnp.full(3, 0.1, dtype=jnp.single),
+        diffuse=jnp.full(3, 0.85, dtype=jnp.single),
+        specular=jnp.full(3, 0.05, dtype=jnp.single),
     )
     shadow = renderer.ShadowParameters(centre=centre)
     base_instance = renderer.ModelObject(model=model)
-    axis = typed_array((0.0, 1.0, 0.0), dtype=jnp.single)
+    axis = jnp.array((0.0, 1.0, 0.0), dtype=jnp.single)
 
     for frame_index in range(frame_count):
         degrees = frame_index * 360.0 / frame_count
@@ -155,7 +148,7 @@ def render_head_frames(
             width=width,
             height=height,
             shadow_param=shadow,
-            colour_default=typed_zeros(3, dtype=jnp.single),
+            colour_default=jnp.zeros(3, dtype=jnp.single),
         )
         image = jnp.clip(image, 0.0, 1.0)
         yield np.asarray(jax.device_get(renderer.transpose_for_display(image)))

@@ -13,7 +13,6 @@ from renderer import (
     build_texture_from_PyTinyrenderer,
     transpose_for_display,
 )
-from renderer._meta_utils import typed_array
 
 scene: Scene = Scene()
 
@@ -52,7 +51,7 @@ texture: Texture = (
     / 255.0
 )
 
-vertices = typed_array(
+vertices = jnp.array(
     [
         [100.000000, -100.000000, 0.000000],
         [100.000000, 100.000000, 0.000000],
@@ -61,7 +60,7 @@ vertices = typed_array(
     ]
 )
 vertices = vertices * 0.01
-normals = typed_array(
+normals = jnp.array(
     [
         [0.000000, 0.000000, 1.000000],
         [0.000000, 0.000000, 1.000000],
@@ -70,7 +69,7 @@ normals = typed_array(
     ]
 )
 
-uvs = typed_array(
+uvs = jnp.array(
     [
         [1.000000, 0.000000],
         [1.000000, 1.000000],
@@ -79,7 +78,7 @@ uvs = typed_array(
     ]
 )
 
-indices = typed_array([[0, 1, 2], [0, 2, 3]])
+indices = jnp.array([[0, 1, 2], [0, 2, 3]])
 model: Model = Model.create(
     verts=vertices,
     norms=normals,
@@ -106,7 +105,7 @@ img = Renderer.get_camera_image(
 
 rgb_array = lax.clamp(0.0, img * 255, 255.0).astype(jnp.uint8)
 
-fig, ax = plt.subplots()  # pyright: ignore
-ax.imshow(transpose_for_display(rgb_array))  # pyright: ignore[reportUnknownMemberType]
+fig, ax = plt.subplots()
+ax.imshow(transpose_for_display(rgb_array))
 
-plt.show()  # pyright: ignore[reportUnknownMemberType]
+plt.show()

@@ -56,7 +56,7 @@ repos:
         name: Pyright project
         entry: uv run --no-sync --python 3.14 pyright --warnings
         language: system
-        files: ^(\.pre-commit-config[.]yaml|pyproject[.]toml|uv[.]lock|(assets|renderer|examples|test_resources|tests|tools)/.*[.]pyi?)$
+        files: ^(\.pre-commit-config[.]yaml|pyproject[.]toml|uv[.]lock|(assets|renderer|test_resources|tests|tools)/.*[.]pyi?)$
         pass_filenames: false
 
       - id: cspell

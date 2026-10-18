@@ -15,20 +15,19 @@ from renderer import (
     build_texture_from_PyTinyrenderer,
     transpose_for_display,
 )
-from renderer._meta_utils import typed_array, typed_full, typed_zeros
 
 scene: Scene = Scene()
 
 width = 640
 height = 480
-eye: Vec3f = typed_array([2.0, 4.0, 1.0])
-target: Vec3f = typed_array([0.0, 0.0, 0.0])
+eye: Vec3f = jnp.array([2.0, 4.0, 1.0])
+target: Vec3f = jnp.array([0.0, 0.0, 0.0])
 
 light: LightParameters = LightParameters(
-    direction=typed_array([2.0, 4.0, 1.0]),
-    ambient=typed_zeros(3),
-    diffuse=typed_full(3, 1.0),
-    specular=typed_full(3, 0.0),
+    direction=jnp.array([2.0, 4.0, 1.0]),
+    ambient=jnp.zeros(3),
+    diffuse=jnp.full(3, 1.0),
+    specular=jnp.full(3, 0.0),
 )
 camera: CameraParameters = CameraParameters(
     viewWidth=width,
@@ -39,7 +38,7 @@ camera: CameraParameters = CameraParameters(
 
 texture: Texture = (
     build_texture_from_PyTinyrenderer(
-        typed_array(
+        jnp.array(
             (
                 255,
                 255,
@@ -81,7 +80,7 @@ with jax.disable_jit(False):
 
 rgb_array = lax.clamp(0.0, img * 255, 255.0).astype(jnp.uint8)
 
-fig, ax = plt.subplots()  # pyright: ignore
-ax.imshow(transpose_for_display(rgb_array))  # pyright: ignore[reportUnknownMemberType]
+fig, ax = plt.subplots()
+ax.imshow(transpose_for_display(rgb_array))
 
-plt.show()  # pyright: ignore[reportUnknownMemberType]
+plt.show()
