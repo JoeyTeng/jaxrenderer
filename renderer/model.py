@@ -288,14 +288,8 @@ class MergedModel(NamedTuple):
 
             shapes: Sequence[tuple[int, ...]] = tree_map(map_shape, maps)
             # pick the largest shape for each dimension
-            single_shape: tuple[int, ...] = cast(
-                tuple[int, ...],
-                tuple(
-                    (
-                        max((shape[i] for shape in shapes))  # pyright: ignore
-                        for i in range(dims)
-                    )
-                ),
+            single_shape: tuple[int, ...] = tuple(
+                max(shape[i] for shape in shapes) for i in range(dims)
             )
 
             dtype = jax.dtypes.result_type(*maps)
