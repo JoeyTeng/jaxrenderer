@@ -155,7 +155,7 @@ def to_homogeneous(
 ) -> Float[Array, "*batch dim+1"]:
     """Transform the coordinates to homogeneous coordinates by append a batch
     of `value`s (default 1.) in the last axis."""
-    if not is_array_type(cast(object, value), Float[Array, "*batch"]):
+    if not is_array_type(value, Float[Array, "*batch"]):
         value = typed_array(value)
 
     target_dtype = jax.dtypes.result_type(coordinates)
