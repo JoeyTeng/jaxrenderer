@@ -517,13 +517,10 @@ def merge_objects(objects: Sequence[ModelObject]) -> MergedModel:
         transform: ModelMatrix,
     ) -> Vertices:
         """Apply transforms defined in `ModelObject` to vertex normals."""
-        world: Float[Array, "N 3"] = cast(
-            Float[Array, "N 3"],
-            Camera.apply_vec(
-                normals,
-                # transform by inverse transpose
-                jnp.linalg.inv(transform).T,  # pyright: ignore
-            ),
+        world: Float[Array, "N 3"] = Camera.apply_vec(
+            normals,
+            # transform by inverse transpose
+            jnp.linalg.inv(transform).T,  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
         )
         assert is_array_type(world, Float[Array, "N 3"])
 
