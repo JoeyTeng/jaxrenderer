@@ -1,6 +1,5 @@
 from typing import NamedTuple, cast
 
-import jax
 import jax.lax as lax
 import jax.numpy as jnp
 from jaxtyping import (
@@ -95,6 +94,11 @@ def test_render_batched_triangles():
             (-2, 0.0, 0.0),
         )
     )
+    light = LightSource()
+    normal = jnp.broadcast_to(
+        light.direction,
+        (position.shape[0], *light.direction.shape),
+    )
     extra = GouraudExtraInput(
         position=position,
         colour=typed_array(
@@ -107,8 +111,8 @@ def test_render_batched_triangles():
                 (1.0, 1.0, 0.0),
             )
         ),
-        normal=jax.vmap(lambda _: LightSource().direction)(position),  # pyright: ignore
-        light=LightSource(),
+        normal=normal,
+        light=light,
     )
 
     result = render(camera, GouraudShader, buffers, face_indices, extra)
@@ -292,6 +296,11 @@ def test_perspective_interpolation():
             (0.0, 1.0, -1.0),
         )
     )
+    light = LightSource()
+    normal = jnp.broadcast_to(
+        light.direction,
+        (position.shape[0], *light.direction.shape),
+    )
     extra = ExtraInput(
         position=position,
         colour=typed_array(
@@ -308,8 +317,8 @@ def test_perspective_interpolation():
                 (0.0, 10.0),
             )
         ),
-        normal=jax.vmap(lambda _: LightSource().direction)(position),  # pyright: ignore
-        light=LightSource(),
+        normal=normal,
+        light=light,
     )
 
     result = render(camera, _Shader, buffers, face_indices, extra)

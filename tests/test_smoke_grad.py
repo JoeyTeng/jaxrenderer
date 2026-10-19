@@ -88,6 +88,11 @@ position = typed_array(
         (-2, 0.0, 0.0),
     )
 )
+light = LightSource()
+normal = jnp.broadcast_to(
+    light.direction,
+    (position.shape[0], *light.direction.shape),
+)
 extra = GouraudExtraInput(
     position=position,
     colour=typed_array(
@@ -100,8 +105,8 @@ extra = GouraudExtraInput(
             (1.0, 1.0, 0.0),
         )
     ),
-    normal=jax.vmap(lambda _: LightSource().direction)(position),  # pyright: ignore
-    light=LightSource(),
+    normal=normal,
+    light=light,
 )
 
 _render = partial(
