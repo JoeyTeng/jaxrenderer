@@ -10,7 +10,6 @@ from jaxtyping import (
     Array,
     Bool,
     Integer,
-    jaxtyped,  # pyright: ignore[reportUnknownVariableType]
 )
 
 from ._meta_utils import (
@@ -22,6 +21,7 @@ from ._meta_utils import (
     typed_ones,
     typed_zeros,
 )
+from ._meta_utils import typed_jaxtyped as jaxtyped
 from ._meta_utils import typed_jit as jit
 from .geometry import Camera, Projection, View, Viewport, normalise
 from .model import MergedModel, ModelObject, merge_objects

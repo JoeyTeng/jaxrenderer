@@ -11,10 +11,10 @@ from jaxtyping import (
     Float,
     Integer,
     Num,
-    jaxtyped,  # pyright: ignore[reportUnknownVariableType]
 )
 
 from ._meta_utils import add_tracing_name, is_array_type, typed_array
+from ._meta_utils import typed_jaxtyped as jaxtyped
 from ._meta_utils import typed_jit as jit
 from .geometry import Camera, Interpolation, Viewport, interpolate
 from .shader import (

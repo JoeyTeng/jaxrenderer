@@ -7,11 +7,18 @@ from jaxtyping import (
     Array,
     Bool,
     Float,
-    jaxtyped,  # pyright: ignore[reportUnknownVariableType]
 )
 
 from renderer import jit
-from renderer._meta_utils import is_array_type, typed_array, typed_modf, typed_zeros
+from renderer._meta_utils import (
+    is_array_type,
+    typed_array,
+    typed_modf,
+    typed_zeros,
+)
+from renderer._meta_utils import (
+    typed_jaxtyped as jaxtyped,
+)
 from renderer.geometry import Camera, normalise, to_homogeneous
 from renderer.pipeline import render
 from renderer.shader import ID, MixerOutput, PerFragment, PerVertex, Shader

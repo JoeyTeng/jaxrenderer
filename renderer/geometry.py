@@ -10,7 +10,6 @@ from jaxtyping import (
     Float,
     Integer,
     Num,
-    jaxtyped,  # pyright: ignore[reportUnknownVariableType]
 )
 
 from ._meta_utils import (
@@ -20,6 +19,7 @@ from ._meta_utils import (
     typed_asarray,
     typed_zeros,
 )
+from ._meta_utils import typed_jaxtyped as jaxtyped
 from ._meta_utils import typed_jit as jit
 from .types import FloatV, JaxFloating, NumV, Triangle2Df, Vec2f, Vec2i, Vec3f, Vec4f
 

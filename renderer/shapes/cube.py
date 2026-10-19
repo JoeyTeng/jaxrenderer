@@ -2,10 +2,10 @@ import jax
 from jaxtyping import (
     Array,
     Float,
-    jaxtyped,  # pyright: ignore[reportUnknownVariableType]
 )
 
 from .._meta_utils import typed_array
+from .._meta_utils import typed_jaxtyped as jaxtyped
 from ..model import Model
 from ..types import (
     FaceIndices,

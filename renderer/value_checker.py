@@ -4,10 +4,10 @@ import jax.numpy as jnp
 from jaxtyping import (
     Array,
     Integer,
-    jaxtyped,  # pyright: ignore[reportUnknownVariableType]
 )
 
 from ._meta_utils import typed_asarray
+from ._meta_utils import typed_jaxtyped as jaxtyped
 from .types import BoolV, IntV
 
 
