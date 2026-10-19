@@ -1,3 +1,4 @@
+from collections.abc import Callable
 from functools import partial
 import json
 import os
@@ -8,7 +9,7 @@ import jax
 import jax.lax as lax
 import jax.numpy as jnp
 
-from renderer import Buffers, Camera, LightSource, render
+from renderer import Buffers, Camera, LightSource, jit, render
 from renderer._meta_utils import typed_array, typed_asarray, typed_grad, typed_zeros
 from renderer.shaders.gouraud import GouraudExtraInput, GouraudShader
 from renderer.types import FloatV
@@ -117,12 +118,11 @@ def test_grad_over_camera():
 
         return jnp.sum(depth)
 
-    grad_camera: Camera = cast(
-        Camera,
-        jax.jit(  # pyright: ignore[reportUnknownMemberType]
-            jax.grad(camera_depth_loss)  # pyright: ignore[reportUnknownMemberType]
-        )(camera),
+    camera_gradient = cast(
+        Callable[[Camera], Camera],
+        jax.grad(camera_depth_loss),  # pyright: ignore[reportUnknownMemberType]
     )
+    grad_camera: Camera = jit(camera_gradient)(camera)
 
     def block_until_ready(value: jax.Array) -> jax.Array:
         return value.block_until_ready()

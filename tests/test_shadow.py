@@ -1,14 +1,10 @@
-from collections.abc import Callable
-from typing import cast
-
-import jax
 import jax.numpy as jnp
 import numpy as np
 
-from renderer import Camera
+from renderer import Camera, jit
 from renderer._meta_utils import typed_asarray
 from renderer.shadow import Shadow
-from renderer.types import FloatV, Vec2f, ZBuffer
+from renderer.types import FloatV, ZBuffer
 
 
 def test_shadow_get_rounding_fill_and_negative_index_wrapping() -> None:
@@ -30,10 +26,7 @@ def test_shadow_get_rounding_fill_and_negative_index_wrapping() -> None:
     )
 
     eager_values = tuple(shadow.get(position) for position in positions)
-    compiled_get = cast(
-        Callable[[Vec2f], FloatV],
-        jax.jit(shadow.get),  # pyright: ignore[reportUnknownMemberType]
-    )
+    compiled_get = jit(shadow.get)
     compiled_values: tuple[FloatV, ...] = tuple(
         compiled_get(position) for position in positions
     )

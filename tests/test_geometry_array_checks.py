@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from typing import Any
 
-import jax
 from jax import Array
 import jax.numpy as jnp
 from jaxtyping import (
@@ -12,6 +11,7 @@ from jaxtyping import (
 )
 import pytest
 
+from renderer import jit
 from renderer._meta_utils import is_array_type, typed_ones
 from renderer._meta_utils import typed_jaxtyped as jaxtyped
 
@@ -56,10 +56,10 @@ def test_array_spec_check_binds_shared_dimensions_in_one_context() -> None:
 
 
 def test_array_spec_check_rejects_dtype_and_shape_mismatches_during_jit_trace() -> None:
-    compiled = jax.jit(_assert_float_matrix)  # pyright: ignore[reportUnknownMemberType]
+    compiled = jit(_assert_float_matrix)
 
     assert compiled(_array((2, 3), jnp.float32))
     with pytest.raises(AssertionError):
-        compiled(_array((2, 3), jnp.int32))
+        _ = compiled(_array((2, 3), jnp.int32))
     with pytest.raises(AssertionError):
-        compiled(_array((2, 4), jnp.float32))
+        _ = compiled(_array((2, 4), jnp.float32))
