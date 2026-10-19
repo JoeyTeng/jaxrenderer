@@ -410,7 +410,7 @@ class Renderer:
         assert isinstance(_camera, Camera), f"{_camera}"
 
         light = tree_map(
-            jnp.asarray,  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
+            typed_asarray,
             light,
             # only flatten one layer
             is_leaf=lambda x: not isinstance(x, LightParameters),
@@ -429,7 +429,7 @@ class Renderer:
 
         if shadow_param is not None:
             shadow_param = tree_map(
-                jnp.asarray,  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
+                typed_asarray,
                 shadow_param,
                 # only flatten one layer
                 is_leaf=lambda x: not isinstance(x, ShadowParameters),

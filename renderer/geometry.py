@@ -160,7 +160,7 @@ def to_homogeneous(
 
     target_dtype = jax.dtypes.result_type(coordinates)
     paddings: Float[Array, "*batch 1"] = jnp.broadcast_to(
-        value.astype(target_dtype),  # pyright: ignore
+        cast(Array, value).astype(target_dtype),
         (*coordinates.shape[:-1], 1),
     )
     homo_coords: Float[Array, "*batch dim+1"] = lax.concatenate(
