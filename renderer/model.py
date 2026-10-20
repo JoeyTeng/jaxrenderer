@@ -356,10 +356,7 @@ class ModelObject(NamedTuple):
     model: Model
     """Reference to the model, with mesh, attached maps, etc."""
     local_scaling: Vec3f = typed_ones(3)
-    """Local scaling factors in x, y, z.
-
-    Non-zero components are required for normal transformation.
-    """
+    """Local scaling factors in x, y, z."""
     transform: ModelMatrix = jnp.identity(4)
     """Transform matrix (model matrix) of the model."""
     # TODO: Support double_sided
@@ -520,11 +517,28 @@ def merge_objects(objects: Sequence[ModelObject]) -> MergedModel:
         local_scaling: Vec3f,
         transform: ModelMatrix,
     ) -> Vertices:
-        """Apply the inverse-transpose of the complete vertex transform."""
-        # Vertices are scaled before the object transform, so apply the
-        # inverse local scale before the existing inverse-transpose transform.
+        """Apply the local cofactor and the object's inverse-transpose transform."""
+        # The diagonal cofactor is proportional to inverse local scaling for
+        # every nonsingular scale, but stays defined when an axis is flattened.
+        scale_magnitude = jnp.max(jnp.abs(local_scaling))
+        safe_scale_magnitude = jnp.where(scale_magnitude > 0.0, scale_magnitude, 1.0)
+        scaled: Vec3f = local_scaling / safe_scale_magnitude
+        local_cofactor: Vec3f = jnp.stack(
+            (
+                scaled[1] * scaled[2],
+                scaled[0] * scaled[2],
+                scaled[0] * scaled[1],
+            )
+        )
+        # Cofactors include the determinant sign. Restore the inverse-transpose
+        # direction for negative scales; treat zero components as positive.
+        orientation_sign = jnp.prod(jnp.where(scaled < 0.0, -1.0, 1.0))
+        local_normals = normals * local_cofactor * orientation_sign
+        has_transformed_normal = jnp.any(local_normals != 0.0, axis=-1, keepdims=True)
+        local_normals = jnp.where(has_transformed_normal, local_normals, normals)
+
         world: Float[Array, "N 3"] = Camera.apply_vec(
-            normals / local_scaling,
+            local_normals,
             # transform by inverse transpose
             jnp.linalg.inv(transform).T,  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
         )
