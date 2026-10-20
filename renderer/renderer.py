@@ -261,7 +261,7 @@ class Renderer:
         normal = model.norms[model.faces_norm.reshape((-1,))]
         uv = model.uvs[model.faces_uv.reshape((-1,))]
 
-        texture_index = model.texture_index[model.faces_uv.reshape((-1,))]
+        texture_index = model.texture_index[model.faces.reshape((-1,))]
         # double_sided = model.texture_index[model.faces_uv.reshape((-1,))]
 
         face_indices: Integer[Array, "_ 3"]
