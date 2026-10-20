@@ -572,18 +572,6 @@ def merge_objects(objects: Sequence[ModelObject]) -> MergedModel:
             & ~zero_axis_support
             & has_extension_normal
         )
-        # At a singular scale only the candidate direction is defined. Rescale
-        # it so the batch-global normalisation cannot underflow; shaders
-        # normalise each vertex before lighting.
-        safe_extension_magnitude = jnp.where(
-            use_scale_limit,
-            extension_magnitude,
-            1.0,
-        )
-        # This positive factor cancels when the resulting normal direction is
-        # normalised, so freezing it avoids reciprocal-square overflow in AD.
-        safe_extension_magnitude = lax.stop_gradient(safe_extension_magnitude)
-        extension_normals = extension_normals / safe_extension_magnitude
         finite_fallback = jnp.where(has_transformed_normal, local_normals, normals)
         # Keep the cofactor or finite fallback where no unique scale-only
         # extension exists.
@@ -592,6 +580,15 @@ def merge_objects(objects: Sequence[ModelObject]) -> MergedModel:
             extension_normals,
             finite_fallback,
         )
+
+        # Normal magnitude is not part of the shading contract. Rescale each
+        # row before batch normalisation so tiny cofactor directions stay finite.
+        local_magnitude = jnp.max(jnp.abs(local_normals), axis=-1, keepdims=True)
+        safe_local_magnitude = jnp.where(local_magnitude > 0.0, local_magnitude, 1.0)
+        # The positive factor cancels under per-vertex direction normalisation;
+        # freezing it avoids reciprocal-square overflow in AD.
+        safe_local_magnitude = lax.stop_gradient(safe_local_magnitude)
+        local_normals = local_normals / safe_local_magnitude
 
         world: Float[Array, "N 3"] = Camera.apply_vec(
             local_normals,

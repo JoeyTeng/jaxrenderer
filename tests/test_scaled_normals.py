@@ -84,10 +84,15 @@ def test_merge_objects_scaled_normal_gradient_matches_finite_differences(
 
     def loss(scale: Array) -> Array:
         merged = merge_objects((obj._replace(local_scaling=scale),))
-        return jnp.sum(merged.norms * weights)
+        directions = jnp.stack(
+            tuple(normalise(merged.norms[index]) for index in range(3))
+        )
+        return jnp.sum(directions * weights)
 
     def inverse_transpose_loss(scale: Array) -> Array:
-        expected = normalise(norms / scale)
+        expected = jnp.stack(
+            tuple(normalise(norms[index] / scale) for index in range(3))
+        )
         return jnp.sum(expected * weights)
 
     scale = _float_array(local_scaling)
@@ -130,9 +135,19 @@ def test_merge_objects_scaled_normal_gradient_matches_finite_differences(
             (0.0, 1.0, 0.0),
             ((0.0, 1.0, 0.0), (0.0, 1.0, 0.0)),
         ),
+        (
+            (1.0, 1e-12, 1e-12),
+            (1.0, 0.0, 0.0),
+            ((1.0, 0.0, 0.0), (1.0, 0.0, 0.0)),
+        ),
+        (
+            (1.0, 1.0, 1e-24),
+            (1.0, 0.0, 0.0),
+            ((0.0, 0.0, 1.0), (0.0, 0.0, 1.0)),
+        ),
     ),
 )
-def test_merge_objects_zero_scale_normal_gradient_matches_continuous_limit(
+def test_merge_objects_scaled_normal_direction_and_gradient_matches_limit(
     local_scaling: tuple[float, float, float],
     source_normal: tuple[float, float, float],
     other_normals: tuple[tuple[float, float, float], tuple[float, float, float]],
@@ -167,11 +182,14 @@ def test_merge_objects_zero_scale_normal_gradient_matches_continuous_limit(
     expected_direction = inverse_transpose_direction(scale)
     gradient: Array = typed_jit(typed_grad(loss))(scale)
     baseline_gradient: Array = typed_jit(typed_grad(inverse_transpose_loss))(scale)
-    epsilon = _float_array(1e-3)
+    epsilon = jnp.where(scale == 0.0, 1e-3, jnp.abs(scale) * 1e-3)
     finite_difference = jnp.stack(
         tuple(
-            (loss(scale.at[index].add(epsilon)) - loss(scale.at[index].add(-epsilon)))
-            / (2.0 * epsilon)
+            (
+                loss(scale.at[index].add(epsilon[index]))
+                - loss(scale.at[index].add(-epsilon[index]))
+            )
+            / (2.0 * epsilon[index])
             for index in range(3)
         )
     )
