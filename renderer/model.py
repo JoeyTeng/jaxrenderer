@@ -528,7 +528,6 @@ def merge_objects(objects: Sequence[ModelObject]) -> MergedModel:
         safe_scale: Vec3f = jnp.where(zero_scale, 1.0, local_scaling)
         normal_mantissa, normal_exponent = jnp.frexp(normals)
         scale_mantissa, scale_exponent = jnp.frexp(safe_scale)
-        ratio_mantissa = normal_mantissa / scale_mantissa
         ratio_exponent = normal_exponent - scale_exponent
         valid_scale = ~zero_scale
         nonzero_ratio = (normals != 0.0) & valid_scale
@@ -545,7 +544,36 @@ def merge_objects(objects: Sequence[ModelObject]) -> MergedModel:
             ratio_exponent - row_exponent,
             0,
         )
-        inverse_normals = jnp.ldexp(ratio_mantissa, relative_exponent)
+        exponent_quotient = relative_exponent // 5
+        exponent_remainder = relative_exponent - 5 * exponent_quotient
+        ones: Float[Array, "N 3"] = typed_ones(
+            ratio_exponent.shape,
+            dtype=normals.dtype,
+        )
+        base_power = jnp.ldexp(ones, exponent_quotient)
+        next_power = jnp.ldexp(ones, exponent_quotient + 1)
+        powers: list[Float[Array, "N 3"]] = []
+        power_product = ones
+        for part in range(5):
+            power: Float[Array, "N 3"] = jnp.where(
+                part < exponent_remainder,
+                next_power,
+                base_power,
+            )
+            powers.append(power)
+            power_product = power_product * power
+
+        power_over_scale = power_product / scale_mantissa
+        stop_zero_scale_gradient = (normals == 0.0) & ~jnp.isfinite(power_over_scale)
+        scale_mantissa = jnp.where(
+            stop_zero_scale_gradient,
+            lax.stop_gradient(scale_mantissa),
+            scale_mantissa,
+        )
+        ratio_mantissa = normal_mantissa / scale_mantissa
+        inverse_normals: Float[Array, "N 3"] = ratio_mantissa
+        for power in powers:
+            inverse_normals = inverse_normals * power
         inverse_normals = jnp.where(valid_scale, inverse_normals, 0.0)
 
         # Relative exponents preserve meaningful inverse directions across the
