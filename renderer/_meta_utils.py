@@ -2,7 +2,7 @@ from collections.abc import Callable
 import functools
 import inspect
 import sys
-from typing import Any, ParamSpec, Protocol, TypeVar, cast, overload
+from typing import Any, ParamSpec, Protocol, TypeVar, cast
 
 import jax
 from jax import Array
@@ -67,15 +67,6 @@ def export(fn: T) -> T:
     return fn
 
 
-T_co = TypeVar("T_co", covariant=True)
-
-
-class Wrapped(Protocol[ArgT, T_co]):
-    def __call__(self, *args: ArgT.args, **kwargs: ArgT.kwargs) -> T_co: ...
-
-    def lower(self, *args: ArgT.args, **kwargs: ArgT.kwargs) -> jax.stages.Lowered: ...
-
-
 def typed_jit(
     f: Callable[ArgT, RetT],
     *args: Any,
@@ -88,15 +79,13 @@ def typed_jit(
 
     See: https://github.com/google/jax/issues/10311
     """
-    jitted: Wrapped[ArgT, RetT] = cast(
-        Wrapped[ArgT, RetT],
+    return cast(
+        Callable[ArgT, RetT],
         functools.update_wrapper(
             jax.jit(f, *args, **kwargs),  # pyright: ignore[reportUnknownMemberType]
             f,
         ),
     )
-
-    return jitted
 
 
 # These manually maintained aliases describe the JAX subset used here. The casts
@@ -163,22 +152,14 @@ class _JaxtypedIdentityDecorator(Protocol):
     def __call__(self, target: _DecoratedTarget, /) -> _DecoratedTarget: ...
 
 
-class _JaxtypedFactory(Protocol):
-    @overload
-    def __call__(self, target: _DecoratedTarget, /) -> _DecoratedTarget: ...
-
-    @overload
-    def __call__(self, *, typechecker: None) -> _JaxtypedIdentityDecorator: ...
-
-
 class _JaxtypingAPI(Protocol):
-    jaxtyped: _JaxtypedFactory
+    def jaxtyped(self, *, typechecker: None) -> _JaxtypedIdentityDecorator: ...
 
 
-# This manually maintained alias covers bare function/class decoration and the
-# typechecker=None factory form. It does not wrap jaxtyping; check this subset
-# against jaxtyping when upgrading the dependency.
-typed_jaxtyped = cast(_JaxtypingAPI, jaxtyping).jaxtyped
+# This configured native decorator retains jaxtyping's manual shape contexts.
+# Its only call form decorates a function or class; recheck this subset when
+# upgrading jaxtyping.
+typed_jaxtyped = cast(_JaxtypingAPI, jaxtyping).jaxtyped(typechecker=None)
 
 typed_array = _jnp_api.array
 typed_asarray = _jnp_api.asarray

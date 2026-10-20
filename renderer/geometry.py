@@ -155,7 +155,7 @@ def to_homogeneous(
 ) -> Float[Array, "*batch dim+1"]:
     """Transform the coordinates to homogeneous coordinates by append a batch
     of `value`s (default 1.) in the last axis."""
-    if not is_array_type(cast(object, value), Float[Array, "*batch"]):
+    if not is_array_type(value, Float[Array, "*batch"]):
         value = typed_array(value)
 
     target_dtype = jax.dtypes.result_type(coordinates)
@@ -259,7 +259,7 @@ class Camera(NamedTuple):
             view_inv = cast(View, jnp.linalg.inv(view))
         assert is_array_type(view_inv, View)
 
-        projection_inv: Projection = lax.cond(  # pyright: ignore
+        projection_inv: Projection = lax.cond(  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
             jnp.isclose(projection[3, 3], 0),
             # is perspective projection matrix
             cls.perspective_projection_matrix_inv,
@@ -315,7 +315,7 @@ class Camera(NamedTuple):
             dtype = jax.dtypes.result_type(points, matrix)
 
         # put `points` at lhs to keep batch axis at axis 0 in the result.
-        transformed: Num[Array, "*N 4"] = lax.dot_general(  # pyright: ignore
+        transformed: Num[Array, "*N 4"] = lax.dot_general(  # pyright: ignore[reportUnknownMemberType]
             points.astype(dtype),
             matrix.astype(dtype),
             (((lhs_contract_axis,), (1,)), ([], [])),
@@ -471,7 +471,7 @@ class Camera(NamedTuple):
             _screen,
         )
         assert is_array_type(clip, Float[Array, "*N 4"])
-        shuffle = lax.cond(  # pyright: ignore
+        shuffle = lax.cond(  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
             self.projection[3, 3] == 0,
             # perspective projection
             lambda: typed_array([0, 1, 3, 2]),
@@ -881,7 +881,7 @@ class Camera(NamedTuple):
             # 3. div by half to centering
             jnp.identity(4).at[0, 0].set(0.5).at[1, 1].set(0.5)
             # 2. mul by width, height
-            @ jnp.eye(4).at[0, 0].set(width).at[1, 1].set(height)  # pyright: ignore
+            @ jnp.eye(4).at[0, 0].set(width).at[1, 1].set(height)  # pyright: ignore[reportUnknownMemberType]
             # 1. Add by 1 to make values positive
             @ jnp.identity(4).at[:2, -1].set(1)
         )
@@ -985,12 +985,11 @@ def rotation_matrix(
 
     c = jnp.cos(angle)
 
-    rotation_matrix: Float[Array, "3 3"] = cast(
-        Float[Array, "3 3"],
-        jnp.identity(3) * c  # +c at main diagonal # pyright: ignore
+    rotation_matrix: Float[Array, "3 3"] = (
+        jnp.identity(3) * c  # +c at main diagonal
         # second term
         - jnp.sin(angle) * jnp.cross(axis, jnp.identity(3))
-        + (1 - c) * jnp.outer(axis, axis),  # first term
+        + (1 - c) * jnp.outer(axis, axis)  # first term
     )
     assert is_array_type(rotation_matrix, Float[Array, "3 3"])
 

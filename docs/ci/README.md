@@ -8,7 +8,7 @@ The required Python 3.14 lint job runs `uv run --no-sync --python 3.14 pyright -
 
 The package combines the public `jax.Array` type, following the [JAX typing guidance](https://docs.jax.dev/en/latest/jax.typing.html), with jaxtyping's dtype and shape specifications. Geometry checks retain their runtime validation of shared dimensions, including during JIT tracing; passing Pyright alone does not verify these constraints. The shared `is_array_type` helper preserves these specifications during runtime checks, while `typed_jit` preserves callable signatures for Pyright.
 
-Private `typed_*` aliases in `renderer/_meta_utils.py` describe the small JAX API and jaxtyping decorator subset used by the renderer and tests. Protocols and explicit casts retain the original callables; these manually maintained contracts require review when either dependency is updated. The casts add no array-shape, dtype or differentiability checks. `typed_jaxtyped` covers the bare decorator and `typechecker=None` forms without changing their runtime behaviour.
+Private `typed_*` aliases in `renderer/_meta_utils.py` describe the small JAX API and jaxtyping decorator subset used by the renderer and tests. Protocols and explicit casts preserve callable signatures; these manually maintained contracts require review when either dependency is updated. The casts add no array-shape, dtype or differentiability checks. `typed_jaxtyped` is the native decorator preconfigured with `typechecker=None`; apply it directly to functions or classes to retain manual shape contexts.
 
 ## Provider checks
 

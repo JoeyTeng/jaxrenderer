@@ -123,11 +123,11 @@ def test_grad_over_camera():
 
         return jnp.sum(depth)
 
-    camera_gradient = cast(
-        Callable[[Camera], Camera],
-        jax.grad(camera_depth_loss),  # pyright: ignore[reportUnknownMemberType]
+    camera_grad_factory = cast(
+        Callable[[Callable[[Camera], FloatV]], Callable[[Camera], Camera]],
+        typed_grad,
     )
-    grad_camera: Camera = jit(camera_gradient)(camera)
+    grad_camera: Camera = jit(camera_grad_factory(camera_depth_loss))(camera)
 
     def block_until_ready(value: jax.Array) -> jax.Array:
         return value.block_until_ready()

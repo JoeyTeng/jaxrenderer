@@ -20,19 +20,19 @@ def _array(shape: tuple[int, ...], dtype: Any) -> Array:
     return typed_ones(shape, dtype=dtype)
 
 
-@jaxtyped(typechecker=None)
+@jaxtyped
 def _matches_shared_vector_size(left: object, right: object) -> bool:
     return is_array_type(left, Float[Array, "n 3"]) and is_array_type(
         right, Float[Array, "n 3"]
     )
 
 
-@jaxtyped(typechecker=None)
+@jaxtyped
 def _matches_float_matrix(value: object) -> bool:
     return is_array_type(value, Float[Array, "n 3"])
 
 
-@jaxtyped(typechecker=None)
+@jaxtyped
 def _assert_float_matrix(value: object) -> bool:
     assert _matches_float_matrix(value)
     return True
