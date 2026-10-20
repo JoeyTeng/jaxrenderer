@@ -4,6 +4,7 @@ import jax
 from jax import Array
 import jax.lax as lax
 import jax.numpy as jnp
+import jax.typing
 from jaxtyping import (
     Bool,
     Float,
@@ -120,12 +121,12 @@ class DtypeInfo(NamedTuple, Generic[_DtypeT]):
     min: _DtypeT
     max: _DtypeT
     bits: int
-    dtype: type
+    dtype: jax.typing.DTypeLike
 
     @classmethod
     @jaxtyped
     # cannot be jitted as `dtype` will not be a valid JAX type
-    def create(cls, dtype: type[_DtypeT]) -> "DtypeInfo[_DtypeT]":
+    def create(cls, dtype: jax.typing.DTypeLike) -> "DtypeInfo[_DtypeT]":
         with jax.ensure_compile_time_eval():
             if jnp.issubdtype(dtype, jnp.floating):
                 finfo = cast(_DtypeInfoLike[_DtypeT], jnp.finfo(dtype))

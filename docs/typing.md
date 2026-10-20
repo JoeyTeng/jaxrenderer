@@ -6,4 +6,6 @@ Import typing constructs from their standard-library modules instead. For exampl
 
 The renderer-specific `JaxFloating` and `JaxInteger` aliases remain available from `renderer`.
 
+`DtypeInfo[T].create` accepts JAX's public `jax.typing.DTypeLike` inputs and preserves the supplied descriptor in `dtype`. Specify `T` at the call site to describe the type of `min` and `max`; Pyright does not infer `T` from an unparameterised `DtypeInfo.create(...)` call.
+
 Renderer modules use native annotation behaviour without `from __future__ import annotations`. Self-references remain explicitly quoted for Python 3.12 and 3.13. Annotations are evaluated eagerly on those versions and lazily on Python 3.14; use `typing.get_type_hints` for resolved runtime annotations rather than relying on string values in `__annotations__`.

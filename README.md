@@ -22,7 +22,7 @@ This project is distributed in [PyPI](https://pypi.org/project/jaxrenderer), and
 pip install jaxrenderer
 ```
 
-Python versions `3.12` to `3.14` are supported, with minimum versions of NumPy `2.1.3` and JAX `0.11.2`. You may need to install `jaxlib` separately if you are using GPU or TPU; by default, the CPU version of jaxlib is installed. Please refer to [JAX's installation guide](https://github.com/google/jax#installation) for more details.
+Python versions `3.12` to `3.14` are supported, with minimum versions of NumPy `2.1.3` and JAX `0.11.2`; the default lock uses JAX `0.12.0`. You may need to install `jaxlib` separately if you are using GPU or TPU; by default, the CPU version of jaxlib is installed. Please refer to [JAX's installation guide](https://github.com/google/jax#installation) for more details.
 
 ### Google Colab TPU
 
