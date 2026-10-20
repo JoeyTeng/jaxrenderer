@@ -85,7 +85,11 @@ class Shadow(NamedTuple):
         # camera frame. Near parallel vectors amplify float32 round-off when
         # the side vector is normalised, so use the least-aligned world axis
         # below sqrt(float32 machine epsilon), approximately 3.5e-4.
-        forward: Vec3f = -normalise(light_direction)
+        # Scale first so the norm cannot overflow for finite, large light
+        # vectors; the resulting direction is unchanged.
+        light_scale: FloatV = jnp.max(jnp.abs(light_direction))
+        scaled_light_direction: Vec3f = light_direction / light_scale
+        forward: Vec3f = -normalise(scaled_light_direction)
         unit_up: Vec3f = normalise(up)
         parallel_threshold: float = 3.5e-4
         cross_direction: Vec3f = jnp.cross(forward, unit_up)

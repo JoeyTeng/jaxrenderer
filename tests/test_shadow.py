@@ -37,7 +37,11 @@ def test_shadow_get_rounding_fill_and_negative_index_wrapping() -> None:
     np.testing.assert_allclose(np.asarray(compiled_values), expected)
 
 
-def _render_small_shadow(light_direction: Vec3f, up: Vec3f) -> Shadow:
+def _render_small_shadow(
+    light_direction: Vec3f,
+    up: Vec3f,
+    distance: float = 0.5,
+) -> Shadow:
     width = 8
     height = 8
     vertices: Vertices = typed_asarray(
@@ -60,7 +64,7 @@ def _render_small_shadow(light_direction: Vec3f, up: Vec3f) -> Shadow:
         centre=typed_asarray((0.0, 0.0, 0.0), dtype=jnp.float32),
         up=up,
         strength=typed_asarray((0.5, 0.5, 0.5), dtype=jnp.float32),
-        distance=0.5,
+        distance=distance,
     )
 
 
@@ -101,4 +105,21 @@ def test_shadow_camera_preserves_nonparallel_up_direction() -> None:
         up=up,
     )
 
+    np.testing.assert_allclose(shadow.camera.view, expected_view)
+
+
+def test_shadow_camera_handles_large_finite_light_direction() -> None:
+    light_direction: Vec3f = typed_asarray((2e19, 0.0, 0.0), dtype=jnp.float32)
+    up: Vec3f = typed_asarray((0.0, 0.0, 1.0), dtype=jnp.float32)
+    centre: Vec3f = typed_asarray((0.0, 0.0, 0.0), dtype=jnp.float32)
+
+    shadow = _render_small_shadow(light_direction, up, distance=5e-20)
+    expected_view = Camera.view_matrix(
+        eye=centre + light_direction * 5e-20,
+        centre=centre,
+        up=up,
+    )
+
+    assert np.isfinite(np.asarray(shadow.camera.view)).all()
+    assert np.isfinite(np.asarray(shadow.shadow_map)).all()
     np.testing.assert_allclose(shadow.camera.view, expected_view)
