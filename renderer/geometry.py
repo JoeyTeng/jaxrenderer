@@ -6,6 +6,7 @@ import jax
 from jax import Array
 import jax.lax as lax
 import jax.numpy as jnp
+import jax.typing
 from jaxtyping import (
     Float,
     Integer,
@@ -787,7 +788,7 @@ class Camera(NamedTuple):
     def perspective_projection_matrix_tinyrenderer(
         eye: Vec3f,
         centre: Vec3f,
-        dtype: type = jnp.single,
+        dtype: jax.typing.DTypeLike = jnp.single,
     ) -> Projection:
         """Create a projection matrix to map the model in the camera frame (eye
             coordinates) onto the viewing volume (clip coordinates), using
