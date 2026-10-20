@@ -41,6 +41,7 @@ def _render_small_shadow(
     light_direction: Vec3f,
     up: Vec3f,
     distance: float = 0.5,
+    centre: Vec3f | None = None,
 ) -> Shadow:
     width = 8
     height = 8
@@ -61,7 +62,11 @@ def _render_small_shadow(
         faces=faces,
         light_direction=light_direction,
         viewport_matrix=viewport,
-        centre=typed_asarray((0.0, 0.0, 0.0), dtype=jnp.float32),
+        centre=(
+            typed_asarray((0.0, 0.0, 0.0), dtype=jnp.float32)
+            if centre is None
+            else centre
+        ),
         up=up,
         strength=typed_asarray((0.5, 0.5, 0.5), dtype=jnp.float32),
         distance=distance,
@@ -123,3 +128,26 @@ def test_shadow_camera_handles_large_finite_light_direction() -> None:
     assert np.isfinite(np.asarray(shadow.camera.view)).all()
     assert np.isfinite(np.asarray(shadow.shadow_map)).all()
     np.testing.assert_allclose(shadow.camera.view, expected_view)
+
+
+def test_shadow_camera_fallback_uses_representable_direction() -> None:
+    light_direction: Vec3f = typed_asarray((2**-20, 2**-19, 1.0), dtype=jnp.float32)
+    centre: Vec3f = typed_asarray((0.0, 2**30, 2**30), dtype=jnp.float32)
+    up: Vec3f = light_direction
+
+    shadow = _render_small_shadow(
+        light_direction,
+        up,
+        distance=1.0,
+        centre=centre,
+    )
+
+    eye: Vec3f = centre + light_direction
+    expected_view = Camera.view_matrix(eye=eye, centre=centre, up=up)
+    actual_view = np.asarray(shadow.camera.view)
+    actual_frame = actual_view[:3, :3]
+
+    assert np.isfinite(actual_view).all()
+    np.testing.assert_allclose(actual_view, expected_view, atol=1e-6)
+    np.testing.assert_allclose(actual_frame @ actual_frame.T, np.eye(3), atol=1e-6)
+    np.testing.assert_allclose(np.linalg.det(actual_frame), 1.0, atol=1e-6)
