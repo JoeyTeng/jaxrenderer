@@ -585,10 +585,17 @@ def merge_objects(objects: Sequence[ModelObject]) -> MergedModel:
         # row before batch normalisation so tiny cofactor directions stay finite.
         local_magnitude = jnp.max(jnp.abs(local_normals), axis=-1, keepdims=True)
         safe_local_magnitude = jnp.where(local_magnitude > 0.0, local_magnitude, 1.0)
-        # The positive factor cancels under per-vertex direction normalisation;
-        # freezing it avoids reciprocal-square overflow in AD.
+        # This positive factor cancels after row normalisation; freezing it
+        # avoids reciprocal-square overflow in AD.
         safe_local_magnitude = lax.stop_gradient(safe_local_magnitude)
         local_normals = local_normals / safe_local_magnitude
+        local_squared_length = jnp.sum(
+            local_normals * local_normals, axis=-1, keepdims=True
+        )
+        safe_local_length = jnp.sqrt(
+            jnp.where(local_squared_length > 0.0, local_squared_length, 1.0)
+        )
+        local_normals = local_normals / safe_local_length
 
         world: Float[Array, "N 3"] = Camera.apply_vec(
             local_normals,

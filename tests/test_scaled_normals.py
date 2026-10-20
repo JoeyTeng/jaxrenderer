@@ -68,8 +68,10 @@ def test_merge_objects_transforms_scaled_normals_perpendicular_to_tangents(
     "local_scaling",
     ((2.0, 0.5, 3.0), (-2.0, 0.5, 3.0), (1.0, 1.0, 1.0)),
 )
+@pytest.mark.parametrize("unit_directions", (True, False))
 def test_merge_objects_scaled_normal_gradient_matches_finite_differences(
     local_scaling: tuple[float, float, float],
+    unit_directions: bool,
 ) -> None:
     verts: Vertices = _float_array(((0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (0.0, 1.0, 0.0)))
     norms: Normals = _float_array(((1.0, 2.0, 3.0), (-2.0, 1.0, 1.0), (0.5, -1.0, 2.0)))
@@ -84,10 +86,13 @@ def test_merge_objects_scaled_normal_gradient_matches_finite_differences(
 
     def loss(scale: Array) -> Array:
         merged = merge_objects((obj._replace(local_scaling=scale),))
-        directions = jnp.stack(
-            tuple(normalise(merged.norms[index]) for index in range(3))
-        )
-        return jnp.sum(directions * weights)
+        if unit_directions:
+            values = jnp.stack(
+                tuple(normalise(merged.norms[index]) for index in range(3))
+            )
+        else:
+            values = merged.norms
+        return jnp.sum(values * weights)
 
     def inverse_transpose_loss(scale: Array) -> Array:
         expected = jnp.stack(
@@ -97,7 +102,6 @@ def test_merge_objects_scaled_normal_gradient_matches_finite_differences(
 
     scale = _float_array(local_scaling)
     gradient: Array = typed_jit(typed_grad(loss))(scale)
-    baseline_gradient: Array = typed_jit(typed_grad(inverse_transpose_loss))(scale)
     epsilon = _float_array(1e-3)
     finite_difference = jnp.stack(
         tuple(
@@ -108,8 +112,10 @@ def test_merge_objects_scaled_normal_gradient_matches_finite_differences(
     )
 
     assert jnp.linalg.norm(gradient) > 1e-2
-    assert jnp.allclose(gradient, baseline_gradient, atol=1e-5, rtol=1e-4)
     assert jnp.allclose(gradient, finite_difference, atol=1e-4, rtol=2e-3)
+    if unit_directions:
+        baseline_gradient: Array = typed_jit(typed_grad(inverse_transpose_loss))(scale)
+        assert jnp.allclose(gradient, baseline_gradient, atol=1e-5, rtol=1e-4)
 
 
 @pytest.mark.parametrize(
