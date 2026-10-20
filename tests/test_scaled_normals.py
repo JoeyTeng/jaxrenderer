@@ -4,7 +4,7 @@ from jax import Array
 import jax.numpy as jnp
 import pytest
 
-from renderer._meta_utils import typed_asarray
+from renderer._meta_utils import typed_asarray, typed_grad, typed_jit
 from renderer.geometry import normalise
 from renderer.model import MergedModel, Model, ModelObject, merge_objects
 from renderer.renderer import CameraParameters, LightParameters, Renderer
@@ -62,6 +62,128 @@ def test_merge_objects_transforms_scaled_normals_perpendicular_to_tangents(
     expected = normalise(expected)
     normal_direction = normalise(normal)
     assert jnp.allclose(normal_direction, expected, atol=1e-6)
+
+
+@pytest.mark.parametrize(
+    "local_scaling",
+    ((2.0, 0.5, 3.0), (-2.0, 0.5, 3.0), (1.0, 1.0, 1.0)),
+)
+def test_merge_objects_scaled_normal_gradient_matches_finite_differences(
+    local_scaling: tuple[float, float, float],
+) -> None:
+    verts: Vertices = _float_array(((0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (0.0, 1.0, 0.0)))
+    norms: Normals = _float_array(((1.0, 2.0, 3.0), (-2.0, 1.0, 1.0), (0.5, -1.0, 2.0)))
+    uvs: UVCoordinates = _float_array(((0.0, 0.0),) * 3)
+    faces: FaceIndices = typed_asarray(((0, 1, 2),), dtype=jnp.int32)
+    diffuse_map: Texture = _float_array((((1.0, 1.0, 1.0),),))
+    model = Model.create(verts, norms, uvs, faces, diffuse_map)
+    obj = ModelObject(model=model)
+    weights: Array = _float_array(
+        ((1.0, -0.5, 0.25), (-0.75, 0.5, 1.0), (0.3, 0.8, -0.4))
+    )
+
+    def loss(scale: Array) -> Array:
+        merged = merge_objects((obj._replace(local_scaling=scale),))
+        return jnp.sum(merged.norms * weights)
+
+    def inverse_transpose_loss(scale: Array) -> Array:
+        expected = normalise(norms / scale)
+        return jnp.sum(expected * weights)
+
+    scale = _float_array(local_scaling)
+    gradient: Array = typed_jit(typed_grad(loss))(scale)
+    baseline_gradient: Array = typed_jit(typed_grad(inverse_transpose_loss))(scale)
+    epsilon = _float_array(1e-3)
+    finite_difference = jnp.stack(
+        tuple(
+            (loss(scale.at[index].add(epsilon)) - loss(scale.at[index].add(-epsilon)))
+            / (2.0 * epsilon)
+            for index in range(3)
+        )
+    )
+
+    assert jnp.linalg.norm(gradient) > 1e-2
+    assert jnp.allclose(gradient, baseline_gradient, atol=1e-5, rtol=1e-4)
+    assert jnp.allclose(gradient, finite_difference, atol=1e-4, rtol=2e-3)
+
+
+@pytest.mark.parametrize(
+    ("local_scaling", "source_normal", "other_normals"),
+    (
+        (
+            (0.0, 2.0, 3.0),
+            (0.0, 1.0, 1.0),
+            ((1.0, 0.25, -0.5), (-0.5, 1.5, 0.75)),
+        ),
+        (
+            (0.0, -2.0, 3.0),
+            (0.0, 1.0, 1.0),
+            ((1.0, 0.25, -0.5), (-0.5, 1.5, 0.75)),
+        ),
+        (
+            (0.0, 0.0, -3.0),
+            (0.0, 0.0, 1.0),
+            ((1.0, 0.5, 0.25), (0.3, -1.0, 0.8)),
+        ),
+        (
+            (0.0, 1e20, 1.0),
+            (0.0, 1.0, 0.0),
+            ((0.0, 1.0, 0.0), (0.0, 1.0, 0.0)),
+        ),
+    ),
+)
+def test_merge_objects_zero_scale_normal_gradient_matches_continuous_limit(
+    local_scaling: tuple[float, float, float],
+    source_normal: tuple[float, float, float],
+    other_normals: tuple[tuple[float, float, float], tuple[float, float, float]],
+) -> None:
+    verts: Vertices = _float_array(((0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (0.0, 1.0, 0.0)))
+    norms: Normals = _float_array((source_normal, *other_normals))
+    uvs: UVCoordinates = _float_array(((0.0, 0.0),) * 3)
+    faces: FaceIndices = typed_asarray(((0, 1, 2),), dtype=jnp.int32)
+    diffuse_map: Texture = _float_array((((1.0, 1.0, 1.0),),))
+    model = Model.create(verts, norms, uvs, faces, diffuse_map)
+    obj = ModelObject(model=model)
+    weights: Array = _float_array((0.31, -0.73, 1.17))
+
+    def loss(scale: Array) -> Array:
+        merged = merge_objects((obj._replace(local_scaling=scale),))
+        target_direction = normalise(merged.norms[0])
+        return jnp.sum(target_direction * weights)
+
+    def inverse_transpose_direction(scale: Array) -> Array:
+        safe_scale = jnp.where(scale == 0.0, 1.0, scale)
+        source = _float_array(source_normal)
+        if sum(value != 0.0 for value in source_normal) == 1:
+            return normalise(source * jnp.sign(safe_scale))
+        return normalise(source / safe_scale)
+
+    def inverse_transpose_loss(scale: Array) -> Array:
+        return jnp.sum(inverse_transpose_direction(scale) * weights)
+
+    scale = _float_array(local_scaling)
+    merged = merge_objects((obj._replace(local_scaling=scale),))
+    actual_direction = normalise(merged.norms[0])
+    expected_direction = inverse_transpose_direction(scale)
+    gradient: Array = typed_jit(typed_grad(loss))(scale)
+    baseline_gradient: Array = typed_jit(typed_grad(inverse_transpose_loss))(scale)
+    epsilon = _float_array(1e-3)
+    finite_difference = jnp.stack(
+        tuple(
+            (loss(scale.at[index].add(epsilon)) - loss(scale.at[index].add(-epsilon)))
+            / (2.0 * epsilon)
+            for index in range(3)
+        )
+    )
+
+    assert jnp.all(jnp.isfinite(actual_direction))
+    assert jnp.all(jnp.isfinite(gradient))
+    assert jnp.all(jnp.isfinite(finite_difference))
+    assert jnp.allclose(actual_direction, expected_direction, atol=1e-6)
+    assert jnp.allclose(gradient, baseline_gradient, atol=1e-5, rtol=1e-4)
+    assert jnp.allclose(gradient, finite_difference, atol=1e-4, rtol=2e-3)
+    if sum(value != 0.0 for value in source_normal) > 1 and local_scaling[1] != 0.0:
+        assert jnp.linalg.norm(gradient[1:]) > 1e-2
 
 
 def test_flattened_cube_keeps_finite_normals_and_renders_foreground() -> None:

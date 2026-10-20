@@ -356,7 +356,13 @@ class ModelObject(NamedTuple):
     model: Model
     """Reference to the model, with mesh, attached maps, etc."""
     local_scaling: Vec3f = typed_ones(3)
-    """Local scaling factors in x, y, z."""
+    """Local scaling factors in x, y, z. Zero factors flatten axes.
+
+    Normal directions use a scale-only limit where it is unique.
+    This concerns unit directions with source normals held fixed; raw batched
+    normal magnitudes need not be continuous. Other singular cases retain
+    finite fallbacks without a general differentiability guarantee.
+    """
     transform: ModelMatrix = jnp.identity(4)
     """Transform matrix (model matrix) of the model."""
     # TODO: Support double_sided
@@ -535,7 +541,57 @@ def merge_objects(objects: Sequence[ModelObject]) -> MergedModel:
         orientation_sign = jnp.prod(jnp.where(scaled < 0.0, -1.0, 1.0))
         local_normals = normals * local_cofactor * orientation_sign
         has_transformed_normal = jnp.any(local_normals != 0.0, axis=-1, keepdims=True)
-        local_normals = jnp.where(has_transformed_normal, local_normals, normals)
+
+        # If a normal has no component on a flattened axis, its scale-only
+        # limit is unique. Replacing zero scale entries with one lets the
+        # cofactor compute that direction without dividing by zero.
+        zero_scale = local_scaling == 0.0
+        zero_axis_support = jnp.any(
+            (normals != 0.0) & zero_scale,
+            axis=-1,
+            keepdims=True,
+        )
+        extension_scale = jnp.where(zero_scale, 1.0, scaled)
+        extension_cofactor: Vec3f = jnp.stack(
+            (
+                extension_scale[1] * extension_scale[2],
+                extension_scale[0] * extension_scale[2],
+                extension_scale[0] * extension_scale[1],
+            )
+        )
+        extension_normals = normals * extension_cofactor * orientation_sign
+        extension_magnitude = jnp.max(
+            jnp.abs(extension_normals),
+            axis=-1,
+            keepdims=True,
+        )
+        has_extension_normal = extension_magnitude > 0.0
+        use_scale_limit = (
+            ~has_transformed_normal
+            & jnp.any(zero_scale)
+            & ~zero_axis_support
+            & has_extension_normal
+        )
+        # At a singular scale only the candidate direction is defined. Rescale
+        # it so the batch-global normalisation cannot underflow; shaders
+        # normalise each vertex before lighting.
+        safe_extension_magnitude = jnp.where(
+            use_scale_limit,
+            extension_magnitude,
+            1.0,
+        )
+        # This positive factor cancels when the resulting normal direction is
+        # normalised, so freezing it avoids reciprocal-square overflow in AD.
+        safe_extension_magnitude = lax.stop_gradient(safe_extension_magnitude)
+        extension_normals = extension_normals / safe_extension_magnitude
+        finite_fallback = jnp.where(has_transformed_normal, local_normals, normals)
+        # Keep the cofactor or finite fallback where no unique scale-only
+        # extension exists.
+        local_normals = jnp.where(
+            use_scale_limit,
+            extension_normals,
+            finite_fallback,
+        )
 
         world: Float[Array, "N 3"] = Camera.apply_vec(
             local_normals,
