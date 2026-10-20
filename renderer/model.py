@@ -358,9 +358,9 @@ class ModelObject(NamedTuple):
     local_scaling: Vec3f = typed_ones(3)
     """Local scaling factors in x, y, z. Zero factors flatten axes.
 
-    Normal directions use a scale-only limit where it is unique.
+    Normal directions use a two-sided scale-only limit where it is unique.
     This concerns unit directions with source normals held fixed; raw batched
-    normal magnitudes need not be continuous. Other singular cases retain
+    normal magnitudes are not preserved. Other singular cases retain
     finite fallbacks without a general differentiability guarantee.
     """
     transform: ModelMatrix = jnp.identity(4)
@@ -523,66 +523,57 @@ def merge_objects(objects: Sequence[ModelObject]) -> MergedModel:
         local_scaling: Vec3f,
         transform: ModelMatrix,
     ) -> Vertices:
-        """Apply the local cofactor and the object's inverse-transpose transform."""
-        # The diagonal cofactor is proportional to inverse local scaling for
-        # every nonsingular scale, but stays defined when an axis is flattened.
-        scale_magnitude = jnp.max(jnp.abs(local_scaling))
-        safe_scale_magnitude = jnp.where(scale_magnitude > 0.0, scale_magnitude, 1.0)
-        scaled: Vec3f = local_scaling / safe_scale_magnitude
-        local_cofactor: Vec3f = jnp.stack(
-            (
-                scaled[1] * scaled[2],
-                scaled[0] * scaled[2],
-                scaled[0] * scaled[1],
-            )
-        )
-        # Cofactors include the determinant sign. Restore the inverse-transpose
-        # direction for negative scales; treat zero components as positive.
-        orientation_sign = jnp.prod(jnp.where(scaled < 0.0, -1.0, 1.0))
-        local_normals = normals * local_cofactor * orientation_sign
-        has_transformed_normal = jnp.any(local_normals != 0.0, axis=-1, keepdims=True)
-
-        # If a normal has no component on a flattened axis, its scale-only
-        # limit is unique. Replacing zero scale entries with one lets the
-        # cofactor compute that direction without dividing by zero.
+        """Apply inverse local scaling and the object's inverse transpose."""
         zero_scale = local_scaling == 0.0
+        safe_scale: Vec3f = jnp.where(zero_scale, 1.0, local_scaling)
+        normal_mantissa, normal_exponent = jnp.frexp(normals)
+        scale_mantissa, scale_exponent = jnp.frexp(safe_scale)
+        ratio_mantissa = normal_mantissa / scale_mantissa
+        ratio_exponent = normal_exponent - scale_exponent
+        valid_scale = ~zero_scale
+        nonzero_ratio = (normals != 0.0) & valid_scale
+        has_ratio = jnp.any(nonzero_ratio, axis=-1, keepdims=True)
+        minimum_exponent = jnp.iinfo(ratio_exponent.dtype).min
+        row_exponent = jnp.max(
+            jnp.where(nonzero_ratio, ratio_exponent, minimum_exponent),
+            axis=-1,
+            keepdims=True,
+        )
+        row_exponent = jnp.where(has_ratio, row_exponent, 0)
+        relative_exponent = jnp.where(
+            valid_scale,
+            ratio_exponent - row_exponent,
+            0,
+        )
+        inverse_normals = jnp.ldexp(ratio_mantissa, relative_exponent)
+        inverse_normals = jnp.where(valid_scale, inverse_normals, 0.0)
+
+        # Relative exponents preserve meaningful inverse directions across the
+        # full scale range without overflowing or underflowing intermediate ratios.
         zero_axis_support = jnp.any(
             (normals != 0.0) & zero_scale,
             axis=-1,
             keepdims=True,
         )
-        extension_scale = jnp.where(zero_scale, 1.0, scaled)
-        extension_cofactor: Vec3f = jnp.stack(
-            (
-                extension_scale[1] * extension_scale[2],
-                extension_scale[0] * extension_scale[2],
-                extension_scale[0] * extension_scale[1],
-            )
+        has_zero_scale = jnp.any(zero_scale)
+        use_inverse_direction = has_ratio & (~has_zero_scale | ~zero_axis_support)
+        # With one flattened axis, the cofactor retains only its normal
+        # component, with the determinant sign restored. With two or more
+        # flattened axes, retain the source normal as a finite fallback.
+        single_zero_axis = jnp.sum(zero_scale) == 1
+        singular_fallback = jnp.where(
+            single_zero_axis,
+            normals * zero_scale,
+            normals,
         )
-        extension_normals = normals * extension_cofactor * orientation_sign
-        extension_magnitude = jnp.max(
-            jnp.abs(extension_normals),
-            axis=-1,
-            keepdims=True,
-        )
-        has_extension_normal = extension_magnitude > 0.0
-        use_scale_limit = (
-            ~has_transformed_normal
-            & jnp.any(zero_scale)
-            & ~zero_axis_support
-            & has_extension_normal
-        )
-        finite_fallback = jnp.where(has_transformed_normal, local_normals, normals)
-        # Keep the cofactor or finite fallback where no unique scale-only
-        # extension exists.
         local_normals = jnp.where(
-            use_scale_limit,
-            extension_normals,
-            finite_fallback,
+            use_inverse_direction,
+            inverse_normals,
+            singular_fallback,
         )
 
         # Normal magnitude is not part of the shading contract. Rescale each
-        # row before batch normalisation so tiny cofactor directions stay finite.
+        # row before batch normalisation so tiny transformed normals stay finite.
         local_magnitude = jnp.max(jnp.abs(local_normals), axis=-1, keepdims=True)
         safe_local_magnitude = jnp.where(local_magnitude > 0.0, local_magnitude, 1.0)
         # This positive factor cancels after row normalisation; freezing it
