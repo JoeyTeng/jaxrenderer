@@ -356,7 +356,10 @@ class ModelObject(NamedTuple):
     model: Model
     """Reference to the model, with mesh, attached maps, etc."""
     local_scaling: Vec3f = typed_ones(3)
-    """Local scaling factors of the object, in x, y, z."""
+    """Local scaling factors in x, y, z.
+
+    Non-zero components are required for normal transformation.
+    """
     transform: ModelMatrix = jnp.identity(4)
     """Transform matrix (model matrix) of the model."""
     # TODO: Support double_sided
@@ -514,11 +517,14 @@ def merge_objects(objects: Sequence[ModelObject]) -> MergedModel:
     @add_tracing_name
     def transform_normals(
         normals: Float[Array, "N 3"],
+        local_scaling: Vec3f,
         transform: ModelMatrix,
     ) -> Vertices:
-        """Apply transforms defined in `ModelObject` to vertex normals."""
+        """Apply the inverse-transpose of the complete vertex transform."""
+        # Vertices are scaled before the object transform, so apply the
+        # inverse local scale before the existing inverse-transpose transform.
         world: Float[Array, "N 3"] = Camera.apply_vec(
-            normals,
+            normals / local_scaling,
             # transform by inverse transpose
             jnp.linalg.inv(transform).T,  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
         )
@@ -527,7 +533,10 @@ def merge_objects(objects: Sequence[ModelObject]) -> MergedModel:
         return world
 
     norms, faces_norm = MergedModel.merge_verts(
-        [transform_normals(obj.model.norms, obj.transform) for obj in objects],
+        [
+            transform_normals(obj.model.norms, obj.local_scaling, obj.transform)
+            for obj in objects
+        ],
         [m.faces_norm for m in models],
     )
     uvs, faces_uv = MergedModel.merge_verts(
