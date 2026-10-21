@@ -1,5 +1,6 @@
 import jax.numpy as jnp
 import numpy as np
+import pytest
 
 from renderer import Camera, jit
 from renderer._meta_utils import typed_asarray, typed_full
@@ -111,6 +112,29 @@ def test_shadow_camera_preserves_nonparallel_up_direction() -> None:
     )
 
     np.testing.assert_allclose(shadow.camera.view, expected_view)
+
+
+@pytest.mark.parametrize("magnitude", (1e-30, 1e30))
+@pytest.mark.parametrize(
+    "light_direction",
+    (
+        typed_asarray((0.0, 0.0, 1.0), dtype=jnp.float32),
+        typed_asarray((0.0, -1.0, 0.0), dtype=jnp.float32),
+    ),
+)
+def test_shadow_camera_is_stable_for_scaled_up_vectors(
+    magnitude: float, light_direction: Vec3f
+) -> None:
+    ordinary_up: Vec3f = typed_asarray((0.0, 0.0, 1.0), dtype=jnp.float32)
+    scaled_up: Vec3f = typed_asarray((0.0, 0.0, magnitude), dtype=jnp.float32)
+
+    expected = _render_small_shadow(light_direction, ordinary_up)
+    actual = _render_small_shadow(light_direction, scaled_up)
+
+    assert np.isfinite(np.asarray(actual.camera.view)).all()
+    assert np.isfinite(np.asarray(actual.shadow_map)).all()
+    np.testing.assert_allclose(actual.camera.view, expected.camera.view, atol=1e-6)
+    np.testing.assert_allclose(actual.shadow_map, expected.shadow_map, atol=1e-6)
 
 
 def test_shadow_camera_handles_large_finite_light_direction() -> None:

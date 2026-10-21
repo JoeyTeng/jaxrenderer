@@ -92,7 +92,9 @@ class Shadow(NamedTuple):
             camera_direction_scale: FloatV = jnp.max(jnp.abs(camera_direction))
             scaled_camera_direction: Vec3f = camera_direction / camera_direction_scale
             forward: Vec3f = normalise(scaled_camera_direction)
-            unit_up: Vec3f = normalise(up)
+            up_scale: FloatV = jnp.max(jnp.abs(up))
+            scaled_up: Vec3f = up / up_scale
+            unit_up: Vec3f = normalise(scaled_up)
             # sqrt(float32 machine epsilon) is approximately 3.5e-4; this is a
             # practical conditioning heuristic, not a universal error bound.
             parallel_threshold: float = 3.5e-4
@@ -114,7 +116,7 @@ class Shadow(NamedTuple):
                     typed_asarray((0.0, 0.0, 1.0), dtype=light_direction.dtype),
                 ),
             )
-            return jnp.where(nearly_parallel, fallback_up, up)
+            return jnp.where(nearly_parallel, fallback_up, scaled_up)
 
         camera_up: Vec3f = select_camera_up()
 
