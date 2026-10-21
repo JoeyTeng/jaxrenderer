@@ -470,9 +470,7 @@ class ModelObject(NamedTuple):
 
         transform = self.transform
         finite_transform = jnp.all(jnp.isfinite(transform))
-        expected_affine_row = typed_asarray(
-            (0.0, 0.0, 0.0, 1.0), dtype=transform.dtype
-        )
+        expected_affine_row = typed_asarray((0.0, 0.0, 0.0, 1.0), dtype=transform.dtype)
         affine_row = jnp.all(transform[3, :] == expected_affine_row)
         linear = transform[:3, :3]
         finite_linear = jnp.isfinite(linear)
