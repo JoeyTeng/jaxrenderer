@@ -59,6 +59,118 @@ _checkify_api = cast(_CheckifyAPI, checkify)
 _jnp_linalg_api = cast(_SvdAPI, jnp.linalg)
 
 
+def _five_part_powers(
+    relative_exponent: Integer[Array, "N 3"],
+    normals: Float[Array, "N 3"],
+) -> tuple[list[Float[Array, "N 3"]], Float[Array, "N 3"]]:
+    """Build five bounded powers on ones for sequential multiplication into data.
+
+    Splitting the exponent preserves zero-component gradients on JAX 0.11.2.
+    """
+    exponent_quotient = relative_exponent // 5
+    exponent_remainder = relative_exponent - 5 * exponent_quotient
+    ones: Float[Array, "N 3"] = typed_ones(
+        relative_exponent.shape,
+        dtype=normals.dtype,
+    )
+    base_power = jnp.ldexp(ones, exponent_quotient)
+    next_power = jnp.ldexp(ones, exponent_quotient + 1)
+    powers: list[Float[Array, "N 3"]] = []
+    power_product = ones
+    for part in range(5):
+        power: Float[Array, "N 3"] = jnp.where(
+            part < exponent_remainder,
+            next_power,
+            base_power,
+        )
+        powers.append(power)
+        power_product = power_product * power
+    return powers, power_product
+
+
+def _inverse_scale_normals(
+    normals: Float[Array, "N 3"],
+    local_scaling: Vec3f,
+) -> tuple[Float[Array, "N 3"], Bool[Array, "N 1"]]:
+    """Apply inverse scaling with frexp mantissas and bounded relative exponents."""
+    zero_scale = local_scaling == 0.0
+    safe_scale: Vec3f = jnp.where(zero_scale, 1.0, local_scaling)
+    # frexp represents each value as mantissa * 2**exponent without losing precision.
+    normal_mantissa, normal_exponent = jnp.frexp(normals)
+    scale_mantissa, scale_exponent = jnp.frexp(safe_scale)
+    ratio_exponent = normal_exponent - scale_exponent
+    valid_scale = ~zero_scale
+    nonzero_ratio = (normals != 0.0) & valid_scale
+    has_ratio = jnp.any(nonzero_ratio, axis=-1, keepdims=True)
+    minimum_exponent = jnp.iinfo(ratio_exponent.dtype).min
+    row_exponent = jnp.max(
+        jnp.where(nonzero_ratio, ratio_exponent, minimum_exponent),
+        axis=-1,
+        keepdims=True,
+    )
+    row_exponent = jnp.where(has_ratio, row_exponent, 0)
+    relative_exponent = jnp.where(
+        valid_scale,
+        ratio_exponent - row_exponent,
+        0,
+    )
+    powers, power_product = _five_part_powers(relative_exponent, normals)
+
+    power_over_scale = power_product / scale_mantissa
+    stop_zero_scale_gradient = (normals == 0.0) & ~jnp.isfinite(power_over_scale)
+    # Keep zero-component gradients finite when the unselected scale ratio overflows.
+    scale_mantissa = jnp.where(
+        stop_zero_scale_gradient,
+        lax.stop_gradient(scale_mantissa),
+        scale_mantissa,
+    )
+    ratio_mantissa = normal_mantissa / scale_mantissa
+    inverse_normals: Float[Array, "N 3"] = ratio_mantissa
+    for power in powers:
+        inverse_normals = inverse_normals * power
+    inverse_normals = jnp.where(valid_scale, inverse_normals, 0.0)
+    return inverse_normals, has_ratio
+
+
+def _select_zero_scale_limit(
+    normals: Float[Array, "N 3"],
+    local_scaling: Vec3f,
+    inverse_normals: Float[Array, "N 3"],
+    has_ratio: Bool[Array, "N 1"],
+) -> Float[Array, "N 3"]:
+    """Select the positive-epsilon limit for rows containing zero scales."""
+    zero_scale = local_scaling == 0.0
+    zero_axis_support = jnp.any(
+        (normals != 0.0) & zero_scale,
+        axis=-1,
+        keepdims=True,
+    )
+    has_zero_scale = jnp.any(zero_scale)
+    use_inverse_direction = has_ratio & (~has_zero_scale | ~zero_axis_support)
+    # Equal positive epsilons on flattened axes leave the source normal on those axes.
+    singular_fallback = normals * zero_scale
+    return jnp.where(use_inverse_direction, inverse_normals, singular_fallback)
+
+
+def _normalise_normal_rows(
+    local_normals: Float[Array, "N 3"],
+) -> Float[Array, "N 3"]:
+    """Normalise rows after max-component scaling to avoid overflow and underflow."""
+    local_magnitude = jnp.max(jnp.abs(local_normals), axis=-1, keepdims=True)
+    safe_local_magnitude = jnp.where(local_magnitude > 0.0, local_magnitude, 1.0)
+    # This factor cancels after row normalisation; freezing it avoids reciprocal-
+    # square overflow in AD.
+    safe_local_magnitude = lax.stop_gradient(safe_local_magnitude)
+    local_normals = local_normals / safe_local_magnitude
+    local_squared_length = jnp.sum(
+        local_normals * local_normals, axis=-1, keepdims=True
+    )
+    safe_local_length = jnp.sqrt(
+        jnp.where(local_squared_length > 0.0, local_squared_length, 1.0)
+    )
+    return local_normals / safe_local_length
+
+
 class Model(NamedTuple):
     """Model with vertices specification and attached maps.
 
@@ -600,91 +712,14 @@ def merge_objects(objects: Sequence[ModelObject]) -> MergedModel:
         transform: ModelMatrix,
     ) -> Vertices:
         """Apply inverse local scaling and the object's inverse transpose."""
-        zero_scale = local_scaling == 0.0
-        safe_scale: Vec3f = jnp.where(zero_scale, 1.0, local_scaling)
-        normal_mantissa, normal_exponent = jnp.frexp(normals)
-        scale_mantissa, scale_exponent = jnp.frexp(safe_scale)
-        ratio_exponent = normal_exponent - scale_exponent
-        valid_scale = ~zero_scale
-        nonzero_ratio = (normals != 0.0) & valid_scale
-        has_ratio = jnp.any(nonzero_ratio, axis=-1, keepdims=True)
-        minimum_exponent = jnp.iinfo(ratio_exponent.dtype).min
-        row_exponent = jnp.max(
-            jnp.where(nonzero_ratio, ratio_exponent, minimum_exponent),
-            axis=-1,
-            keepdims=True,
-        )
-        row_exponent = jnp.where(has_ratio, row_exponent, 0)
-        relative_exponent = jnp.where(
-            valid_scale,
-            ratio_exponent - row_exponent,
-            0,
-        )
-        exponent_quotient = relative_exponent // 5
-        exponent_remainder = relative_exponent - 5 * exponent_quotient
-        ones: Float[Array, "N 3"] = typed_ones(
-            ratio_exponent.shape,
-            dtype=normals.dtype,
-        )
-        base_power = jnp.ldexp(ones, exponent_quotient)
-        next_power = jnp.ldexp(ones, exponent_quotient + 1)
-        powers: list[Float[Array, "N 3"]] = []
-        power_product = ones
-        for part in range(5):
-            power: Float[Array, "N 3"] = jnp.where(
-                part < exponent_remainder,
-                next_power,
-                base_power,
-            )
-            powers.append(power)
-            power_product = power_product * power
-
-        power_over_scale = power_product / scale_mantissa
-        stop_zero_scale_gradient = (normals == 0.0) & ~jnp.isfinite(power_over_scale)
-        scale_mantissa = jnp.where(
-            stop_zero_scale_gradient,
-            lax.stop_gradient(scale_mantissa),
-            scale_mantissa,
-        )
-        ratio_mantissa = normal_mantissa / scale_mantissa
-        inverse_normals: Float[Array, "N 3"] = ratio_mantissa
-        for power in powers:
-            inverse_normals = inverse_normals * power
-        inverse_normals = jnp.where(valid_scale, inverse_normals, 0.0)
-
-        # Relative exponents preserve meaningful inverse directions across the
-        # full scale range without overflowing or underflowing intermediate ratios.
-        zero_axis_support = jnp.any(
-            (normals != 0.0) & zero_scale,
-            axis=-1,
-            keepdims=True,
-        )
-        has_zero_scale = jnp.any(zero_scale)
-        use_inverse_direction = has_ratio & (~has_zero_scale | ~zero_axis_support)
-        # Equal positive epsilons on all flattened axes select the source
-        # normal restricted to those axes as eps tends to zero.
-        singular_fallback = normals * zero_scale
-        local_normals = jnp.where(
-            use_inverse_direction,
+        inverse_normals, has_ratio = _inverse_scale_normals(normals, local_scaling)
+        local_normals = _select_zero_scale_limit(
+            normals,
+            local_scaling,
             inverse_normals,
-            singular_fallback,
+            has_ratio,
         )
-
-        # Normal magnitude is not part of the shading contract. Rescale each
-        # row before batch normalisation so tiny transformed normals stay finite.
-        local_magnitude = jnp.max(jnp.abs(local_normals), axis=-1, keepdims=True)
-        safe_local_magnitude = jnp.where(local_magnitude > 0.0, local_magnitude, 1.0)
-        # This positive factor cancels after row normalisation; freezing it
-        # avoids reciprocal-square overflow in AD.
-        safe_local_magnitude = lax.stop_gradient(safe_local_magnitude)
-        local_normals = local_normals / safe_local_magnitude
-        local_squared_length = jnp.sum(
-            local_normals * local_normals, axis=-1, keepdims=True
-        )
-        safe_local_length = jnp.sqrt(
-            jnp.where(local_squared_length > 0.0, local_squared_length, 1.0)
-        )
-        local_normals = local_normals / safe_local_length
+        local_normals = _normalise_normal_rows(local_normals)
 
         world: Float[Array, "N 3"] = Camera.apply_vec(
             local_normals,
