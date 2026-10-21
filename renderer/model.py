@@ -1,6 +1,6 @@
 from collections.abc import Sequence
 from functools import partial
-from typing import NamedTuple, Optional, TypeAlias, Union, cast
+from typing import Literal, NamedTuple, Optional, Protocol, TypeAlias, Union, cast
 
 import jax
 from jax import Array
@@ -45,6 +45,18 @@ from .types import (
 from .value_checker import index_in_bound
 
 ModelMatrix: TypeAlias = Float[Array, "4 4"]
+
+
+class _CheckifyAPI(Protocol):
+    def check(self, pred: Array, msg: str) -> None: ...
+
+
+class _SvdAPI(Protocol):
+    def svd(self, a: Array, *, compute_uv: Literal[False]) -> Array: ...
+
+
+_checkify_api = cast(_CheckifyAPI, checkify)
+_jnp_linalg_api = cast(_SvdAPI, jnp.linalg)
 
 
 class Model(NamedTuple):
@@ -358,10 +370,13 @@ class ModelObject(NamedTuple):
     local_scaling: Vec3f = typed_ones(3)
     """Local scaling factors in x, y, z. Zero factors flatten axes.
 
-    Normal directions use a two-sided scale-only limit where it is unique.
-    This concerns unit directions with source normals held fixed; raw batched
-    normal magnitudes are not preserved. Other singular cases retain
-    finite fallbacks without a general differentiability guarantee.
+    For zero factors, normal directions use the limit obtained by replacing
+    each zero with the same positive epsilon as epsilon tends to zero, holding
+    source normals and nonzero factors fixed. If a source normal has support on
+    a zero axis, its limiting direction is the source normal restricted to
+    those axes; otherwise the inverse-scaled nonzero components are retained.
+    Normal magnitudes are not preserved, and this does not guarantee continuity
+    or differentiability across all paths.
     """
     transform: ModelMatrix = jnp.identity(4)
     """Transform matrix (model matrix) of the model."""
@@ -418,6 +433,69 @@ class ModelObject(NamedTuple):
           - local_scaling: the new local scaling of the object.
         """
         return self._replace(local_scaling=local_scaling)
+
+    @jaxtyped
+    @checkify.checkify
+    def value_checks(self, rcond: float = 1e-6) -> None:
+        """Check whether the object's scale and transforms are numerically usable.
+
+        Checks that ``rcond`` is finite and between zero and one, local scaling
+        is finite and sufficiently well-conditioned, the transform is finite
+        with an affine last row and a sufficiently well-conditioned linear
+        part, and every source normal is finite and nonzero. The affine row is
+        required to equal ``[0, 0, 0, 1]``.
+
+        Usage::
+
+          err, _ = obj.value_checks()
+          err.throw()  # call outside a jitted graph
+        """
+        rcond_value = typed_asarray(rcond)
+        _checkify_api.check(
+            jnp.isfinite(rcond_value) & (rcond_value > 0.0) & (rcond_value < 1.0),
+            "rcond must be finite and satisfy 0 < rcond < 1",
+        )
+
+        scale = self.local_scaling
+        finite_scale = jnp.all(jnp.isfinite(scale))
+        absolute_scale = jnp.where(jnp.isfinite(scale), jnp.abs(scale), 0.0)
+        scale_max = jnp.max(absolute_scale)
+        scale_min = jnp.min(absolute_scale)
+        safe_scale_max = jnp.where(scale_max > 0.0, scale_max, 1.0)
+        scale_ratio = scale_min / safe_scale_max
+        _checkify_api.check(
+            finite_scale & (scale_ratio > rcond_value),
+            "local scaling is singular or ill-conditioned; minimum-to-maximum absolute scale ratio must exceed rcond",
+        )
+
+        transform = self.transform
+        finite_transform = jnp.all(jnp.isfinite(transform))
+        expected_affine_row = typed_asarray(
+            (0.0, 0.0, 0.0, 1.0), dtype=transform.dtype
+        )
+        affine_row = jnp.all(transform[3, :] == expected_affine_row)
+        linear = transform[:3, :3]
+        finite_linear = jnp.isfinite(linear)
+        sanitised_linear = jnp.where(finite_linear, linear, 0.0)
+        linear_max = jnp.max(jnp.abs(sanitised_linear))
+        safe_linear_max = jnp.where(linear_max > 0.0, linear_max, 1.0)
+        scaled_linear = sanitised_linear / safe_linear_max
+        singular_values = _jnp_linalg_api.svd(scaled_linear, compute_uv=False)
+        safe_largest = jnp.where(singular_values[0] > 0.0, singular_values[0], 1.0)
+        linear_ratio = singular_values[-1] / safe_largest
+        _checkify_api.check(
+            finite_transform & affine_row & (linear_ratio > rcond_value),
+            "transform must be finite and affine, and its linear part must be nonsingular and sufficiently well-conditioned",
+        )
+
+        normals = self.model.norms
+        finite_normals = jnp.all(jnp.isfinite(normals), axis=-1)
+        sanitised_normals = jnp.where(jnp.isfinite(normals), normals, 0.0)
+        normal_max = jnp.max(jnp.abs(sanitised_normals), axis=-1)
+        _checkify_api.check(
+            jnp.all(finite_normals & (normal_max > 0.0)),
+            "source normals must be finite and each row must be nonzero",
+        )
 
     @jaxtyped
     def replace_with_double_sided(self, double_sided: BoolV) -> "ModelObject":
@@ -585,15 +663,9 @@ def merge_objects(objects: Sequence[ModelObject]) -> MergedModel:
         )
         has_zero_scale = jnp.any(zero_scale)
         use_inverse_direction = has_ratio & (~has_zero_scale | ~zero_axis_support)
-        # With one flattened axis, the cofactor retains only its normal
-        # component, with the determinant sign restored. With two or more
-        # flattened axes, retain the source normal as a finite fallback.
-        single_zero_axis = jnp.sum(zero_scale) == 1
-        singular_fallback = jnp.where(
-            single_zero_axis,
-            normals * zero_scale,
-            normals,
-        )
+        # Equal positive epsilons on all flattened axes select the source
+        # normal restricted to those axes as eps tends to zero.
+        singular_fallback = normals * zero_scale
         local_normals = jnp.where(
             use_inverse_direction,
             inverse_normals,

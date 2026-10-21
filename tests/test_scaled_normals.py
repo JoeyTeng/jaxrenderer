@@ -17,6 +17,22 @@ def _float_array(values: object) -> Array:
     return typed_asarray(values, dtype=jnp.float32)
 
 
+def _simple_model_object(
+    local_scaling: tuple[float, float, float] = (1.0, 1.0, 1.0),
+    source_normal: tuple[float, float, float] = (0.0, 0.0, 1.0),
+    transform: Array | None = None,
+) -> ModelObject:
+    verts: Vertices = _float_array(((0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (0.0, 1.0, 0.0)))
+    norms: Normals = _float_array((source_normal,) * 3)
+    uvs: UVCoordinates = _float_array(((0.0, 0.0),) * 3)
+    faces: FaceIndices = typed_asarray(((0, 1, 2),), dtype=jnp.int32)
+    diffuse_map: Texture = _float_array((((1.0, 1.0, 1.0),),))
+    model = Model.create(verts, norms, uvs, faces, diffuse_map)
+    if transform is None:
+        transform = jnp.identity(4, dtype=jnp.float32)
+    return ModelObject(model, _float_array(local_scaling), transform)
+
+
 @pytest.mark.parametrize(
     "local_scaling",
     ((2.0, 0.5, 3.0), (-2.0, 0.5, 3.0), (0.0, 1.0, 1.0)),
@@ -320,6 +336,154 @@ def test_merge_objects_singular_normal_can_have_opposite_signed_limits() -> None
     assert jnp.all(jnp.isfinite(negative_direction))
     assert positive_direction[0] > 0.999
     assert negative_direction[0] < -0.999
+
+
+@pytest.mark.parametrize(
+    ("local_scaling", "source_normal"),
+    (
+        ((0.0, 0.0, 1.0), (1.0, 2.0, 3.0)),
+        ((0.0, 2.0, 0.0), (3.0, 4.0, 5.0)),
+        ((0.0, 0.0, 0.0), (1.0, 2.0, 4.0)),
+        ((0.0, -2.0, 4.0), (0.0, 1.0, 2.0)),
+    ),
+)
+def test_merge_objects_singular_normal_matches_positive_epsilon_limit(
+    local_scaling: tuple[float, float, float],
+    source_normal: tuple[float, float, float],
+) -> None:
+    verts: Vertices = _float_array(((0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (0.0, 1.0, 0.0)))
+    normals: Normals = _float_array((source_normal,) * 3)
+    uvs: UVCoordinates = _float_array(((0.0, 0.0),) * 3)
+    faces: FaceIndices = typed_asarray(((0, 1, 2),), dtype=jnp.int32)
+    diffuse_map: Texture = _float_array((((1.0, 1.0, 1.0),),))
+    model = Model.create(verts, normals, uvs, faces, diffuse_map)
+    scale = _float_array(local_scaling)
+    obj = ModelObject(model=model)
+
+    # Use an independent float64 inverse-transpose calculation along the
+    # documented positive-epsilon path while preserving non-zero scales.
+    scale64 = np.asarray(local_scaling, dtype=np.float64)
+    source64 = np.asarray(source_normal, dtype=np.float64)
+    positive_scale64 = np.where(scale64 == 0.0, 1e-6, scale64)
+    expected_direction64 = source64 / positive_scale64
+    expected_direction64 /= np.linalg.norm(expected_direction64)
+    singular = merge_objects((obj._replace(local_scaling=scale),))
+    singular_direction = normalise(singular.norms[0])
+    expected_direction = _float_array(expected_direction64)
+
+    assert jnp.all(jnp.isfinite(singular_direction))
+    assert jnp.allclose(singular_direction, expected_direction, atol=1e-5)
+
+
+@pytest.mark.parametrize(
+    "local_scaling",
+    ((-2.0, 0.5, -3.0), (1e-30, 1e-30, 1e-30)),
+)
+def test_model_object_value_checks_accept_negative_and_uniform_small_scales(
+    local_scaling: tuple[float, float, float],
+) -> None:
+    obj = _simple_model_object(local_scaling=local_scaling)
+
+    err, _ = obj.value_checks()
+    err.throw()
+    compiled_checks = typed_jit(ModelObject.value_checks)
+    compiled_err, _ = compiled_checks(obj)
+    compiled_err.throw()
+
+
+@pytest.mark.parametrize(
+    ("local_scaling", "source_normal", "transform", "rcond"),
+    (
+        ((0.0, 1.0, 1.0), (0.0, 0.0, 1.0), None, 1e-6),
+        ((1e-8, 1.0, 1.0), (0.0, 0.0, 1.0), None, 1e-6),
+        ((float("nan"), 1.0, 1.0), (0.0, 0.0, 1.0), None, 1e-6),
+        ((1.0, 1.0, 1.0), (0.0, 0.0, 0.0), None, 1e-6),
+        ((1.0, 1.0, 1.0), (0.0, float("inf"), 1.0), None, 1e-6),
+        (
+            (1.0, 1.0, 1.0),
+            (0.0, 0.0, 1.0),
+            _float_array(
+                (
+                    (1.0, 0.0, 0.0, 0.0),
+                    (0.0, 1.0, 0.0, 0.0),
+                    (0.0, 0.0, 1.0, 0.0),
+                    (0.0, 0.0, 0.0, 0.0),
+                )
+            ),
+            1e-6,
+        ),
+        (
+            (1.0, 1.0, 1.0),
+            (0.0, 0.0, 1.0),
+            _float_array(
+                (
+                    (0.0, 0.0, 0.0, 0.0),
+                    (0.0, 1.0, 0.0, 0.0),
+                    (0.0, 0.0, 1.0, 0.0),
+                    (0.0, 0.0, 0.0, 1.0),
+                )
+            ),
+            1e-6,
+        ),
+        (
+            (1.0, 1.0, 1.0),
+            (0.0, 0.0, 1.0),
+            _float_array(
+                (
+                    (1.0, 0.0, 0.0, 0.0),
+                    (0.0, 1.0, 0.0, 0.0),
+                    (0.0, 0.0, 1.0, 0.0),
+                    (0.0, 0.0, 0.0, float("inf")),
+                )
+            ),
+            1e-6,
+        ),
+    ),
+)
+def test_model_object_value_checks_report_invalid_numeric_inputs(
+    local_scaling: tuple[float, float, float],
+    source_normal: tuple[float, float, float],
+    transform: Array | None,
+    rcond: float,
+) -> None:
+    obj = _simple_model_object(
+        local_scaling=local_scaling,
+        source_normal=source_normal,
+        transform=transform,
+    )
+
+    err, _ = obj.value_checks(rcond=rcond)
+    assert err.get() is not None
+    compiled_checks = typed_jit(ModelObject.value_checks)
+    compiled_err, _ = compiled_checks(obj, rcond=rcond)
+    assert compiled_err.get() is not None
+
+
+def test_model_object_value_checks_allow_tighter_configured_condition_limit() -> None:
+    transform = _float_array(
+        (
+            (1e-8, 0.0, 0.0, 0.0),
+            (0.0, 1.0, 0.0, 0.0),
+            (0.0, 0.0, 1.0, 0.0),
+            (0.0, 0.0, 0.0, 1.0),
+        )
+    )
+    obj = _simple_model_object(transform=transform)
+
+    default_err, _ = obj.value_checks()
+    assert default_err.get() is not None
+    configured_err, _ = obj.value_checks(rcond=1e-9)
+    configured_err.throw()
+
+
+@pytest.mark.parametrize("rcond", (0.0, 1.0, float("nan"), float("inf")))
+def test_model_object_value_checks_reject_invalid_rcond(rcond: float) -> None:
+    obj = _simple_model_object()
+
+    err, _ = obj.value_checks(rcond=rcond)
+    assert err.get() is not None
+    compiled_err, _ = typed_jit(ModelObject.value_checks)(obj, rcond=rcond)
+    assert compiled_err.get() is not None
 
 
 def test_flattened_cube_keeps_finite_normals_and_renders_foreground() -> None:
