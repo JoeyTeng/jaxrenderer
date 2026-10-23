@@ -1,5 +1,8 @@
 # Numerical behaviour
 
+For the mathematical derivation and implementation details, see
+[stable normal transformations](normal-transformations.md).
+
 ## Normals at zero scale
 
 Normals are transformed by the inverse transpose of the object's local scale

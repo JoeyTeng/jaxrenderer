@@ -66,6 +66,7 @@ def _five_part_powers(
     """Build five bounded powers on ones for sequential multiplication into data.
 
     Splitting the exponent preserves zero-component gradients on JAX 0.11.2.
+    See [bounded powers](../docs/normal-transformations.md#bounded-powers).
     """
     exponent_quotient = relative_exponent // 5
     exponent_remainder = relative_exponent - 5 * exponent_quotient
@@ -92,7 +93,10 @@ def _inverse_scale_normals(
     normals: Float[Array, "N 3"],
     local_scaling: Vec3f,
 ) -> tuple[Float[Array, "N 3"], Bool[Array, "N 1"]]:
-    """Apply inverse scaling with frexp mantissas and bounded relative exponents."""
+    """Apply inverse scaling with frexp mantissas and bounded relative exponents.
+
+    See [inverse scaling](../docs/normal-transformations.md#inverse-scaling).
+    """
     zero_scale = local_scaling == 0.0
     safe_scale: Vec3f = jnp.where(zero_scale, 1.0, local_scaling)
     # frexp represents each value as mantissa * 2**exponent without losing precision.
@@ -155,7 +159,10 @@ def _select_zero_scale_limit(
 def _normalise_normal_rows(
     local_normals: Float[Array, "N 3"],
 ) -> Float[Array, "N 3"]:
-    """Normalise rows after max-component scaling to avoid overflow and underflow."""
+    """Normalise rows after max-component scaling to avoid overflow and underflow.
+
+    See [row normalisation](../docs/normal-transformations.md#row-normalisation).
+    """
     local_magnitude = jnp.max(jnp.abs(local_normals), axis=-1, keepdims=True)
     safe_local_magnitude = jnp.where(local_magnitude > 0.0, local_magnitude, 1.0)
     # This factor cancels after row normalisation; freezing it avoids reciprocal-
