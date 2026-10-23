@@ -81,11 +81,14 @@ possible gradient finite.
 `_normalise_normal_rows` turns each non-zero row into a unit vector. For a finite
 row $x$, it computes
 
-$$
+```math
 m=\max_i|x_i|,\qquad
-\tilde m=\begin{cases}m,&m>0,\\1,&m=0,\end{cases}\qquad
+\tilde m=\begin{cases}
+m,&m>0,\\
+1,&m=0,
+\end{cases}\qquad
 y=x/\tilde m,
-$$
+```
 
 It then computes $q=\sum_i y_i^2$ and uses
 $\ell=\sqrt{q}$ when $q>0$, or $\ell=1$ when $q=0$, returning $y/\ell$. For a
