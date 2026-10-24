@@ -65,16 +65,20 @@ $(1/\sqrt{5},2/\sqrt{5},0)$.
 
 Each relative exponent $r=d_i-E$ is split into five integer exponents. Let
 $q=\lfloor r/5\rfloor$ and $u=r-5q$. The helper uses $u$ factors of $2^{q+1}$ and
-$5-u$ factors of $2^q$, whose product is $2^r$. These factors remain within the
-float32 and float64 exponent ranges; their full product may not. They are applied
-sequentially to the mantissa ratio. A zero component multiplied by finite factors
-stays zero, whereas forming an overflowing product first can produce `0 * inf`.
+$5-u$ factors of $2^q$, whose product is $2^r$. In float32 and float64 these
+factors remain within the dtype's exponent range; their full product may not.
+They are applied sequentially to the mantissa ratio. A zero component multiplied
+by finite factors stays zero, whereas forming an overflowing product first can
+produce `0 * inf`.
 Building the powers on ones and multiplying them into the data also preserves
 the zero-component gradient behaviour needed for JAX 0.11.2. This measure does
 not guarantee that every intermediate or every derivative is finite. When the
 power-over-scale value for a zero normal component is non-finite, a separate guard
 stops the scale-mantissa gradient at that component; it does not make every
-possible gradient finite.
+possible gradient finite. When normals and scales have different floating-point
+dtypes, the helper uses their promoted result dtype so a zero component is not
+multiplied by a power that overflowed only because the normal used a narrower
+dtype. Homogeneous low-precision inputs still have that dtype's limited range.
 
 ## Row normalisation
 
@@ -111,6 +115,13 @@ scaling factor's reciprocal-square path, which can overflow in automatic
 differentiation. Floating-point rounding and underflow still apply. At an all-zero
 row, unit-vector normalisation is undefined; returning zero is a computational
 convention, not a unique mathematical derivative.
+
+After this step, the model applies the object's inverse-transpose transform to
+each normal row independently. A common batch normalisation would cancel from
+each direction in exact arithmetic, but its shared derivative can couple
+otherwise unrelated rows and amplify floating-point cancellation. The per-row
+transform keeps one normal's direction and scale gradient independent of other
+normals in the mesh.
 
 ## Limits and diagnostics
 

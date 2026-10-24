@@ -51,12 +51,14 @@ class _CheckifyAPI(Protocol):
     def check(self, pred: Array, msg: str) -> None: ...
 
 
-class _SvdAPI(Protocol):
+class _LinearAlgebraAPI(Protocol):
     def svd(self, a: Array, *, compute_uv: Literal[False]) -> Array: ...
+
+    def inv(self, a: Array) -> Array: ...
 
 
 _checkify_api = cast(_CheckifyAPI, checkify)
-_jnp_linalg_api = cast(_SvdAPI, jnp.linalg)
+_jnp_linalg_api = cast(_LinearAlgebraAPI, jnp.linalg)
 
 
 def _five_part_powers(
@@ -97,6 +99,9 @@ def _inverse_scale_normals(
 
     See [inverse scaling](../docs/normal-transformations.md#inverse-scaling).
     """
+    working_dtype = jax.dtypes.result_type(normals, local_scaling)
+    normals = normals.astype(working_dtype)
+    local_scaling = local_scaling.astype(working_dtype)
     zero_scale = local_scaling == 0.0
     safe_scale: Vec3f = jnp.where(zero_scale, 1.0, local_scaling)
     # frexp represents each value as mantissa * 2**exponent without losing precision.
@@ -728,10 +733,13 @@ def merge_objects(objects: Sequence[ModelObject]) -> MergedModel:
         )
         local_normals = _normalise_normal_rows(local_normals)
 
-        world: Float[Array, "N 3"] = Camera.apply_vec(
+        inverse_transpose: ModelMatrix = _jnp_linalg_api.inv(transform).T
+        world: Float[Array, "N 3"] = jax.vmap(
+            Camera.apply_vec,
+            in_axes=(0, None),
+        )(
             local_normals,
-            # transform by inverse transpose
-            jnp.linalg.inv(transform).T,  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
+            inverse_transpose,
         )
         assert is_array_type(world, Float[Array, "N 3"])
 

@@ -309,6 +309,28 @@ def test_merge_objects_extreme_nonzero_scaling_keeps_inverse_transpose_direction
     assert jnp.allclose(actual_direction, expected_direction, atol=1e-6)
 
 
+def test_merge_objects_mixed_dtype_extreme_scaling_keeps_normal_direction() -> None:
+    verts: Vertices = _float_array(
+        ((0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (0.0, 1.0, 0.0))
+    )
+    norms: Normals = typed_asarray(((0.0, 1.0, 0.0),) * 3, dtype=jnp.float16)
+    uvs: UVCoordinates = _float_array(((0.0, 0.0),) * 3)
+    faces: FaceIndices = typed_asarray(((0, 1, 2),), dtype=jnp.int32)
+    diffuse_map: Texture = _float_array((((1.0, 1.0, 1.0),),))
+    model = Model.create(verts, norms, uvs, faces, diffuse_map)
+    scale = typed_asarray((2.0**-125, 1.0, 1.0), dtype=jnp.float32)
+
+    merged = merge_objects((ModelObject(model, local_scaling=scale),))
+    normal_directions = jnp.stack(
+        tuple(normalise(merged.norms[index]) for index in range(3))
+    )
+
+    assert merged.norms.dtype == jnp.float32
+    assert jnp.all(jnp.isfinite(merged.norms))
+    assert jnp.all(jnp.isfinite(normal_directions))
+    assert jnp.allclose(normal_directions, _float_array(((0.0, 1.0, 0.0),) * 3))
+
+
 def test_merge_objects_singular_normal_can_have_opposite_signed_limits() -> None:
     source_normal = _float_array((1.0, 0.0, 1.0))
     normals: Normals = jnp.broadcast_to(source_normal, (3, 3))
