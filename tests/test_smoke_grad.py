@@ -124,6 +124,7 @@ _render = partial(
 
 
 def test_grad_over_camera():
+    """Check physical camera parameter gradients; see docs/camera-gradients.md."""
     camera_parameters = CameraParameters(
         viewWidth=width,
         viewHeight=height,

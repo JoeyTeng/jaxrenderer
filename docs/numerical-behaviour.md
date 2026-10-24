@@ -58,13 +58,11 @@ produce Python runtime warnings by default.
 
 ## Debugging derivatives
 
-The render regression checks differentiate selected physical camera parameters
-with `Renderer.create_camera_from_parameters`, which rebuilds the dependent
-view and projection matrices for each value. Their finite-difference oracle
-uses the interior pixels of a single non-degenerate triangle with positive
-perspective near and far distances. It covers camera position x and the far
-clip distance; it does not guarantee finite gradients for every `Camera` tree
-leaf or every scene.
+The camera regression differentiates selected physical parameters through
+`Renderer.create_camera_from_parameters` in a stable single-triangle scene. See
+[camera gradient checks](camera-gradients.md) for the fixture, numerical
+comparison, report and run command. It does not guarantee finite gradients for
+every `Camera` tree leaf or every scene.
 
 Raster coverage changes at triangle edges and visibility boundaries are
 discontinuous. Clipped or degenerate projected triangles, singular camera
