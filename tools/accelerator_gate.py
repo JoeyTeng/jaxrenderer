@@ -50,6 +50,7 @@ def gh_api(route: str, body: dict[str, object] | None = None) -> object:
     env["GH_TOKEN"] = token
     env["GH_PROMPT_DISABLED"] = "1"
     command = ["gh", "api", route]
+    command.extend(["--header", "Cache-Control: no-cache"])
     encoded_body = None
     if body is not None:
         command.extend(["--method", "POST", "--input", "-"])
@@ -95,8 +96,32 @@ def _is_repository(value: object, expected: str) -> bool:
     return isinstance(value, str) and value.casefold() == expected.casefold()
 
 
-def _binding_from_pr(pr_number: int, run_id: str) -> dict[str, object]:
-    pr = _read_pr(pr_number)
+def _master_sha() -> str:
+    value = gh_api(f"repos/{REPOSITORY}/branches/{BASE_BRANCH}")
+    if not isinstance(value, dict):
+        raise GateError("GitHub returned malformed master branch metadata")
+    commit = cast(dict[str, object], value).get("commit")
+    if not isinstance(commit, dict):
+        raise GateError("GitHub returned malformed master branch metadata")
+    sha = cast(dict[str, object], commit).get("sha")
+    if not isinstance(sha, str) or not SHA_RE.fullmatch(sha):
+        raise GateError("GitHub returned malformed master SHA")
+    return sha
+
+
+def _require_head_contains(base_sha: str, head_sha: str, description: str) -> None:
+    comparison = gh_api(f"repos/{REPOSITORY}/compare/{base_sha}...{head_sha}")
+    if not isinstance(comparison, dict) or cast(dict[str, object], comparison).get(
+        "status"
+    ) not in {"ahead", "identical"}:
+        raise GateError(f"pull request head is not up to date with {description}")
+
+
+def _binding_from_pr(
+    pr_number: int, run_id: str, pr: dict[str, object] | None = None
+) -> dict[str, object]:
+    if pr is None:
+        pr = _read_pr(pr_number)
     base = pr.get("base")
     head = pr.get("head")
     if not isinstance(base, dict) or not isinstance(head, dict):
@@ -115,8 +140,8 @@ def _binding_from_pr(pr_number: int, run_id: str) -> dict[str, object]:
     head_repository = head_repo.get("full_name")
     if pr.get("state") != "open":
         raise GateError("pull request is not open")
-    if base_ref != BASE_BRANCH:
-        raise GateError(f"pull request must target {BASE_BRANCH}")
+    if not isinstance(base_ref, str) or not base_ref:
+        raise GateError("pull request base reference is malformed")
     if not _is_repository(base_repo.get("full_name"), REPOSITORY):
         raise GateError(
             "pull request base repository does not match the gate repository"
@@ -132,14 +157,44 @@ def _binding_from_pr(pr_number: int, run_id: str) -> dict[str, object]:
     if not isinstance(head_sha, str) or not SHA_RE.fullmatch(head_sha):
         raise GateError("pull request head SHA is malformed")
 
-    comparison = gh_api(f"repos/{REPOSITORY}/compare/{base_sha}...{head_sha}")
-    if not isinstance(comparison, dict) or cast(dict[str, object], comparison).get(
-        "status"
-    ) not in {
-        "ahead",
-        "identical",
-    }:
-        raise GateError("pull request head is not up to date with its base")
+    stack_value = pr.get("stack")
+    if base_ref != BASE_BRANCH and not isinstance(stack_value, dict):
+        raise GateError("non-master base requires native stack metadata")
+    if stack_value is not None:
+        if not isinstance(stack_value, dict):
+            raise GateError("pull request has malformed native stack metadata")
+        stack = cast(dict[str, object], stack_value)
+        stack_base = stack.get("base")
+        if not isinstance(stack_base, dict):
+            raise GateError("pull request has malformed native stack base metadata")
+        stack_base = cast(dict[str, object], stack_base)
+        coordinates = ("id", "number", "position", "size")
+        if (
+            any(
+                type(stack.get(key)) is not int or cast(int, stack[key]) <= 0
+                for key in coordinates
+            )
+            or cast(int, stack["size"]) < cast(int, stack["position"])
+            or stack_base.get("ref") != BASE_BRANCH
+            or not isinstance(stack_base.get("sha"), str)
+            or not SHA_RE.fullmatch(cast(str, stack_base["sha"]))
+        ):
+            raise GateError("pull request has malformed native stack metadata")
+        if base_ref != BASE_BRANCH and not _is_repository(
+            head_repo.get("full_name"), REPOSITORY
+        ):
+            raise GateError("native stack layers must use the target repository")
+        if base_ref == BASE_BRANCH and stack_base["sha"] != base_sha:
+            raise GateError("native stack base does not match the pull request base")
+    live_master_sha = _master_sha()
+    if (
+        stack_value is not None
+        and cast(dict[str, object], cast(dict[str, object], stack_value)["base"])["sha"]
+        != live_master_sha
+    ):
+        raise GateError("native stack base does not match the live master SHA")
+    _require_head_contains(base_sha, head_sha, "its base")
+    _require_head_contains(live_master_sha, head_sha, "the live master")
     return {
         "pr": pr_number,
         "head_sha": head_sha,
@@ -150,7 +205,9 @@ def _binding_from_pr(pr_number: int, run_id: str) -> dict[str, object]:
     }
 
 
-def validate_binding(value: object) -> dict[str, object]:
+def validate_binding(
+    value: object, *, allow_non_master: bool = False
+) -> dict[str, object]:
     if not isinstance(value, dict):
         raise GateError("binding.json has missing or unexpected fields")
     value = cast(dict[str, object], value)
@@ -163,7 +220,11 @@ def validate_binding(value: object) -> dict[str, object]:
         sha = value[name]
         if not isinstance(sha, str) or not SHA_RE.fullmatch(sha):
             raise GateError(f"binding {name} is invalid")
-    if value["base_ref"] != BASE_BRANCH:
+    if (
+        not isinstance(value["base_ref"], str)
+        or not value["base_ref"]
+        or (not allow_non_master and value["base_ref"] != BASE_BRANCH)
+    ):
         raise GateError("binding base_ref is not master")
     head_repository = value["head_repository"]
     if not isinstance(head_repository, str) or not REPOSITORY_NAME_RE.fullmatch(
@@ -255,7 +316,7 @@ def _load_binding(path: Path) -> dict[str, object]:
         value = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, UnicodeError, json.JSONDecodeError) as error:
         raise GateError(f"could not read binding file: {error}") from error
-    return validate_binding(value)
+    return validate_binding(value, allow_non_master=True)
 
 
 def _load_result(path: Path, binding: dict[str, object], backend: str) -> None:
@@ -325,41 +386,9 @@ def _load_result(path: Path, binding: dict[str, object], backend: str) -> None:
 
 
 def _current_pr_matches(binding: dict[str, object]) -> None:
-    pr = _read_pr(binding["pr"])  # type: ignore[arg-type]
-    base = pr.get("base")
-    head = pr.get("head")
-    if not isinstance(base, dict) or not isinstance(head, dict):
-        raise GateError("current pull request is missing base or head metadata")
-    base = cast(dict[str, object], base)
-    head = cast(dict[str, object], head)
-    head_repo = head.get("repo")
-    if not isinstance(head_repo, dict):
-        raise GateError("current pull request head repository is unavailable")
-    head_repo = cast(dict[str, object], head_repo)
-    base_repo_value = base.get("repo")
-    if not isinstance(base_repo_value, dict):
-        raise GateError("current pull request base repository is unavailable")
-    base_repo = cast(dict[str, object], base_repo_value)
-    if (
-        pr.get("state") != "open"
-        or not _is_repository(base_repo.get("full_name"), REPOSITORY)
-        or base.get("ref") != binding["base_ref"]
-        or base.get("sha") != binding["base_sha"]
-        or head.get("sha") != binding["head_sha"]
-        or head_repo.get("full_name") != binding["head_repository"]
-        or head_repo.get("private") is not False
-    ):
+    current = _binding_from_pr(cast(int, binding["pr"]), cast(str, binding["run_id"]))
+    if current != binding:
         raise GateError("pull request identity or frozen head/base has changed")
-    comparison = gh_api(
-        f"repos/{REPOSITORY}/compare/{binding['base_sha']}...{binding['head_sha']}"
-    )
-    if not isinstance(comparison, dict) or cast(dict[str, object], comparison).get(
-        "status"
-    ) not in {
-        "ahead",
-        "identical",
-    }:
-        raise GateError("pull request head is no longer up to date with its base")
 
 
 def _latest_status(
@@ -387,9 +416,18 @@ def finish(
     binding = _load_binding(binding_path)
     run_id = run_id_from_env()
     if binding["run_id"] != run_id:
-        failure_reason = "binding belongs to a different workflow run or attempt"
-    else:
-        failure_reason = ""
+        run_number, attempt = _run_url_parts(cast(str, binding["run_id"]))
+        return {
+            "backend": backend,
+            "state": "failure",
+            "run_url": (
+                f"https://github.com/{REPOSITORY}/actions/runs/"
+                f"{run_number}/attempts/{attempt}"
+            ),
+            "reason": "binding belongs to a different workflow run or attempt",
+            "status_updated": False,
+        }
+    failure_reason = ""
     if not provider_success:
         failure_reason = failure_reason or "provider command did not succeed"
     try:

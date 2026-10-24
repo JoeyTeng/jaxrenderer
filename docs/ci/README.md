@@ -12,9 +12,13 @@ Private `typed_*` aliases in `renderer/_meta_utils.py` describe the small JAX AP
 
 ## Provider checks
 
-The `Manual GPU regression` workflow runs the same test suite and render and gradient regressions on a Modal T4 GPU. A maintainer dispatches it from `master` once before merging, specifying a pull request number. The workflow freezes its head and base revisions and records `accelerator/gpu` on the PR head. New commits need new checks; results from a changed head or base are rejected.
+The `Manual GPU regression` workflow runs the same test suite and render and gradient regressions on a Modal T4 GPU. A maintainer dispatches it from `master` separately for each PR or stack layer that needs GPU confirmation. Each run validates only the selected PR's current head and base; selecting a stack's top PR does not expand the run to its lower layers. GitHub's PR workflow runs the required CPU checks automatically for every PR. The manual GPU workflow is not triggered by PR events.
 
-GPU and TPU confirmation run automatically before PyPI publication. TPU is not a PR merge requirement, allowing Kaggle's free quota and queue to be used less frequently.
+Every layer in a [native GitHub stack](https://docs.github.com/en/pull-requests/reference/stacked-pull-requests) must have its own required checks before the stack is merged. GitHub's merge controls enforce the per-PR required checks and the complete stack topology. The binding records the selected head, base and workflow run attempt, which the finish step rechecks. For a non-master direct base, native stack metadata must anchor it to the current `master`; the current `master` commit must also be an ancestor of the selected head. After a rebase or other head/base change, wait for fresh CPU checks and dispatch fresh GPU checks for the affected PRs. TPU confirmation runs only for releases and is not a PR merge requirement.
+
+Runs for the same PR share a concurrency group; runs for different PRs may execute concurrently, so dispatch them consecutively to limit concurrent GPU use. To retry, use **Re-run all jobs** or dispatch that PR again; both create a binding for the new attempt. If the whole workflow is cancelled, check for a pending status and confirm any Modal run has stopped before dispatching again. A provider run may outlive a cancelled Actions job, so cancellation does not confirm that Modal has stopped.
+
+GPU and TPU confirmation run automatically before PyPI publication. TPU confirmation is also available as a release-only manual check; it is not a PR merge requirement.
 
 Provider controller dependencies are pinned in the `ci-modal` and `ci-kaggle` groups in `uv.lock`. Each controller installs only its own group. Standard CI installs all locked groups, including both controller SDKs; remote rendering tests install the development and test groups. GPU tests use Python 3.14, while TPU tests use Python 3.13 in an isolated environment.
 
@@ -42,6 +46,8 @@ First merge the workflow and configure the environments. GitHub requires a `work
 ```sh
 gh workflow run accelerators.yml --ref master -f pr=PR_NUMBER
 ```
+
+Dispatch once for each PR whose `accelerator/gpu` result is required, including every PR in a stack. Each run checks only the selected PR; selecting the top PR does not check its lower layers.
 
 ### Publishing a release
 
