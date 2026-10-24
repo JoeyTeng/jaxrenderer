@@ -94,6 +94,8 @@ image = renderer.Renderer.get_camera_image(
 
 You may refer to [demo](https://colab.research.google.com/github/JoeyTeng/jaxrenderer/blob/master/notebooks/Demo.ipynb) for more complex examples, including differentiable rendering and batch rendering.
 
+For zero-scale normals, input diagnostics and derivative caveats, see [Numerical behaviour](docs/numerical-behaviour.md).
+
 ### Supported Shaders
 
 #### Built-in Shaders
