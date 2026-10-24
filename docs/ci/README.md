@@ -12,7 +12,11 @@ Private `typed_*` aliases in `renderer/_meta_utils.py` describe the small JAX AP
 
 ## Provider checks
 
-The `Manual GPU regression` workflow runs the same test suite and render and gradient regressions on a Modal T4 GPU. A maintainer dispatches it from `master` once before merging, specifying a pull request number. The workflow freezes its head and base revisions and records `accelerator/gpu` on the PR head. New commits need new checks; results from a changed head or base are rejected.
+The `Manual GPU regression` workflow runs the same test suite and render and gradient regressions on a Modal T4 GPU. A maintainer dispatches it from `master` once before merging, specifying a pull request number. For an ordinary PR, this checks that PR. For a [native GitHub stack](https://docs.github.com/en/pull-requests/reference/stacked-pull-requests), select its top PR: the workflow freezes the open stack prefix through that PR and runs the GPU regression separately for every layer, recording `accelerator/gpu` against each frozen head. GitHub's own PR workflow also runs the required CPU checks for every layer; a passing result on the top layer does not replace a lower layer's status. The manual GPU workflow is not triggered by PR events.
+
+Each GPU result is tied to the layer's head and base snapshot. A changed head, direct parent, stack membership or trunk base requires fresh checks; stale results are rejected. PR `edited` events run the normal checks again so changing a PR's target branch refreshes its merge-ref checks. When a stack is rebased, wait for fresh CPU checks on every layer and dispatch the GPU check again. Merge the stack atomically only when every layer has its required checks and reviews; release validation then runs against the resulting squash commits on `master`.
+
+Manual PR GPU runs share one repository concurrency group, and the matrix runs one layer at a time to respect the provider quota. GitHub permits one running and one pending run per group, replaces an existing pending run when another arrives, and does not guarantee queue order. If a dispatch is replaced, dispatch it again after the active run completes. To retry a run, dispatch the workflow again or use **Re-run all jobs** so preparation creates bindings for the new attempt; rerunning only failed jobs reuses the old attempt's bindings. The final cleanup closes statuses left pending by skipped layers, but manually cancelling the whole workflow may prevent that job from starting. Check for a pending status after cancellation, and confirm any Modal run has stopped before dispatching again. This group serialises manual PR GPU use; it does not lock a stack revision or remove the need to compare the frozen snapshot.
 
 GPU and TPU confirmation run automatically before PyPI publication. TPU is not a PR merge requirement, allowing Kaggle's free quota and queue to be used less frequently.
 
@@ -42,6 +46,8 @@ First merge the workflow and configure the environments. GitHub requires a `work
 ```sh
 gh workflow run accelerators.yml --ref master -f pr=PR_NUMBER
 ```
+
+For a stack, use the top PR number. The preparation step records the current open prefix and exposes one binding per PR; a preparation failure closes checks still pending for that run. The manifest is also used by a final cleanup job so skipped layers are closed when the workflow reaches cleanup.
 
 ### Publishing a release
 
