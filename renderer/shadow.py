@@ -4,13 +4,14 @@ from typing import NamedTuple
 import jax.lax as lax
 import jax.numpy as jnp
 
-from ._meta_utils import add_tracing_name, is_array_type
+from ._meta_utils import add_tracing_name, is_array_type, typed_asarray
 from ._meta_utils import typed_jaxtyped as jaxtyped
 from ._meta_utils import typed_jit as jit
-from .geometry import Camera, View, Viewport
+from .geometry import Camera, View, Viewport, normalise
 from .pipeline import render
 from .shaders.depth import DepthExtraInput, DepthShader
 from .types import (
+    BoolV,
     Buffers,
     Colour,
     FaceIndices,
@@ -80,11 +81,50 @@ class Shadow(NamedTuple):
         Returns: Updated `Shadow` object with shadow_map updated.
         """
 
+        eye: Vec3f = centre + light_direction * distance
+
+        def select_camera_up() -> Vec3f:
+            # Use the direction represented by the actual eye position: adding
+            # a small light displacement to a large centre can round components
+            # away in float32. Scale before normalising to avoid overflow for
+            # large finite displacements.
+            camera_direction: Vec3f = centre - eye
+            camera_direction_scale: FloatV = jnp.max(jnp.abs(camera_direction))
+            scaled_camera_direction: Vec3f = camera_direction / camera_direction_scale
+            forward: Vec3f = normalise(scaled_camera_direction)
+            up_scale: FloatV = jnp.max(jnp.abs(up))
+            scaled_up: Vec3f = up / up_scale
+            unit_up: Vec3f = normalise(scaled_up)
+            # sqrt(float32 machine epsilon) is approximately 3.5e-4; this is a
+            # practical conditioning heuristic, not a universal error bound.
+            parallel_threshold: float = 3.5e-4
+            # For unit vectors, the cross-product magnitude is the sine of the
+            # angle between the view direction and the supplied up direction.
+            cross_direction: Vec3f = jnp.cross(forward, unit_up)
+            nearly_parallel: BoolV = (
+                jnp.sum(jnp.square(cross_direction)) < parallel_threshold**2
+            )
+            abs_forward: Vec3f = jnp.abs(forward)
+            # The least-aligned world axis maximises the fallback cross-product
+            # magnitude, including when the supplied up vector is antiparallel.
+            fallback_up: Vec3f = jnp.where(
+                (abs_forward[0] <= abs_forward[1]) & (abs_forward[0] <= abs_forward[2]),
+                typed_asarray((1.0, 0.0, 0.0), dtype=light_direction.dtype),
+                jnp.where(
+                    abs_forward[1] <= abs_forward[2],
+                    typed_asarray((0.0, 1.0, 0.0), dtype=light_direction.dtype),
+                    typed_asarray((0.0, 0.0, 1.0), dtype=light_direction.dtype),
+                ),
+            )
+            return jnp.where(nearly_parallel, fallback_up, scaled_up)
+
+        camera_up: Vec3f = select_camera_up()
+
         view: View = Camera.view_matrix(
-            # keep "forward = -light_direction"
-            eye=centre + light_direction * distance,
+            # Keep the camera aimed towards the centre.
+            eye=eye,
             centre=centre,
-            up=up,
+            up=camera_up,
         )
         assert is_array_type(view, View)
 
