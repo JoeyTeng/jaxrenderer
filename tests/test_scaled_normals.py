@@ -310,9 +310,7 @@ def test_merge_objects_extreme_nonzero_scaling_keeps_inverse_transpose_direction
 
 
 def test_merge_objects_mixed_dtype_extreme_scaling_keeps_normal_direction() -> None:
-    verts: Vertices = _float_array(
-        ((0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (0.0, 1.0, 0.0))
-    )
+    verts: Vertices = _float_array(((0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (0.0, 1.0, 0.0)))
     norms: Normals = typed_asarray(((0.0, 1.0, 0.0),) * 3, dtype=jnp.float16)
     uvs: UVCoordinates = _float_array(((0.0, 0.0),) * 3)
     faces: FaceIndices = typed_asarray(((0, 1, 2),), dtype=jnp.int32)
