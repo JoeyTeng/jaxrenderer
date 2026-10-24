@@ -178,6 +178,8 @@ class PhongReflectionTextureShader(
         values: PhongReflectionTextureExtraFragmentData,
         barycentric_screen: Float[Array, "primitives 3"],
         barycentric_clip: Float[Array, "primitives 3"],
+        *,
+        double_sided: Bool[Array, "primitives"] | BoolV = FALSE_ARRAY,
     ) -> tuple[
         Float[Array, "kept_primitives 4"],
         Bool[Array, "kept_primitives"],
@@ -191,7 +193,7 @@ class PhongReflectionTextureShader(
             PhongReflectionTextureExtraInput,
             PhongReflectionTextureExtraFragmentData,
             PhongReflectionTextureExtraFragmentData,
-        ]._primitive_chooser(
+        ].primitive_chooser(
             gl_FragCoord,
             gl_FrontFacing,
             gl_PointCoord,
@@ -199,7 +201,7 @@ class PhongReflectionTextureShader(
             values,
             barycentric_screen,
             barycentric_clip,
-            double_sided=values.double_sided[:, 0],
+            double_sided=double_sided | values.double_sided[:, 0],
         )
 
     @staticmethod

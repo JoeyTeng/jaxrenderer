@@ -54,6 +54,14 @@ This is an additional stage in this pipeline which may be analogical to the earl
 
 Custom implementations can overload to change this behaviour to achieve special effects like occlusion, transparency, etc. Note that the number of returned primitives must be static, i.e., same for all fragments, as required by `jax.jit`.
 
+`Shader.primitive_chooser` also accepts an optional keyword-only `double_sided`
+mask, either a scalar or one boolean per primitive. The default chooser lets
+marked back-facing primitives compete for the closest depth while preserving
+their original `gl_FrontFacing` value. Overrides should retain this optional
+keyword in their signature for type compatibility; the renderer does not pass
+it automatically. The built-in double-sided shaders combine it with their
+per-object visibility flags.
+
 #### Interpolation of Attributes
 
 Interpolation of all attributes for each fragment is defined by `Shader.interpolate`. The default implementation is provided, which simply linearly interpolates the attributes in the clip space according to the barycentric coordinates of the fragment. This behaviour is wrapped as a convenient function `interpolate` and mode `Interpolation.SMOOTH`. The interpolated values are then passed to the fragment shader. Currently only `Interpolation.SMOOTH` and `Interpolation.FLAT` are supported.
