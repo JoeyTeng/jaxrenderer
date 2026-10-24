@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 import subprocess
-from typing import ContextManager, NotRequired, TypedDict
+from typing import ContextManager, NotRequired, TypedDict, cast
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -91,15 +91,19 @@ class FakeGitHub:
         self.compare_status = "ahead"
         self.statuses: list[dict[str, object]] = []
         self.posts: list[tuple[str, dict[str, object]]] = []
+        self.routes: list[str] = []
 
     def __call__(
         self, command: list[str], **kwargs: object
     ) -> subprocess.CompletedProcess[str]:
         route = command[2]
+        self.routes.append(route)
         if route == f"repos/{gate.REPOSITORY}/pulls/24":
             value: object = self.pr
-        elif route == f"repos/{gate.REPOSITORY}/compare/{BASE_SHA}...{HEAD_SHA}":
+        elif route.startswith(f"repos/{gate.REPOSITORY}/compare/"):
             value = {"status": self.compare_status}
+        elif route == f"repos/{gate.REPOSITORY}/branches/master":
+            value = {"commit": {"sha": BASE_SHA}}
         elif (
             route == f"repos/{gate.REPOSITORY}/commits/{HEAD_SHA}/statuses?per_page=100"
         ):
@@ -199,6 +203,134 @@ def test_prepare_rejects_head_that_is_behind_base(
     assert github.posts == []
 
 
+def test_prepare_accepts_native_stack_layer_without_enumerating_stack(
+    tmp_path: Path, github: FakeGitHub
+) -> None:
+    native_master_sha = BASE_SHA
+    stack_base_sha = "c" * 40
+    github.pr["base"] = {
+        "ref": "topic-parent",
+        "sha": stack_base_sha,
+        "repo": {"full_name": gate.REPOSITORY},
+    }
+    github.pr["head"] = {
+        "sha": HEAD_SHA,
+        "repo": {"full_name": gate.REPOSITORY, "private": False},
+    }
+    cast(dict[str, object], github.pr)["stack"] = {
+        "id": 91,
+        "number": 57,
+        "position": 2,
+        "size": 3,
+        "base": {"ref": "master", "sha": native_master_sha},
+    }
+    with install_fake_github(github):
+        actual = gate.prepare(24, "gpu", tmp_path / "binding.json", tmp_path / "out")
+
+    assert actual == {
+        **binding(),
+        "base_ref": "topic-parent",
+        "base_sha": stack_base_sha,
+        "head_repository": gate.REPOSITORY,
+    }
+    assert not any("/stacks/" in route for route in github.routes)
+    assert (
+        f"repos/{gate.REPOSITORY}/compare/{native_master_sha}...{HEAD_SHA}"
+        in github.routes
+    )
+
+
+def test_prepare_rejects_stale_native_master_metadata(
+    tmp_path: Path, github: FakeGitHub
+) -> None:
+    github.pr["base"] = {
+        "ref": "topic-parent",
+        "sha": "c" * 40,
+        "repo": {"full_name": gate.REPOSITORY},
+    }
+    github.pr["head"] = {
+        "sha": HEAD_SHA,
+        "repo": {"full_name": gate.REPOSITORY, "private": False},
+    }
+    cast(dict[str, object], github.pr)["stack"] = {
+        "id": 91,
+        "number": 57,
+        "position": 2,
+        "size": 3,
+        "base": {"ref": "master", "sha": "d" * 40},
+    }
+    with install_fake_github(github):
+        with pytest.raises(gate.GateError, match="live master SHA"):
+            _ = gate.prepare(24, "gpu", tmp_path / "binding.json", tmp_path / "out")
+    assert github.posts == []
+
+
+def test_prepare_rejects_native_stack_head_behind_live_master(
+    tmp_path: Path, github: FakeGitHub
+) -> None:
+    github.pr["base"] = {
+        "ref": "topic-parent",
+        "sha": "c" * 40,
+        "repo": {"full_name": gate.REPOSITORY},
+    }
+    github.pr["head"] = {
+        "sha": HEAD_SHA,
+        "repo": {"full_name": gate.REPOSITORY, "private": False},
+    }
+    cast(dict[str, object], github.pr)["stack"] = {
+        "id": 91,
+        "number": 57,
+        "position": 2,
+        "size": 3,
+        "base": {"ref": "master", "sha": BASE_SHA},
+    }
+    github.compare_status = "behind"
+    with install_fake_github(github):
+        with pytest.raises(gate.GateError, match="up to date"):
+            _ = gate.prepare(24, "gpu", tmp_path / "binding.json", tmp_path / "out")
+    assert github.posts == []
+
+
+def test_finish_rechecks_native_stack_binding_and_status_ownership(
+    tmp_path: Path, github: FakeGitHub
+) -> None:
+    stack_base_sha = "c" * 40
+    github.pr["base"] = {
+        "ref": "topic-parent",
+        "sha": stack_base_sha,
+        "repo": {"full_name": gate.REPOSITORY},
+    }
+    github.pr["head"] = {
+        "sha": HEAD_SHA,
+        "repo": {"full_name": gate.REPOSITORY, "private": False},
+    }
+    cast(dict[str, object], github.pr)["stack"] = {
+        "id": 91,
+        "number": 57,
+        "position": 2,
+        "size": 3,
+        "base": {"ref": "master", "sha": BASE_SHA},
+    }
+    binding_path = tmp_path / "binding.json"
+    with install_fake_github(github):
+        _ = gate.prepare(24, "gpu", binding_path, tmp_path / "out")
+    output_dir = tmp_path / "provider-output"
+    write_result(
+        output_dir,
+        result(base_sha=stack_base_sha),
+    )
+    add_pending_status(github)
+    stack = cast(dict[str, object], github.pr)["stack"]
+    cast(dict[str, object], cast(dict[str, object], stack)["base"])["sha"] = "d" * 40
+
+    with install_fake_github(github):
+        actual = gate.finish(binding_path, "gpu", output_dir, provider_success=True)
+
+    assert actual["state"] == "failure"
+    assert "live master SHA" in str(actual["reason"])
+    assert github.posts[-1][1]["state"] == "failure"
+
+
 @pytest.mark.parametrize("backend", ["tpu", "both"])
 def test_prepare_rejects_non_gpu_backends(
     tmp_path: Path, github: FakeGitHub, backend: str
@@ -238,6 +370,14 @@ def test_gh_api_prefers_gh_token_and_bounds_calls(
 
     assert run.call_args.kwargs["env"]["GH_TOKEN"] == SYNTHETIC_ACCESS_B
     assert run.call_args.kwargs["timeout"] == 45
+    assert "Cache-Control: no-cache" in run.call_args.args[0]
+
+
+def test_binding_rejects_empty_non_master_base_ref() -> None:
+    value = binding()
+    value["base_ref"] = ""
+    with pytest.raises(gate.GateError, match="base_ref"):
+        _ = gate.validate_binding(value, allow_non_master=True)
 
 
 def test_finish_posts_success_only_for_exact_accelerator_result(
@@ -318,6 +458,34 @@ def test_finish_rejects_result_from_another_pr_head(
     assert "head_sha does not match" in str(actual["reason"])
 
 
+@pytest.mark.parametrize("change", ["target", "head", "head_repository"])
+def test_finish_rejects_changed_target_or_head_binding(
+    tmp_path: Path, github: FakeGitHub, change: str
+) -> None:
+    binding_path = tmp_path / "binding.json"
+    with install_fake_github(github):
+        _ = gate.prepare(24, "gpu", binding_path, tmp_path / "out")
+    output_dir = tmp_path / "provider-output"
+    write_result(output_dir, result())
+    add_pending_status(github)
+    if change == "target":
+        github.pr["base"]["ref"] = "different-target"
+    elif change == "head":
+        github.pr["head"]["sha"] = "c" * 40
+    else:
+        github.pr["head"]["repo"]["full_name"] = "Another/jaxrenderer"
+
+    with install_fake_github(github):
+        actual = gate.finish(binding_path, "gpu", output_dir, provider_success=True)
+
+    assert actual["state"] == "failure"
+    if change == "target":
+        assert "native stack metadata" in str(actual["reason"])
+    else:
+        assert "frozen head/base has changed" in str(actual["reason"])
+    assert github.posts[-1][1]["state"] == "failure"
+
+
 def test_finish_requires_pending_status_from_this_run(
     tmp_path: Path, github: FakeGitHub
 ) -> None:
@@ -358,3 +526,28 @@ def test_finish_does_not_overwrite_a_newer_run_status(
     assert actual["status_updated"] is False
     assert "another run" in str(actual["reason"])
     assert github.posts == []
+
+
+def test_finish_does_not_read_or_clobber_status_for_another_attempt(
+    tmp_path: Path,
+    github: FakeGitHub,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    binding_path = write_binding(tmp_path / "binding.json")
+    add_pending_status(github)
+    monkeypatch.setenv("GITHUB_RUN_ATTEMPT", "3")
+
+    with install_fake_github(github):
+        actual = gate.finish(
+            binding_path,
+            "gpu",
+            tmp_path / "missing-result",
+            provider_success=False,
+        )
+
+    assert actual["state"] == "failure"
+    assert actual["status_updated"] is False
+    assert "different workflow run or attempt" in str(actual["reason"])
+    assert github.routes == []
+    assert github.posts == []
+    assert github.statuses[0]["state"] == "pending"

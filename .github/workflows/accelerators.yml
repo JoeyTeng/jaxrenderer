@@ -11,25 +11,20 @@ on:
 permissions:
   contents: read
 
-# Keep manual PR GPU runs serialised. GitHub concurrency is not FIFO
-# and permits only one pending run in this group.
 concurrency:
-  group: accelerator-gpu
+  group: accelerator-pr-${{ inputs.pr }}
   cancel-in-progress: false
 
 jobs:
-  prepare:
+  gpu:
+    if: github.ref == 'refs/heads/master'
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 35
+    environment: modal-gpu
     permissions:
       contents: read
       pull-requests: read
       statuses: write
-    outputs:
-      matrix: ${{ steps.freeze.outputs.matrix }}
-      manifest: ${{ steps.freeze.outputs.manifest }}
-      run_id: ${{ steps.freeze.outputs.run_id }}
-      count: ${{ steps.freeze.outputs.count }}
     steps:
       - name: Require the trusted default branch
         run: test "$GITHUB_REF" = 'refs/heads/master'
@@ -39,58 +34,16 @@ jobs:
       - uses: actions/setup-python@v7
         with:
           python-version: "3.14"
-      - name: Freeze the pull request stack and initialise GPU checks
-        id: freeze
+      - name: Freeze the pull request and initialise its GPU check
+        id: prepare
         env:
           GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ inputs.pr }}
         run: >-
-          python tools/accelerator_gate.py prepare-stack
-          --pr "$PR_NUMBER" --backend gpu --output-dir accelerator-bindings
+          python tools/accelerator_gate.py prepare
+          --pr "$PR_NUMBER" --backend gpu
+          --output accelerator-bindings/binding.json
           --github-output "$GITHUB_OUTPUT"
-      - uses: actions/upload-artifact@v7
-        id: binding
-        if: always()
-        with:
-          name: accelerator-bindings
-          path: accelerator-bindings/
-          if-no-files-found: error
-          retention-days: 7
-      - name: Close pending GPU checks if preparation fails
-        if: >-
-          always() &&
-          (steps.freeze.outcome != 'success' || steps.binding.outcome != 'success') &&
-          hashFiles('accelerator-bindings/manifest.json') != ''
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          python tools/accelerator_gate.py close-pending \
-            --manifest accelerator-bindings/manifest.json --backend gpu
-
-  gpu:
-    needs: prepare
-    runs-on: ubuntu-latest
-    timeout-minutes: 35
-    environment: modal-gpu
-    strategy:
-      fail-fast: false
-      max-parallel: 1
-      matrix: ${{ fromJson(needs.prepare.outputs.matrix) }}
-    permissions:
-      contents: read
-      pull-requests: read
-      statuses: write
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          persist-credentials: false
-      - uses: actions/download-artifact@v7
-        with:
-          name: accelerator-bindings
-          path: accelerator-bindings
-      - uses: actions/setup-python@v7
-        with:
-          python-version: "3.14"
       - uses: astral-sh/setup-uv@v10.2.0
         with:
           version: "0.12.20"
@@ -99,56 +52,34 @@ jobs:
         run: uv sync --locked --only-group ci-modal --python 3.14
       - name: Run the GPU regression on Modal
         id: provider
+        if: steps.prepare.outcome == 'success'
         timeout-minutes: 30
         env:
           MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
           MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
         run: >-
-          .venv/bin/python -m tools.modal_ci --binding "${{ matrix.binding }}"
-          --output-dir "accelerator-artifacts/gpu-${{ matrix.pr }}-${{ matrix.head_sha }}"
+          .venv/bin/python -m tools.modal_ci
+          --binding accelerator-bindings/binding.json
+          --output-dir accelerator-artifacts/gpu
       - name: Record the GPU result on the frozen PR commit
-        if: always()
+        if: >-
+          always() &&
+          hashFiles('accelerator-bindings/binding.json') != ''
         env:
           GH_TOKEN: ${{ github.token }}
           PROVIDER_SUCCESS: ${{ steps.provider.outcome == 'success' }}
         run: >-
           python tools/accelerator_gate.py finish
-          --binding "${{ matrix.binding }}"
-          --manifest accelerator-bindings/manifest.json --backend gpu
-          --output-dir "accelerator-artifacts/gpu-${{ matrix.pr }}-${{ matrix.head_sha }}"
+          --binding accelerator-bindings/binding.json --backend gpu
+          --output-dir accelerator-artifacts/gpu
           --provider-success "$PROVIDER_SUCCESS"
-      - name: Upload GPU regression artefacts
+      - name: Upload the GPU result and binding
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: gpu-${{ matrix.head_sha }}
-          path: accelerator-artifacts/gpu-${{ matrix.pr }}-${{ matrix.head_sha }}/
+          name: gpu-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            accelerator-bindings/binding.json
+            accelerator-artifacts/
           if-no-files-found: warn
           retention-days: 14
-
-  cleanup:
-    if: always() && needs.prepare.result == 'success'
-    needs: [prepare, gpu]
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    permissions:
-      contents: read
-      pull-requests: read
-      statuses: write
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          persist-credentials: false
-      - uses: actions/download-artifact@v7
-        with:
-          name: accelerator-bindings
-          path: accelerator-bindings
-      - uses: actions/setup-python@v7
-        with:
-          python-version: "3.14"
-      - name: Close GPU checks left pending by skipped or cancelled layers
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: >-
-          python tools/accelerator_gate.py close-pending
-          --manifest accelerator-bindings/manifest.json --backend gpu
