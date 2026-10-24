@@ -15,13 +15,12 @@ numerically correct. A probe of that check found non-finite leaves; it did not
 establish their cause.
 
 The current regression follows the physical inputs through camera construction
-and rendering. For parameters $\theta$, the test evaluates
+and rendering. For parameters $\theta$, let $C(\theta)$ be the camera returned
+by `Renderer.create_camera_from_parameters`, and let $Z(C)$ be the rendered
+depth buffer for camera $C$. The sampled window is $W$. The test evaluates
 
 $$
-L(\theta) = \sum_{(x,y)\in W}
-  \operatorname{depth}\bigl(\operatorname{render}(C(\theta))\bigr)_{x,y},
-\qquad
-C(\theta)=\operatorname{Renderer.create\_camera\_from\_parameters}(\theta).
+L(\theta) = \sum_{(x,y)\in W} Z(C(\theta))_{x,y}.
 $$
 
 Autodiff therefore applies the chain rule through both the camera construction
