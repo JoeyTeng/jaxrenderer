@@ -1,4 +1,3 @@
-from collections.abc import Callable
 from functools import partial
 import json
 import os
@@ -9,13 +8,20 @@ import jax
 import jax.lax as lax
 import jax.numpy as jnp
 
-from renderer import Buffers, Camera, LightSource, jit, render
+from renderer import (
+    Buffers,
+    Camera,
+    CameraParameters,
+    LightSource,
+    Renderer,
+    render,
+)
 from renderer._meta_utils import typed_array, typed_asarray, typed_grad, typed_zeros
 from renderer.shaders.gouraud import GouraudExtraInput, GouraudShader
 from renderer.types import FloatV
 
 
-def _write_gradient_report(metrics: dict[str, float]) -> None:
+def _write_numeric_report(section: str, metrics: dict[str, float]) -> None:
     artifact_dir = Path(
         os.environ.get("JAXRENDERER_ARTIFACT_DIR", ".artifacts/render-regression")
     )
@@ -26,7 +32,7 @@ def _write_gradient_report(metrics: dict[str, float]) -> None:
         if report_path.exists()
         else {}
     )
-    report["light_gradient"] = metrics
+    report[section] = metrics
     _ = report_path.write_text(
         json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8"
     )
@@ -118,22 +124,129 @@ _render = partial(
 
 
 def test_grad_over_camera():
-    def camera_depth_loss(a: Camera) -> FloatV:
-        depth = _render(camera=a, extra=extra)[0]
-
-        return jnp.sum(depth)
-
-    camera_grad_factory = cast(
-        Callable[[Callable[[Camera], FloatV]], Callable[[Camera], Camera]],
-        typed_grad,
+    """Check physical camera parameter gradients; see docs/camera-gradients.md."""
+    camera_parameters = CameraParameters(
+        viewWidth=width,
+        viewHeight=height,
+        viewDepth=1.0,
+        near=0.1,
+        far=10.0,
+        hfov=90.0,
+        vfov=90.0,
+        position=typed_array((0.0, 0.0, 2.0)),
+        target=typed_array((0.0, 0.0, 0.0)),
+        up=typed_array((0.0, 1.0, 0.0)),
     )
-    grad_camera: Camera = jit(camera_grad_factory(camera_depth_loss))(camera)
+    triangle_extra = GouraudExtraInput(
+        position=typed_array(
+            (
+                (-0.6, -0.6, 0.0),
+                (0.7, -0.5, 0.0),
+                (0.0, 0.7, 0.0),
+            )
+        ),
+        colour=typed_array(
+            (
+                (1.0, 0.0, 0.0),
+                (0.0, 1.0, 0.0),
+                (0.0, 0.0, 1.0),
+            )
+        ),
+        normal=jnp.broadcast_to(light.direction, (3, 3)),
+        light=light,
+    )
+    triangle_faces = typed_array(((0, 1, 2),))
 
-    def block_until_ready(value: jax.Array) -> jax.Array:
-        return value.block_until_ready()
+    def camera_depth_window(position_x: FloatV, far: FloatV) -> jax.Array:
+        position = typed_array((position_x, 0.0, 2.0))
+        camera_from_parameters = Renderer.create_camera_from_parameters(
+            camera_parameters._replace(position=position, far=far)
+        )
+        depth_buffer = render(
+            camera=camera_from_parameters,
+            extra=triangle_extra,
+            buffers=buffers,
+            face_indices=triangle_faces,
+            shader=GouraudShader,
+        )[0]
+        return depth_buffer[36:46, 31:41]
 
-    _ = jax.tree_util.tree_map(block_until_ready, grad_camera)
-    assert jax.tree_util.tree_leaves(grad_camera)
+    def camera_depth_loss(position_x: FloatV, far: FloatV) -> FloatV:
+        return jnp.sum(camera_depth_window(position_x, far))
+
+    position_x = typed_asarray(0.0)
+    far = typed_asarray(10.0)
+    # CPU float32 gave 0.61% and 0.04% relative FD error at these steps;
+    # smaller steps amplified rounding in the depth-buffer reductions.
+    position_epsilon = typed_asarray(0.01)
+    far_epsilon = typed_asarray(0.3)
+
+    # These five samples must stay fully covered so the oracle excludes raster
+    # edge and visibility changes rather than treating background as depth.
+    coverage_windows = (
+        camera_depth_window(position_x, far),
+        camera_depth_window(position_x + position_epsilon, far),
+        camera_depth_window(position_x - position_epsilon, far),
+        camera_depth_window(position_x, far + far_epsilon),
+        camera_depth_window(position_x, far - far_epsilon),
+    )
+    assert all(bool(jnp.all(window > 0.0)) for window in coverage_windows)
+
+    position_gradient: FloatV = typed_grad(lambda value: camera_depth_loss(value, far))(
+        position_x
+    )
+    position_difference = (
+        camera_depth_loss(position_x + position_epsilon, far)
+        - camera_depth_loss(position_x - position_epsilon, far)
+    ) / (2 * position_epsilon)
+
+    far_gradient: FloatV = typed_grad(
+        lambda value: camera_depth_loss(position_x, value)
+    )(far)
+    far_difference = (
+        camera_depth_loss(position_x, far + far_epsilon)
+        - camera_depth_loss(position_x, far - far_epsilon)
+    ) / (2 * far_epsilon)
+
+    _ = position_gradient.block_until_ready()
+    _ = position_difference.block_until_ready()
+    _ = far_gradient.block_until_ready()
+    _ = far_difference.block_until_ready()
+
+    def record(
+        gradient: FloatV, difference: FloatV, epsilon: FloatV
+    ) -> dict[str, float]:
+        gradient_value = float(gradient)
+        difference_value = float(difference)
+        absolute_error = abs(gradient_value - difference_value)
+        return {
+            "autodiff": gradient_value,
+            "central_difference": difference_value,
+            "absolute_error": absolute_error,
+            "relative_error": absolute_error / max(abs(difference_value), 1e-12),
+            "epsilon": float(epsilon),
+        }
+
+    position_metrics = record(position_gradient, position_difference, position_epsilon)
+    far_metrics = record(far_gradient, far_difference, far_epsilon)
+    _write_numeric_report(
+        "camera_gradient",
+        {
+            **{f"position_x_{key}": value for key, value in position_metrics.items()},
+            **{f"far_{key}": value for key, value in far_metrics.items()},
+        },
+    )
+
+    assert bool(jnp.isfinite(position_gradient))
+    assert bool(jnp.isfinite(position_difference))
+    assert abs(float(position_gradient)) > 1e-3
+    # A 3% bound leaves room above the measured float32 error while rejecting
+    # regressions that zero or materially distort either sensitivity.
+    assert jnp.allclose(position_gradient, position_difference, rtol=0.03, atol=1e-4)
+    assert bool(jnp.isfinite(far_gradient))
+    assert bool(jnp.isfinite(far_difference))
+    assert abs(float(far_gradient)) > 1e-3
+    assert jnp.allclose(far_gradient, far_difference, rtol=0.03, atol=1e-4)
 
 
 def test_grad_over_light():
@@ -164,14 +277,15 @@ def test_grad_over_light():
     finite_difference_value = float(finite_difference)
     absolute_error = abs(gradient_value - finite_difference_value)
     relative_error = absolute_error / max(abs(finite_difference_value), 1e-12)
-    _write_gradient_report(
+    _write_numeric_report(
+        "light_gradient",
         {
             "autodiff": gradient_value,
             "central_difference": finite_difference_value,
             "absolute_error": absolute_error,
             "relative_error": relative_error,
             "epsilon": float(epsilon),
-        }
+        },
     )
 
     assert bool(jnp.isfinite(gradient))
