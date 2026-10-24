@@ -349,4 +349,63 @@ def test_perspective_interpolation():
     assert empty_pixels > (width * height // 2), "The canvas should be mostly empty"
     assert empty_pixels < (width * height), "The canvas should not be all empty"
 
-    # TODO: find a way to specify the effect of "perspective transform"
+    # At the screen-space centroid, perspective-correct weights are
+    # (1/4, 3/8, 3/8) for clip-space w values (3, 2, 2). The vertex values
+    # (0, 1/2, 1) therefore produce 9/16, while affine interpolation gives 1/2.
+    proof_width = 64
+    proof_height = 64
+    proof_camera = Camera.create(
+        view=Camera.view_matrix(
+            eye=typed_array((0.0, 0.0, 0.0)),
+            centre=typed_array((0.0, 0.0, -1.0)),
+            up=up,
+        ),
+        projection=Camera.perspective_projection_matrix(
+            fovy=90.0,
+            aspect=1.0,
+            z_near=1.0,
+            z_far=10.0,
+        ),
+        viewport=Camera.viewport_matrix(
+            lowerbound=lowerbound,
+            dimension=typed_array((proof_width, proof_height)),
+            depth=1.0,
+        ),
+    )
+    proof_position = typed_array(
+        (
+            (-2.25, -2.25, -3.0),
+            (0.75, -1.5, -2.0),
+            (-1.5, 0.75, -2.0),
+        )
+    )
+    proof_extra = ExtraInput(
+        position=proof_position,
+        normal=jnp.broadcast_to(
+            light.direction,
+            (proof_position.shape[0], *light.direction.shape),
+        ),
+        uv=typed_array(((0.25, 0.75),) * 3),
+        light=light,
+        colour=typed_array(
+            (
+                (0.0, 0.0, 0.0),
+                (0.5, 0.5, 0.5),
+                (1.0, 1.0, 1.0),
+            )
+        ),
+    )
+    proof_buffers = Buffers(
+        zbuffer=lax.full((proof_width, proof_height), 1.0),
+        targets=(lax.full((proof_width, proof_height, 3), 0.0),),
+    )
+    _, (proof_canvas,) = render(
+        proof_camera,
+        _Shader,
+        proof_buffers,
+        face_indices,
+        proof_extra,
+    )
+    assert jnp.all(
+        jnp.abs(proof_canvas[20, 20] - typed_array((9.0 / 16.0,) * 3)) < 1e-5
+    )
