@@ -1,5 +1,5 @@
 from functools import partial
-from typing import NamedTuple
+from typing import NamedTuple, override
 
 from jax import Array
 import jax.lax as lax
@@ -17,6 +17,7 @@ from ..geometry import Camera, normalise, to_homogeneous
 from ..model import MergedModel
 from ..shader import ID, MixerOutput, PerFragment, PerVertex, Shader
 from ..types import (
+    FALSE_ARRAY,
     BoolV,
     Colour,
     FloatV,
@@ -48,6 +49,7 @@ class PhongReflectionTextureExtraInput(NamedTuple):
       - ambient: ambient strength, shared by all vertices.
       - diffuse: diffuse strength, shared by all vertices.
       - specular: specular strength, shared by all vertices.
+      - double_sided: per-vertex visibility mask; defaults to false.
     """
 
     position: Float[Array, "vertices 3"]  # in world space
@@ -63,6 +65,7 @@ class PhongReflectionTextureExtraInput(NamedTuple):
     ambient: Colour
     diffuse: Colour
     specular: Colour
+    double_sided: Bool[Array, "vertices"] | BoolV = FALSE_ARRAY
 
 
 class PhongReflectionTextureExtraFragmentData(NamedTuple):
@@ -79,6 +82,7 @@ class PhongReflectionTextureExtraFragmentData(NamedTuple):
     uv: Vec2f = typed_zeros(2)
     texture_index: IntV = typed_array(0)
     colour: Colour = typed_zeros(3)
+    double_sided: BoolV = FALSE_ARRAY
 
 
 class PhongReflectionTextureExtraMixerOutput(NamedTuple):
@@ -127,6 +131,10 @@ class PhongReflectionTextureShader(
                 # repeat texture
                 uv=extra.uv[gl_VertexID],
                 texture_index=extra.texture_index[gl_VertexID],
+                double_sided=jnp.broadcast_to(
+                    extra.double_sided,
+                    extra.position.shape[:1],
+                )[gl_VertexID],
             ),
         )
 
@@ -149,10 +157,50 @@ class PhongReflectionTextureShader(
             barycentric_clip=barycentric_clip,
         )
         # all three values should be the same, just pick the first.
-        varying = varying._replace(texture_index=values.texture_index[0])
+        varying = varying._replace(
+            texture_index=values.texture_index[0],
+            double_sided=values.double_sided[0],
+        )
         assert isinstance(varying, PhongReflectionTextureExtraFragmentData)
 
         return varying
+
+    @staticmethod
+    @jaxtyped
+    @partial(jit, inline=True)
+    @add_tracing_name
+    @override
+    def primitive_chooser(
+        gl_FragCoord: Float[Array, "primitives 4"],
+        gl_FrontFacing: Bool[Array, "primitives"],
+        gl_PointCoord: Float[Array, "primitives 2"],
+        keeps: Bool[Array, "primitives"],
+        values: PhongReflectionTextureExtraFragmentData,
+        barycentric_screen: Float[Array, "primitives 3"],
+        barycentric_clip: Float[Array, "primitives 3"],
+    ) -> tuple[
+        Float[Array, "kept_primitives 4"],
+        Bool[Array, "kept_primitives"],
+        Float[Array, "kept_primitives 2"],
+        Bool[Array, "kept_primitives"],
+        PhongReflectionTextureExtraFragmentData,
+        Float[Array, "kept_primitives 3"],
+        Float[Array, "kept_primitives 3"],
+    ]:
+        return Shader[
+            PhongReflectionTextureExtraInput,
+            PhongReflectionTextureExtraFragmentData,
+            PhongReflectionTextureExtraFragmentData,
+        ]._primitive_chooser(
+            gl_FragCoord,
+            gl_FrontFacing,
+            gl_PointCoord,
+            keeps,
+            values,
+            barycentric_screen,
+            barycentric_clip,
+            double_sided=values.double_sided[:, 0],
+        )
 
     @staticmethod
     @jaxtyped
@@ -228,7 +276,7 @@ class PhongReflectionTextureShader(
             PerFragment(
                 keeps=jnp.logical_and(
                     built_in.keeps,
-                    gl_FrontFacing,
+                    gl_FrontFacing | varying.double_sided,
                 ),
                 use_default_depth=built_in.use_default_depth,
             ),

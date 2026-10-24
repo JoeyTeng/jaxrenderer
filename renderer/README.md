@@ -29,6 +29,15 @@ References:
 
 This is not implemented in the pipeline, but can be achieved by discard fragment in the fragment shader according to `gl_FrontFacing` variable, and return `keeps=False` in first return value `PerFragment`. See example implementation `renderer/shaders/gouraud.py:GouraudShader.fragment`.
 
+`Renderer.get_camera_image` honours [`ModelObject.double_sided`](model.py) for
+the built-in textured Phong renderers and their shadow maps. Set it directly or
+use [`Scene.set_object_double_sided`](scene.py). The default is `False`, which
+culls back-facing triangles. Setting it to `True` makes those triangles visible
+while preserving `gl_FrontFacing` and the supplied normals. Normals are not
+flipped and lighting is not made two-sided, so a visible rear face may be dark.
+Visible fragments remain opaque and participate in colour and shadow depth
+occlusion.
+
 ### Rasterization
 
 Implemented in pipeline and cannot be changed.

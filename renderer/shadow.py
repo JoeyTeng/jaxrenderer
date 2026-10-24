@@ -3,6 +3,7 @@ from typing import NamedTuple
 
 import jax.lax as lax
 import jax.numpy as jnp
+from jaxtyping import Array, Bool
 
 from ._meta_utils import add_tracing_name, is_array_type, typed_asarray
 from ._meta_utils import typed_jaxtyped as jaxtyped
@@ -11,6 +12,7 @@ from .geometry import Camera, View, Viewport, normalise
 from .pipeline import render
 from .shaders.depth import DepthExtraInput, DepthShader
 from .types import (
+    FALSE_ARRAY,
     BoolV,
     Buffers,
     Colour,
@@ -58,6 +60,7 @@ class Shadow(NamedTuple):
         offset: float = 0.001,
         distance: float = 10.0,
         loop_unroll: int = 1,
+        double_sided: Bool[Array, "vertices"] | BoolV = FALSE_ARRAY,
     ) -> "Shadow":
         """Render shadow map from light source's point of view.
 
@@ -65,6 +68,8 @@ class Shadow(NamedTuple):
           - shadow_map: ZBuffer to store the depth map.
           - verts: vertices of the object.
           - faces: face indices of the object.
+          - double_sided: optional per-vertex or scalar mask enabling visibility
+            of back-facing faces in the shadow map.
           - light_direction: direction of **parallel** light source, where it
             goes towards, in world space.
           - viewport_matrix: viewport matrix for rendering the objects.
@@ -143,7 +148,7 @@ class Shadow(NamedTuple):
         assert isinstance(_camera, Camera)
 
         buffers: Buffers[tuple[()]] = Buffers(zbuffer=shadow_map, targets=tuple())
-        extra = DepthExtraInput(position=verts)
+        extra = DepthExtraInput(position=verts, double_sided=double_sided)
         shadow_map, _ = render(
             _camera,
             DepthShader,

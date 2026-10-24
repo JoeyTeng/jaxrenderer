@@ -187,7 +187,6 @@ class Shader(ABC, Generic[ShaderExtraInputT, VaryingT, MixedExtraT]):
           - keeps: batch of bool, whether the primitive is kept. This is used
             to filter out the primitives that are not visible, or with garbage
             values.
-
           The parameters below are batched values over primitives, with each
           value same as the input given to `Shader.interpolate`
 
@@ -203,9 +202,51 @@ class Shader(ABC, Generic[ShaderExtraInputT, VaryingT, MixedExtraT]):
           tuple of values from kept primitives, in same order and structure of
           the input parameters. The returned fields must be batched.
         """
+        return Shader[ShaderExtraInputT, VaryingT, MixedExtraT]._primitive_chooser(
+            gl_FragCoord,
+            gl_FrontFacing,
+            gl_PointCoord,
+            keeps,
+            values,
+            barycentric_screen,
+            barycentric_clip,
+        )
+
+    @staticmethod
+    @jaxtyped
+    @partial(jit, inline=True)
+    @add_tracing_name
+    def _primitive_chooser(
+        gl_FragCoord: Float[Array, "primitives 4"],
+        gl_FrontFacing: Bool[Array, "primitives"],
+        gl_PointCoord: Float[Array, "primitives 2"],
+        keeps: Bool[Array, "primitives"],
+        values: VaryingT,
+        barycentric_screen: Float[Array, "primitives 3"],
+        barycentric_clip: Float[Array, "primitives 3"],
+        *,
+        double_sided: Bool[Array, "primitives"] | BoolV = FALSE_ARRAY,
+    ) -> tuple[
+        Float[Array, "kept_primitives 4"],
+        Bool[Array, "kept_primitives"],
+        Float[Array, "kept_primitives 2"],
+        Bool[Array, "kept_primitives"],
+        VaryingT,
+        Float[Array, "kept_primitives 3"],
+        Float[Array, "kept_primitives 3"],
+    ]:
+        double_sided_per_primitive: Bool[Array, "primitives"] = jnp.broadcast_to(
+            double_sided,
+            gl_FrontFacing.shape,
+        )
+        assert is_array_type(
+            double_sided_per_primitive,
+            Bool[Array, "primitives"],
+        )
+
         depths: Float[Array, "primitives"]
         depths = jnp.where(
-            keeps & gl_FrontFacing,
+            keeps & (gl_FrontFacing | double_sided_per_primitive),
             gl_FragCoord[:, 2],
             jnp.inf,
         )
