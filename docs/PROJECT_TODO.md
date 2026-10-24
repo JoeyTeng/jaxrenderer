@@ -1,8 +1,5 @@
 # Rendering follow-ups
 
-- [ ] **Define empty-scene behaviour.** Decide whether an empty object sequence
-  returns the configured background buffers or raises a clear `ValueError`, then
-  cover the chosen behaviour through the public renderer API.
 - [ ] **Verify perspective-correct interpolation numerically.** Extend the
   existing perspective smoke test with a small analytical example whose expected
   interpolated value differs from affine interpolation.
