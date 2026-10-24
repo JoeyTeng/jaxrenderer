@@ -29,6 +29,15 @@ References:
 
 This is not implemented in the pipeline, but can be achieved by discard fragment in the fragment shader according to `gl_FrontFacing` variable, and return `keeps=False` in first return value `PerFragment`. See example implementation `renderer/shaders/gouraud.py:GouraudShader.fragment`.
 
+`Renderer.get_camera_image` honours [`ModelObject.double_sided`](model.py) for
+the built-in textured Phong renderers and their shadow maps. Set it directly or
+use [`Scene.set_object_double_sided`](scene.py). The default is `False`, which
+culls back-facing triangles. Setting it to `True` makes those triangles visible
+while preserving `gl_FrontFacing` and the supplied normals. Normals are not
+flipped and lighting is not made two-sided, so a visible rear face may be dark.
+Visible fragments remain opaque and participate in colour and shadow depth
+occlusion.
+
 ### Rasterization
 
 Implemented in pipeline and cannot be changed.
@@ -44,6 +53,14 @@ Currently no anti-aliasing strategy is supported.
 This is an additional stage in this pipeline which may be analogical to the early depth test in OpenGL. It is implemented in `Shader.primitive_chooser`. The default implementation is provided, which assumes that the depth is just the interpolated `z` value in the eye space. It just picks the values of the single primitive that is closest to the camera and is not discarded in the previous pipeline.
 
 Custom implementations can overload to change this behaviour to achieve special effects like occlusion, transparency, etc. Note that the number of returned primitives must be static, i.e., same for all fragments, as required by `jax.jit`.
+
+`Shader.primitive_chooser` also accepts an optional keyword-only `double_sided`
+mask, either a scalar or one boolean per primitive. The default chooser lets
+marked back-facing primitives compete for the closest depth while preserving
+their original `gl_FrontFacing` value. Overrides should retain this optional
+keyword in their signature for type compatibility; the renderer does not pass
+it automatically. The built-in double-sided shaders combine it with their
+per-object visibility flags.
 
 #### Interpolation of Attributes
 

@@ -163,6 +163,8 @@ class Shader(ABC, Generic[ShaderExtraInputT, VaryingT, MixedExtraT]):
         values: VaryingT,
         barycentric_screen: Float[Array, "primitives 3"],
         barycentric_clip: Float[Array, "primitives 3"],
+        *,
+        double_sided: Bool[Array, "primitives"] | BoolV = FALSE_ARRAY,
     ) -> tuple[  #
         Float[Array, "kept_primitives 4"],  # gl_FragCoord
         Bool[Array, "kept_primitives"],  # gl_FrontFacing
@@ -177,7 +179,8 @@ class Shader(ABC, Generic[ShaderExtraInputT, VaryingT, MixedExtraT]):
         The default implementation is to only keep the primitive with minimum
         `gl_FragCoord[2]` and `gl_FrontFacing` and `keeps` (interpolated `z`
         value in window space is minimum), i.e., the closest primitive that is
-        kept and is not back-facing.
+        kept and is front-facing. The optional `double_sided` mask also allows
+        marked back-facing primitives to compete.
 
         Parameters:
           - gl_FragCoord: batch of coordinates in screen space. (x, y, z, 1/w).
@@ -187,7 +190,10 @@ class Shader(ABC, Generic[ShaderExtraInputT, VaryingT, MixedExtraT]):
           - keeps: batch of bool, whether the primitive is kept. This is used
             to filter out the primitives that are not visible, or with garbage
             values.
-
+          - double_sided: optional scalar or per-primitive mask that allows
+            back-facing primitives to compete for the closest visible depth.
+            This affects chooser eligibility only; it does not change
+            `gl_FrontFacing` or the supplied normals.
           The parameters below are batched values over primitives, with each
           value same as the input given to `Shader.interpolate`
 
@@ -203,9 +209,18 @@ class Shader(ABC, Generic[ShaderExtraInputT, VaryingT, MixedExtraT]):
           tuple of values from kept primitives, in same order and structure of
           the input parameters. The returned fields must be batched.
         """
+        double_sided_per_primitive: Bool[Array, "primitives"] = jnp.broadcast_to(
+            double_sided,
+            gl_FrontFacing.shape,
+        )
+        assert is_array_type(
+            double_sided_per_primitive,
+            Bool[Array, "primitives"],
+        )
+
         depths: Float[Array, "primitives"]
         depths = jnp.where(
-            keeps & gl_FrontFacing,
+            keeps & (gl_FrontFacing | double_sided_per_primitive),
             gl_FragCoord[:, 2],
             jnp.inf,
         )

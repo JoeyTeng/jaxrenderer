@@ -504,9 +504,13 @@ class ModelObject(NamedTuple):
     """
     transform: ModelMatrix = jnp.identity(4)
     """Transform matrix (model matrix) of the model."""
-    # TODO: Support double_sided
     double_sided: BoolV = FALSE_ARRAY
-    """Whether the object is double-sided."""
+    """Whether back-facing primitives are visible for this object.
+
+    This affects visibility only. It does not flip or otherwise change the
+    object's normals or lighting, and visible fragments remain opaque.
+    Use `Scene.set_object_double_sided` for the scene-level API.
+    """
 
     @jaxtyped
     def replace_with_position(self, position: Vec3f) -> "ModelObject":
@@ -621,12 +625,13 @@ class ModelObject(NamedTuple):
 
     @jaxtyped
     def replace_with_double_sided(self, double_sided: BoolV) -> "ModelObject":
-        """Return a new ModelObject with given double_sided.
+        """Return a new ModelObject with back-face visibility set.
 
         !!This does not change the original object.
 
         Parameters:
-          - double_sided: whether the object is double-sided.
+          - double_sided: whether back-facing primitives are visible. This does
+            not change their normals or lighting.
         """
         return self._replace(double_sided=double_sided)
 
