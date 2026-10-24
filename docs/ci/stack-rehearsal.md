@@ -1,5 +1,5 @@
 # GPU stack rehearsal
 
-Layer: middle
+Layer: top
 
 This documentation-only marker supports a draft CI stack rehearsal.
