@@ -262,7 +262,7 @@ class Renderer:
         uv = model.uvs[model.faces_uv.reshape((-1,))]
 
         texture_index = model.texture_index[model.faces.reshape((-1,))]
-        # double_sided = model.texture_index[model.faces_uv.reshape((-1,))]
+        double_sided = model.double_sided[model.faces.reshape((-1,))]
 
         face_indices: Integer[Array, "_ 3"]
         face_indices = jnp.arange(  # pyright: ignore[reportUnknownMemberType]
@@ -299,6 +299,7 @@ class Renderer:
             ambient=light.ambient,
             diffuse=light.diffuse,
             specular=light.specular,
+            double_sided=double_sided,
         )
 
         if shadow_param is None:
@@ -335,6 +336,7 @@ class Renderer:
                 strength=shadow_param.strength,
                 offset=shadow_param.offset,
                 loop_unroll=loop_unroll,
+                double_sided=model.double_sided,
             )
             assert isinstance(shadow, Shadow), f"{shadow}"
 

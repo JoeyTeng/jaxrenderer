@@ -275,9 +275,13 @@ class Scene(NamedTuple):
     ) -> "Scene":
         """Set whether an object in the scene is double-sided.
 
+        This controls visibility only: it does not flip normals or change
+        lighting. The default is false. See
+        `ModelObject.replace_with_double_sided` for the object-level API.
+
         Parameters:
           - object_id: the unique identifier of the object.
-          - double_sided: whether the object is double-sided.
+          - double_sided: whether back-facing primitives are visible.
         """
         new_obj = self.objects[object_id].replace_with_double_sided(
             typed_asarray(double_sided)

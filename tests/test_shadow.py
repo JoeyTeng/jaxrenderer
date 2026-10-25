@@ -61,6 +61,9 @@ def _render_small_shadow(
         shadow_map=shadow_map,
         verts=vertices,
         faces=faces,
+        # This fixture isolates camera conditioning; keep its plane visible
+        # from either light direction.
+        double_sided=typed_asarray(True),
         light_direction=light_direction,
         viewport_matrix=viewport,
         centre=(

@@ -63,6 +63,32 @@ def test_primitive_chooser_keeps_nearest_front_facing_candidate_and_structure() 
     np.testing.assert_array_equal(chosen[5], barycentric_screen[3:4])
     np.testing.assert_array_equal(chosen[6], barycentric_clip[3:4])
 
+    for double_sided in (
+        _array(True, dtype=np.bool_),
+        _array([True, False, False, False], dtype=np.bool_),
+    ):
+        chosen = _TestShader.primitive_chooser(
+            gl_FragCoord=frag_coord,
+            gl_FrontFacing=_array([False, True, True, True], dtype=np.bool_),
+            gl_PointCoord=point_coord,
+            keeps=_array([True, False, True, True], dtype=np.bool_),
+            values=values,
+            barycentric_screen=barycentric_screen,
+            barycentric_clip=barycentric_clip,
+            double_sided=double_sided,
+        )
+
+        assert chosen[0].shape == (1, 4)
+        assert isinstance(chosen[4], _Varying)
+        np.testing.assert_array_equal(chosen[0], frag_coord[0:1])
+        np.testing.assert_array_equal(chosen[1], _array([False], dtype=np.bool_))
+        np.testing.assert_array_equal(chosen[2], point_coord[0:1])
+        np.testing.assert_array_equal(chosen[3], _array([True], dtype=np.bool_))
+        np.testing.assert_array_equal(chosen[4].colour, values.colour[0:1])
+        np.testing.assert_array_equal(chosen[4].uv, values.uv[0:1])
+        np.testing.assert_array_equal(chosen[5], barycentric_screen[0:1])
+        np.testing.assert_array_equal(chosen[6], barycentric_clip[0:1])
+
 
 def test_interpolate_preserves_namedtuple_and_uses_smooth_weights() -> None:
     values = _Varying(
