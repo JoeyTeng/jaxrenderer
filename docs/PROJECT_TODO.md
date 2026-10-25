@@ -3,6 +3,3 @@
 - [ ] **Support double-sided objects.** Propagate `ModelObject.double_sided`
   through rendering and verify reversed winding and mixed single- and double-sided
   objects in the same scene.
-- [ ] **Validate camera gradients.** Locate the non-finite leaves in the current
-  camera-gradient smoke check, differentiate the original camera parameters in a
-  stable scene, and compare a finite gradient with a central finite difference.
