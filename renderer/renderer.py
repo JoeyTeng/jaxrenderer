@@ -387,6 +387,9 @@ class Renderer:
     ) -> Canvas:
         """Render the scene with the given camera.
 
+        If `objects` is empty, return a canvas filled with `colour_default`
+        without processing the camera, light, or rendering pipeline.
+
         The dtype of `colour_default` and `zbuffer_default` will be used as the
         dtype of canvas and zbuffer.
 
@@ -401,8 +404,18 @@ class Renderer:
             it None to disable shadows.
           - loop_unroll: passed directly to `render`. See `pipeline:render`.
 
-        Returns: Buffers, with zbuffer and (coloured image, ).
+        Returns: The rendered canvas, or the configured background canvas when
+          there are no objects.
         """
+        buffers: Buffers[tuple[Canvas]] = cls.create_buffers(
+            width=width,
+            height=height,
+            colour_default=colour_default,
+            zbuffer_default=zbuffer_default,
+        )
+        if not objects:
+            return buffers.targets[0]
+
         _camera: Camera
         if isinstance(camera, CameraParameters):
             _camera = cls.create_camera_from_parameters(camera)
@@ -418,13 +431,6 @@ class Renderer:
             is_leaf=lambda x: not isinstance(x, LightParameters),
         )
         assert isinstance(light, LightParameters), f"{light}"
-
-        buffers: Buffers[tuple[Canvas]] = cls.create_buffers(
-            width=width,
-            height=height,
-            colour_default=colour_default,
-            zbuffer_default=zbuffer_default,
-        )
 
         model: MergedModel = merge_objects(objects)
         assert isinstance(model, MergedModel), f"{model}"

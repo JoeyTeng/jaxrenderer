@@ -58,6 +58,19 @@ produce Python runtime warnings by default.
 
 ## Debugging derivatives
 
+The camera regression differentiates selected physical parameters through
+`Renderer.create_camera_from_parameters` in a stable single-triangle scene. See
+[camera gradient checks](camera-gradients.md) for the fixture, numerical
+comparison, report and run command. It does not guarantee finite gradients for
+every `Camera` tree leaf or every scene.
+
+Raster coverage changes at triangle edges and visibility boundaries are
+discontinuous. Clipped or degenerate projected triangles, singular camera
+frames or matrices, and parameters that cross those boundaries can still have
+undefined or non-finite derivatives. Keep finite-difference comparisons inside
+a stable coverage region, and treat these cases as renderer limitations rather
+than evidence that all camera gradients are safe.
+
 A model snapshot contains no previous state or time interval, so it cannot
 provide a physical velocity. A finite-difference `delta_scale / delta_t`
 requires the previous and current scale plus their elapsed time. If a caller
