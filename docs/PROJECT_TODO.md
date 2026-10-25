@@ -1,8 +1,5 @@
 # Rendering follow-ups
 
-- [ ] **Define empty-scene behaviour.** Decide whether an empty object sequence
-  returns the configured background buffers or raises a clear `ValueError`, then
-  cover the chosen behaviour through the public renderer API.
 - [ ] **Support double-sided objects.** Propagate `ModelObject.double_sided`
   through rendering and verify reversed winding and mixed single- and double-sided
   objects in the same scene.
