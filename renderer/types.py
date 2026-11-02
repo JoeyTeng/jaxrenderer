@@ -47,6 +47,7 @@ __all__ = [
     "NormalMap",
     "DtypeInfo",
     "LightSource",
+    "PixelState",
     "Buffers",
 ]
 
@@ -162,6 +163,13 @@ class LightSource(NamedTuple):
 
 _TargetsT = TypeVar("_TargetsT", bound=tuple[Any, ...])
 """Extra target buffers, must be in shape of (width, height, ...)."""
+
+
+class PixelState(NamedTuple, Generic[_TargetsT]):
+    """Current depth and target values for one destination pixel."""
+
+    zbuffer: FloatV
+    targets: _TargetsT
 
 
 class Buffers(NamedTuple, Generic[_TargetsT]):

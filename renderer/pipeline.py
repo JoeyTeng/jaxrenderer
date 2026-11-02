@@ -1,5 +1,5 @@
 from functools import partial
-from typing import Any, NamedTuple, Protocol, TypeVar, cast
+from typing import NamedTuple, Protocol, TypeVar, cast
 
 import jax
 from jax import Array
@@ -19,6 +19,7 @@ from ._meta_utils import typed_jit as jit
 from .geometry import Camera, Interpolation, Viewport, interpolate
 from .shader import (
     ID,
+    Fragment,
     MixedExtraT,
     MixerOutput,
     PerFragment,
@@ -34,6 +35,7 @@ from .types import (
     FaceIndices,
     FloatV,
     IntV,
+    PixelState,
     Triangle,
     Vec2f,
     Vec2i,
@@ -111,7 +113,6 @@ class PerPrimitive(NamedTuple):
         )
 
 
-T = TypeVar("T", bound=tuple[Any, ...])
 _BufferLeafT = TypeVar("_BufferLeafT", bound=Array)
 
 
@@ -133,13 +134,13 @@ class _IndexedExtra(Protocol):
 @add_tracing_name
 def _postprocessing(
     shader: type[Shader[ShaderExtraInputT, VaryingT, MixedExtraT]],
-    buffers: Buffers[T],
+    buffers: Buffers[MixedExtraT],
     per_primitive: PerPrimitive,
     varyings: VaryingT,
     extra: ShaderExtraInputT,
     viewport: Viewport,
     loop_unroll: int,
-) -> Buffers[T]:
+) -> Buffers[MixedExtraT]:
     with jax.ensure_compile_time_eval():
         # vmap batch along second axis
         batch_size: int = int(buffers[0].shape[1])
@@ -291,7 +292,7 @@ def _postprocessing(
             values: VaryingT,
             barycentric_screen: Vec3f,
             barycentric_clip: Vec3f,
-        ) -> tuple[PerFragment, VaryingT]:
+        ) -> tuple[PerFragment, Fragment[MixedExtraT]]:
             # PROCESS: Interpolation
             varying: VaryingT = shader.interpolate(
                 values=values,
@@ -302,7 +303,7 @@ def _postprocessing(
 
             # PROCESS: Fragment Processing
             per_frag: PerFragment
-            extra_fragment_output: VaryingT
+            extra_fragment_output: Fragment[MixedExtraT]
             per_frag, extra_fragment_output = shader.fragment(
                 gl_FragCoord=gl_FragCoord,
                 gl_FrontFacing=gl_FrontFacing,
@@ -311,7 +312,7 @@ def _postprocessing(
                 extra=extra,  # pyright: ignore[reportUnknownArgumentType]  # PyTree bound is opaque to Pyright
             )
             assert isinstance(per_frag, PerFragment)
-            assert isinstance(extra_fragment_output, tuple)
+            assert isinstance(extra_fragment_output, Fragment)
 
             # enforce default `gl_FragDepth` when `use_default_depth`
             def _use_default_depth() -> PerFragment:
@@ -340,10 +341,12 @@ def _postprocessing(
             per_primitive,
             varyings,
         )
-        chosen_args = shader.primitive_chooser(*args)
+        chosen_args = shader.primitive_chooser(
+            *args, collection=shader.fragment_collection
+        )
 
         built_in: PerFragment
-        extra_outputs: VaryingT
+        extra_outputs: Fragment[MixedExtraT]
         _f = jax.vmap(_interpolate_and_fragment_shading)
         built_in, extra_outputs = _f(*chosen_args)
         assert isinstance(built_in, PerFragment)
@@ -356,9 +359,16 @@ def _postprocessing(
         # PROCESS: Per-Sample Operations (Mixing: depth test + colour blending)
         mixed_output: MixerOutput
         attachments: MixedExtraT
-        mixed_output, attachments = cast(
-            tuple[MixerOutput, MixedExtraT],
-            shader.mix(gl_Depths, keeps, extra_outputs),
+
+        def _destination_leaf(value: Array) -> Array:
+            return value[coord[0], coord[1]]
+
+        destination: PixelState[MixedExtraT] = PixelState(
+            zbuffer=buffers.zbuffer[coord[0], coord[1]],
+            targets=tree_map(_destination_leaf, buffers.targets),
+        )
+        mixed_output, attachments = shader.mix(
+            gl_Depths, keeps, extra_outputs, destination=destination
         )
         assert isinstance(mixed_output, MixerOutput)
         assert isinstance(attachments, tuple)
@@ -381,11 +391,10 @@ def _postprocessing(
 
         Returns: one row from `Shader.mixer`, `MixerOutput` and `MixerExtraT`.
         """
-        keeps: Bool[Array, "height"]
-        depths: Num[Array, "height"]
+        mixed_output: MixerOutput
         extras: MixedExtraT
         # vmap over axis 1 (height) of the buffers. Axis 0 (width) is `i`.
-        (keeps, depths), extras = jax.vmap(_per_pixel)(
+        mixed_output, extras = jax.vmap(_per_pixel)(
             lax.concatenate(
                 (
                     lax.full((batch_size, 1), i),
@@ -396,11 +405,12 @@ def _postprocessing(
                 1,
             )
         )
-        assert is_array_type(keeps, Bool[Array, "height"])
-        assert is_array_type(depths, Num[Array, "height"])
+        assert is_array_type(mixed_output.keep, Bool[Array, "height"])
+        assert is_array_type(mixed_output.write_depth, Bool[Array, "height"])
+        assert is_array_type(mixed_output.zbuffer, Num[Array, "height"])
         assert isinstance(extras, tuple)
 
-        return MixerOutput(keep=keeps, zbuffer=depths), extras
+        return mixed_output, extras
 
     # END OF `_per_row`
 
@@ -409,8 +419,8 @@ def _postprocessing(
     @add_tracing_name
     def merge_buffers(
         mixer_outputs: tuple[MixerOutput, MixedExtraT],
-        old_buffers: Buffers[T],
-    ) -> Buffers[T]:
+        old_buffers: Buffers[MixedExtraT],
+    ) -> Buffers[MixedExtraT]:
         """Merge the rendered row into the buffers.
 
         Parameters:
@@ -421,6 +431,7 @@ def _postprocessing(
         Returns: the updated buffers.
         """
         keeps: CanvasMask = mixer_outputs[0].keep
+        depth_keeps: CanvasMask = mixer_outputs[0].write_depth
         depths: ZBuffer = mixer_outputs[0].zbuffer
         extras: MixedExtraT = mixer_outputs[1]
 
@@ -447,13 +458,14 @@ def _postprocessing(
 
             return jax.vmap(_merge_second_axis)(_mask, _new, _old)
 
-        def _merge_buffer_leaf(new: Array, old: Array) -> Array:
-            return jax.vmap(_merge_first_axis)(keeps, new, old)
+        def _merge_buffer_leaf(mask: CanvasMask, new: Array, old: Array) -> Array:
+            return jax.vmap(_merge_first_axis)(mask, new, old)
 
-        new_buffers: Buffers[T] = tree_map(
-            _merge_buffer_leaf,
-            Buffers(zbuffer=depths, targets=tuple(extras)),
-            old_buffers,
+        new_buffers: Buffers[MixedExtraT] = Buffers(
+            zbuffer=_merge_buffer_leaf(depth_keeps, depths, old_buffers.zbuffer),
+            targets=tree_map(
+                partial(_merge_buffer_leaf, keeps), extras, old_buffers.targets
+            ),
         )
         assert isinstance(new_buffers, Buffers)
 
@@ -494,11 +506,11 @@ def _postprocessing(
 def render(
     camera: Camera,
     shader: type[Shader[ShaderExtraInputT, VaryingT, MixedExtraT]],
-    buffers: Buffers[T],
+    buffers: Buffers[MixedExtraT],
     face_indices: FaceIndices,
     extra: ShaderExtraInputT,
     loop_unroll: int = 1,
-) -> Buffers[T]:
+) -> Buffers[MixedExtraT]:
     """Render a scene with a shader.
 
     Parameters:

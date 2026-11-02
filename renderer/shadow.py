@@ -10,7 +10,7 @@ from ._meta_utils import typed_jaxtyped as jaxtyped
 from ._meta_utils import typed_jit as jit
 from .geometry import Camera, View, Viewport, normalise
 from .pipeline import render
-from .shaders.depth import DepthExtraInput, DepthShader
+from .shaders.depth import DepthExtraInput, DepthExtraMixerOutput, DepthShader
 from .types import (
     FALSE_ARRAY,
     BoolV,
@@ -147,7 +147,7 @@ class Shadow(NamedTuple):
         )
         assert isinstance(_camera, Camera)
 
-        buffers: Buffers[tuple[()]] = Buffers(zbuffer=shadow_map, targets=tuple())
+        buffers = Buffers(zbuffer=shadow_map, targets=DepthExtraMixerOutput())
         extra = DepthExtraInput(position=verts, double_sided=double_sided)
         shadow_map, _ = render(
             _camera,

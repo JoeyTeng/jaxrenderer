@@ -15,9 +15,10 @@ from .._meta_utils import typed_jaxtyped as jaxtyped
 from .._meta_utils import typed_jit as jit
 from ..geometry import Camera, normalise, to_homogeneous
 from ..model import MergedModel
-from ..shader import ID, MixerOutput, PerFragment, PerVertex, Shader
+from ..shader import ID, Fragment, FragmentCollection, PerFragment, PerVertex, Shader
 from ..types import (
     FALSE_ARRAY,
+    TRUE_ARRAY,
     BoolV,
     Colour,
     FloatV,
@@ -167,7 +168,7 @@ class PhongReflectionTextureShader(
 
     @staticmethod
     @jaxtyped
-    @partial(jit, inline=True)
+    @partial(jit, static_argnames=("collection",), inline=True)
     @add_tracing_name
     @override
     def primitive_chooser(
@@ -180,6 +181,7 @@ class PhongReflectionTextureShader(
         barycentric_clip: Float[Array, "primitives 3"],
         *,
         double_sided: Bool[Array, "primitives"] | BoolV = FALSE_ARRAY,
+        collection: FragmentCollection = FragmentCollection.NEAREST,
     ) -> tuple[
         Float[Array, "kept_primitives 4"],
         Bool[Array, "kept_primitives"],
@@ -202,6 +204,7 @@ class PhongReflectionTextureShader(
             barycentric_screen,
             barycentric_clip,
             double_sided=double_sided | values.double_sided[:, 0],
+            collection=collection,
         )
 
     @staticmethod
@@ -214,19 +217,7 @@ class PhongReflectionTextureShader(
         gl_PointCoord: Vec2f,
         varying: PhongReflectionTextureExtraFragmentData,
         extra: PhongReflectionTextureExtraInput,
-    ) -> tuple[PerFragment, PhongReflectionTextureExtraFragmentData]:
-        built_in: PerFragment = Shader[
-            PhongReflectionTextureExtraInput,
-            PhongReflectionTextureExtraFragmentData,
-            PhongReflectionTextureExtraFragmentData,
-        ].fragment(
-            gl_FragCoord,
-            gl_FrontFacing,
-            gl_PointCoord,
-            varying,
-            extra,
-        )[0]
-        assert isinstance(built_in, PerFragment)
+    ) -> tuple[PerFragment, Fragment[PhongReflectionTextureExtraMixerOutput]]:
 
         # texture
         texture_index = varying.texture_index.astype(int)
@@ -276,39 +267,10 @@ class PhongReflectionTextureShader(
 
         return (
             PerFragment(
-                keeps=jnp.logical_and(
-                    built_in.keeps,
-                    gl_FrontFacing | varying.double_sided,
-                ),
-                use_default_depth=built_in.use_default_depth,
+                keeps=gl_FrontFacing | varying.double_sided,
+                use_default_depth=TRUE_ARRAY,
             ),
-            PhongReflectionTextureExtraFragmentData(
-                colour=colour,
-                uv=varying.uv,
-                normal=varying.normal,
+            Fragment(
+                targets=PhongReflectionTextureExtraMixerOutput(canvas=colour),
             ),
-        )
-
-    @staticmethod
-    @jaxtyped
-    @partial(jit, inline=True)
-    @add_tracing_name
-    def mix(
-        gl_FragDepth: Float[Array, "primitives"],
-        keeps: Bool[Array, "primitives"],
-        extra: PhongReflectionTextureExtraFragmentData,
-    ) -> tuple[MixerOutput, PhongReflectionTextureExtraMixerOutput]:
-        mixer_output: MixerOutput
-        extra_output: PhongReflectionTextureExtraFragmentData
-        mixer_output, extra_output = Shader[
-            PhongReflectionTextureExtraInput,
-            PhongReflectionTextureExtraFragmentData,
-            PhongReflectionTextureExtraFragmentData,
-        ].mix(gl_FragDepth, keeps, extra)
-        assert isinstance(mixer_output, MixerOutput)
-        assert isinstance(extra_output, PhongReflectionTextureExtraFragmentData)
-
-        return (
-            mixer_output,
-            PhongReflectionTextureExtraMixerOutput(canvas=extra_output.colour),
         )

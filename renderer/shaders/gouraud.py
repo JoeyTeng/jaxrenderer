@@ -11,8 +11,8 @@ from .._meta_utils import add_tracing_name, is_array_type, typed_array
 from .._meta_utils import typed_jaxtyped as jaxtyped
 from .._meta_utils import typed_jit as jit
 from ..geometry import Camera, normalise, to_homogeneous
-from ..shader import ID, PerFragment, PerVertex, Shader
-from ..types import BoolV, Colour, FloatV, LightSource, Vec2f, Vec3f, Vec4f
+from ..shader import ID, Fragment, PerFragment, PerVertex, Shader
+from ..types import TRUE_ARRAY, BoolV, Colour, FloatV, LightSource, Vec2f, Vec3f, Vec4f
 
 
 class GouraudExtraInput(NamedTuple):
@@ -89,30 +89,16 @@ class GouraudShader(
         gl_PointCoord: Vec2f,
         varying: GouraudExtraFragmentData,
         extra: GouraudExtraInput,
-    ) -> tuple[PerFragment, GouraudExtraFragmentData]:
-        built_in: PerFragment = Shader[
-            GouraudExtraInput,
-            GouraudExtraFragmentData,
-            GouraudExtraMixerOutput,
-        ].fragment(
-            gl_FragCoord,
-            gl_FrontFacing,
-            gl_PointCoord,
-            varying,
-            extra,
-        )[0]
-        assert isinstance(built_in, PerFragment)
-
+    ) -> tuple[PerFragment, Fragment[GouraudExtraMixerOutput]]:
         return (
             PerFragment(
                 keeps=typed_array(
                     (
-                        built_in.keeps,
                         gl_FrontFacing,
                         jnp.all(varying.colour >= 0),
                     )
                 ).all(),
-                use_default_depth=built_in.use_default_depth,
+                use_default_depth=TRUE_ARRAY,
             ),
-            varying,
+            Fragment(targets=GouraudExtraMixerOutput(canvas=varying.colour)),
         )

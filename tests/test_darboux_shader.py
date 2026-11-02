@@ -6,6 +6,7 @@ from renderer._meta_utils import typed_asarray, typed_zeros
 from renderer.geometry import Viewport
 from renderer.shaders.phong_darboux import (
     PhongTextureDarbouxExtraInput,
+    PhongTextureDarbouxExtraMixerOutput,
     PhongTextureDarbouxShader,
 )
 from renderer.types import (
@@ -71,9 +72,9 @@ def test_darboux_shader_renders_nontrivial_normal_map() -> None:
     )
     zbuffer: ZBuffer = typed_zeros((width, height))
     canvas: Canvas = typed_zeros((width, height, 3))
-    buffers: Buffers[tuple[Canvas]] = Buffers(
+    buffers: Buffers[PhongTextureDarbouxExtraMixerOutput] = Buffers(
         zbuffer=zbuffer,
-        targets=(canvas,),
+        targets=PhongTextureDarbouxExtraMixerOutput(canvas=canvas),
     )
 
     result = render(
@@ -83,7 +84,7 @@ def test_darboux_shader_renders_nontrivial_normal_map() -> None:
         face_indices=face_indices,
         extra=extra,
     )
-    canvas = result.targets[0]
+    canvas = result.targets.canvas
     lit_pixels = canvas[jnp.any(canvas > 0.0, axis=-1)]
 
     assert bool(jnp.isfinite(canvas).all())

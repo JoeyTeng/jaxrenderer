@@ -11,6 +11,13 @@ from .model import Model, ModelObject, batch_models, merge_objects
 from .pipeline import render
 from .renderer import CameraParameters, LightParameters, Renderer, ShadowParameters
 from .scene import GUID, Scene
+from .shader import (
+    Fragment,
+    FragmentCollection,
+    MixerOutput,
+    PassthroughShader,
+    Shader,
+)
 from .shapes.capsule import UpAxis, create_capsule
 from .shapes.cube import create_cube
 from .types import (
@@ -19,6 +26,7 @@ from .types import (
     JaxFloating,
     JaxInteger,
     LightSource,
+    PixelState,
     SpecularMap,
     Texture,
     Vec3f,
@@ -38,22 +46,28 @@ __all__ = [
     "Colour",
     "create_capsule",
     "create_cube",
+    "Fragment",
+    "FragmentCollection",
     "GUID",
     "JaxFloating",
     "JaxInteger",
     "jit",
     "LightParameters",
     "LightSource",
+    "MixerOutput",
     "merge_objects",
     "Model",
     "ModelObject",
     "normalise",
+    "PassthroughShader",
+    "PixelState",
     "quaternion_mul",
     "quaternion",
     "render",
     "Renderer",
     "rotation_matrix",
     "Scene",
+    "Shader",
     "ShadowParameters",
     "SpecularMap",
     "Texture",
