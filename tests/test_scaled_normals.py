@@ -33,6 +33,28 @@ def _simple_model_object(
     return ModelObject(model, _float_array(local_scaling), transform)
 
 
+def test_replace_with_orientation_defaults_to_identity_and_preserves_other_fields() -> (
+    None
+):
+    transform = jnp.identity(4, dtype=jnp.float32)
+    transform = transform.at[:3, 3].set((4.0, -2.0, 7.0))
+    original = _simple_model_object(
+        local_scaling=(2.0, 0.5, 3.0),
+        transform=transform,
+    ).replace_with_orientation(_float_array((0.0, 0.0, 0.0, 1.0)))
+
+    reset = original.replace_with_orientation()
+
+    assert jnp.allclose(
+        original.transform[:3, :3],
+        jnp.diag(_float_array((-1.0, -1.0, 1.0))),
+    )
+    assert jnp.allclose(reset.transform[:3, :3], jnp.identity(3))
+    assert jnp.array_equal(reset.transform[:3, 3], original.transform[:3, 3])
+    assert jnp.array_equal(reset.local_scaling, original.local_scaling)
+    assert reset.model is original.model
+
+
 @pytest.mark.parametrize(
     "local_scaling",
     ((2.0, 0.5, 3.0), (-2.0, 0.5, 3.0), (0.0, 1.0, 1.0)),
