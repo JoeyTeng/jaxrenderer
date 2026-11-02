@@ -542,7 +542,7 @@ class ModelObject(NamedTuple):
         """
         if rotation_matrix is None:
             if orientation is None:
-                orientation = typed_array((0.0, 0.0, 0.0, 1.0))
+                orientation = typed_array((1.0, 0.0, 0.0, 0.0))
 
             assert is_array_type(orientation, Vec4f), f"{orientation}"
             rotation_matrix = transform_matrix_from_rotation(orientation)
