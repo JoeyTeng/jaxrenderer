@@ -7,6 +7,7 @@ from collections.abc import Mapping
 from datetime import datetime, timezone
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import re
@@ -18,7 +19,7 @@ import tempfile
 import time
 from typing import Any, cast
 
-QUEUE_TIMEOUT_SECONDS = 4 * 60 * 60
+QUEUE_TIMEOUT_SECONDS = 8 * 60 * 60
 EXECUTION_TIMEOUT_SECONDS = 45 * 60
 POLL_INTERVAL_SECONDS = 20
 CLI_TIMEOUT_SECONDS = 90
@@ -418,11 +419,28 @@ def validate_downloaded_result(
     return cast(dict[str, Any], result)
 
 
-def _run(binding: dict[str, object], backend: str, output_dir: Path) -> dict[str, Any]:
+def _run(
+    binding: dict[str, object],
+    backend: str,
+    output_dir: Path,
+    *,
+    queue_timeout_seconds: float | None = None,
+) -> dict[str, Any]:
     """Submit one private TPU kernel and return its binding-checked result."""
     binding = validate_binding(binding)
     if backend != "tpu":
         raise KaggleError("Kaggle adapter only supports the TPU backend")
+    queue_timeout = (
+        QUEUE_TIMEOUT_SECONDS
+        if queue_timeout_seconds is None
+        else queue_timeout_seconds
+    )
+    if (
+        isinstance(queue_timeout, bool)
+        or not math.isfinite(queue_timeout)
+        or queue_timeout <= 0
+    ):
+        raise KaggleError("Kaggle queue timeout must be a finite positive number")
     env = os.environ.copy()
     username = _require_credentials(env)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -581,7 +599,7 @@ def _run(binding: dict[str, object], backend: str, output_dir: Path) -> dict[str
         state["submitted_version"] = 1
         queue_started = time.monotonic()
         submitted_at = _timestamp()
-        queue_deadline = queue_started + QUEUE_TIMEOUT_SECONDS
+        queue_deadline = queue_started + queue_timeout
         execution_deadline: float | None = None
         persist(
             status="submitted",
@@ -826,11 +844,22 @@ def _run(binding: dict[str, object], backend: str, output_dir: Path) -> dict[str
     return result
 
 
-def run(binding: dict[str, object], backend: str, output_dir: Path) -> dict[str, Any]:
+def run(
+    binding: dict[str, object],
+    backend: str,
+    output_dir: Path,
+    *,
+    queue_timeout_seconds: float | None = None,
+) -> dict[str, Any]:
     """Run Kaggle and preserve a short failure diagnostic with its artefacts."""
     output_dir.mkdir(parents=True, exist_ok=True)
     try:
-        return _run(binding, backend, output_dir)
+        return _run(
+            binding,
+            backend,
+            output_dir,
+            queue_timeout_seconds=queue_timeout_seconds,
+        )
     except KaggleError as error:
         message = _redact(str(error), os.environ)
         try:

@@ -53,7 +53,7 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
-  tpu:
+  tpu-submit:
     needs: prepare
     runs-on: ubuntu-latest
     timeout-minutes: 350
@@ -75,14 +75,60 @@ jobs:
           enable-cache: true
       - name: Install the locked Kaggle controller
         run: uv sync --locked --only-group ci-kaggle --python 3.14
-      - name: Confirm the release candidate on a Kaggle TPU
+      - name: Submit and wait through the first Kaggle TPU queue segment
         id: provider
         timeout-minutes: 330
         env:
           KAGGLE_API_TOKEN: ${{ secrets.KAGGLE_API_TOKEN }}
           KAGGLE_USERNAME: ${{ vars.KAGGLE_USERNAME }}
         run: >-
-          .venv/bin/python -u -m tools.kaggle_ci --binding tpu-release-binding.json
+          .venv/bin/python -u -m tools.kaggle_wait submit
+          --binding tpu-release-binding.json --output-dir release-artifacts/tpu-wait-segment-1
+      - name: Upload the first queue segment state
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: tpu-wait-segment-1-${{ github.run_attempt }}
+          path: release-artifacts/tpu-wait-segment-1/
+          if-no-files-found: error
+          retention-days: 30
+
+  tpu:
+    needs: [prepare, tpu-submit]
+    if: ${{ always() && !cancelled() && needs.prepare.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    environment: kaggle-tpu
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/download-artifact@v7
+        with:
+          name: tpu-release-binding-${{ github.run_attempt }}
+      - uses: actions/download-artifact@v7
+        with:
+          name: tpu-wait-segment-1-${{ github.run_attempt }}
+          path: tpu-wait-source
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.14"
+      - uses: astral-sh/setup-uv@v10.2.0
+        with:
+          version: "0.12.20"
+          enable-cache: true
+      - name: Install the locked Kaggle controller
+        run: uv sync --locked --only-group ci-kaggle --python 3.14
+      - name: Resume the exact Kaggle TPU submission and wait through the remaining queue budget
+        id: provider
+        timeout-minutes: 330
+        env:
+          KAGGLE_API_TOKEN: ${{ secrets.KAGGLE_API_TOKEN }}
+          KAGGLE_USERNAME: ${{ vars.KAGGLE_USERNAME }}
+        run: >-
+          .venv/bin/python -u -m tools.kaggle_wait continue
+          --binding tpu-release-binding.json --resume-dir tpu-wait-source
           --output-dir release-artifacts/tpu
       - name: Validate the bound TPU result
         if: always()
