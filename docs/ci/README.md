@@ -55,7 +55,9 @@ Publishing a GitHub Release starts `Build, validate and publish`. The workflow f
 
 The package is built once and its installed wheel is smoke-tested. Only after CPU CI and the build pass do Modal GPU and Kaggle TPU confirmation run in parallel. Each validates the same frozen SHA and workflow attempt, genuine devices and the existing numerical tolerances. Failure, cancellation, timeout, missing reports or insufficient free quota block PyPI publication; there is no paid fallback or automatic retry.
 
-The final `PyPI` job requires every gate to pass, rechecks the tag and downloads the validated distributions from the same workflow attempt without rebuilding. Its token is only provided to the upload step. Artefacts are scoped by attempt, so use **Re-run all jobs** after a failure to obtain a complete new confirmation. Neither release accelerator check writes a PR status.
+The final `PyPI` job requires every gate to pass, rechecks the tag and downloads the validated distributions from the same workflow attempt without rebuilding. Its token is only provided to the upload step, after the environment's required approval. Artefacts are scoped by attempt. Neither release accelerator check writes a PR status.
+
+If the published tag's controller needs fixing, merge the fix into protected `master`, then use [Recovering an existing release](release-recovery.md). This preserves the tag and reruns every gate on its original source with the repaired controller. Rerunning the original Actions run would still use the old controller. Before any new submission after a TPU timeout, confirm that the previous remote notebook has ended.
 
 To rehearse the publishing gates without creating a release, see [Rehearsing the publishing workflow](release-rehearsal.md).
 
@@ -78,6 +80,8 @@ These manual entries help diagnose account and device problems before a release.
 ### Collecting delayed TPU results
 
 When a publishing rehearsal passed its CPU, build and GPU gates but its TPU wait timed out, [Collect delayed TPU results](release-rehearsal.md#collecting-delayed-tpu-results) can retrieve the saved Kaggle result. A manual dispatch from `master` accepts the original workflow run ID, TPU source attempt and full candidate SHA. After this workflow is on `master`, a schedule checks eligible source runs every 30 minutes. GitHub Actions may delay scheduled runs, so the interval is not a guaranteed completion time. It scans only the previous seven days of `pypi.yml` runs and considers each run's latest attempt, after verifying the CPU, build and GPU gates passed and the TPU wait timed out. The manual collector remains available while original source artefacts are retained for 30 days.
+
+These collectors support ordinary releases and rehearsals whose controller and candidate commits match. Existing-tag recovery runs use separate commits and are excluded from periodic discovery; use their saved binding and controller state for a bounded status-only query, as described in the recovery guide.
 
 A pending Kaggle run is non-terminal: it produces evidence but no terminal marker, and a later scheduled scan can check it again; this does not fail the periodic job. A verified success or explicit remote failure is terminal and recorded so later scans skip that source attempt. An explicit remote failure fails that collection job once; API, authentication and validation errors also fail without creating a terminal marker. Neither path submits a notebook, consumes additional TPU quota, changes the original failed Actions attempt, satisfies a later release's TPU gate or publishes a package. The GitHub token is used only for GitHub evidence and is never placed in the Kaggle notebook.
 

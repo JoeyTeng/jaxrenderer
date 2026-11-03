@@ -108,8 +108,15 @@ def _require_credentials(env: dict[str, str]) -> str:
 
 
 def _read_quota(raw: str) -> float:
+    response = raw.strip()
+    if not response:
+        raise KaggleError("Kaggle quota response was empty")
+    if re.fullmatch(
+        r"no\s+quota\s+information\s+available\.?", response, re.IGNORECASE
+    ):
+        raise KaggleError("Kaggle quota information is unavailable")
     try:
-        rows = cast(JsonValue, json.loads(raw))
+        rows = cast(JsonValue, json.loads(response))
     except json.JSONDecodeError as error:
         raise KaggleError("Kaggle quota response was not valid JSON") from error
     if not isinstance(rows, list):
@@ -137,7 +144,7 @@ def _run_cli(
     args: list[str], *, env: dict[str, str], timeout: float = CLI_TIMEOUT_SECONDS
 ) -> subprocess.CompletedProcess[str]:
     """Run one CLI command with wall-clock and combined-output limits."""
-    command = [sys.executable, "-m", "kaggle", *args[1:]]
+    command = [sys.executable, "-m", "kaggle", "--no-warn", *args[1:]]
     try:
         process = subprocess.Popen(
             command,

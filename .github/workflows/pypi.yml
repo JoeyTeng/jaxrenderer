@@ -4,13 +4,19 @@ on:
   release:
     types: [published]
   workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Existing published tag to recover; leave empty for a rehearsal
+        required: false
+        default: ""
+        type: string
 
 permissions:
   contents: read
 
 # Never cancel a candidate while a remote accelerator run may still be active.
 concurrency:
-  group: publish-${{ github.event.release.tag_name || github.sha }}
+  group: publish-${{ inputs.release_tag || github.event.release.tag_name || github.sha }}
   cancel-in-progress: false
 
 jobs:
@@ -19,7 +25,9 @@ jobs:
     timeout-minutes: 5
     outputs:
       head_sha: ${{ steps.freeze.outputs.head_sha }}
-      version: ${{ steps.version.outputs.version }}
+      version: ${{ steps.candidate.outputs.version }}
+      publish: ${{ steps.candidate.outputs.publish }}
+      mode: ${{ steps.candidate.outputs.mode }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -29,44 +37,40 @@ jobs:
       - uses: actions/setup-python@v7
         with:
           python-version: "3.14"
+      - name: Select and bind the release candidate
+        id: candidate
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RECOVERY_TAG: ${{ inputs.release_tag }}
+        run: >-
+          python -m tools.release_candidate prepare --recovery-tag "$RECOVERY_TAG"
+          --output candidate-binding.json --github-output "$GITHUB_OUTPUT"
       - name: Freeze and validate the candidate
         id: freeze
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_COMMIT: ${{ github.sha }}
+          RELEASE_COMMIT: ${{ steps.candidate.outputs.head_sha }}
         run: >-
           python -m tools.release_tpu_gate prepare --commit "$RELEASE_COMMIT"
           --output release-binding.json --github-output "$GITHUB_OUTPUT"
-      - name: Read package version
-        id: version
-        run: |
-          python - <<'PY'
-          import os
-          import tomllib
-          from pathlib import Path
-
-          version = tomllib.loads(Path("pyproject.toml").read_text())["project"]["version"]
-          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
-              output.write(f"version={version}\n")
-          PY
-      - name: Check release tag version
-        if: github.event_name == 'release'
-        env:
-          RELEASE_TAG: ${{ github.event.release.tag_name }}
-          PACKAGE_VERSION: ${{ steps.version.outputs.version }}
-        run: |
-          python - <<'PY'
-          import os
-
-          version = os.environ["PACKAGE_VERSION"]
-          tag = os.environ["RELEASE_TAG"]
-          if tag.removeprefix("v") != version:
-              raise SystemExit(f"Release tag {tag!r} does not match project version {version!r}")
-          PY
       - uses: actions/upload-artifact@v7
         with:
           name: release-binding-${{ github.run_attempt }}
           path: release-binding.json
+          if-no-files-found: error
+          retention-days: 30
+      - uses: actions/upload-artifact@v7
+        with:
+          name: candidate-binding-${{ github.run_attempt }}
+          path: candidate-binding.json
+          if-no-files-found: error
+          retention-days: 30
+      - name: Mark the recovery source for delayed-collection discovery
+        if: steps.candidate.outputs.mode == 'recovery'
+        uses: actions/upload-artifact@v7
+        with:
+          name: recovery-source-binding-${{ github.run_attempt }}
+          path: candidate-binding.json
           if-no-files-found: error
           retention-days: 30
 
@@ -146,14 +150,14 @@ jobs:
 
   publish:
     needs: [prepare, cpu, build, gpu, tpu]
-    if: ${{ success() && github.event_name == 'release' }}
+    if: ${{ success() && needs.prepare.outputs.publish == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     environment: PyPI
     steps:
       - uses: actions/checkout@v7
         with:
-          ref: ${{ needs.prepare.outputs.head_sha }}
+          ref: ${{ github.sha }}
           persist-credentials: false
       - uses: actions/setup-python@v7
         with:
@@ -164,11 +168,17 @@ jobs:
       - uses: actions/download-artifact@v7
         with:
           name: release-binding-${{ github.run_attempt }}
+      - uses: actions/download-artifact@v7
+        with:
+          name: candidate-binding-${{ github.run_attempt }}
       - name: Recheck the tag and frozen workflow attempt
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_COMMIT: ${{ needs.prepare.outputs.head_sha }}
+          RECOVERY_TAG: ${{ inputs.release_tag }}
         run: |
+          python -m tools.release_candidate verify --binding candidate-binding.json \
+            --recovery-tag "$RECOVERY_TAG"
           python -m tools.release_tpu_gate prepare --commit "$RELEASE_COMMIT" \
             --output publish-binding.json --github-output "$GITHUB_OUTPUT"
           cmp release-binding.json publish-binding.json
@@ -183,13 +193,13 @@ jobs:
 
   rehearsal:
     needs: [prepare, cpu, build, gpu, tpu]
-    if: ${{ success() && github.event_name == 'workflow_dispatch' }}
+    if: ${{ success() && needs.prepare.outputs.publish == 'false' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
         with:
-          ref: ${{ needs.prepare.outputs.head_sha }}
+          ref: ${{ github.sha }}
           persist-credentials: false
       - uses: actions/setup-python@v7
         with:
@@ -197,11 +207,17 @@ jobs:
       - uses: actions/download-artifact@v7
         with:
           name: release-binding-${{ github.run_attempt }}
+      - uses: actions/download-artifact@v7
+        with:
+          name: candidate-binding-${{ github.run_attempt }}
       - name: Recheck the frozen workflow attempt
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_COMMIT: ${{ needs.prepare.outputs.head_sha }}
+          RECOVERY_TAG: ${{ inputs.release_tag }}
         run: |
+          python -m tools.release_candidate verify --binding candidate-binding.json \
+            --recovery-tag "$RECOVERY_TAG"
           python -m tools.release_tpu_gate prepare --commit "$RELEASE_COMMIT" \
             --output rehearsal-binding.json --github-output "$GITHUB_OUTPUT"
           cmp release-binding.json rehearsal-binding.json
