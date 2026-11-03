@@ -7,6 +7,12 @@ controller needs a fix, merge that fix into protected `master` and dispatch:
 gh workflow run pypi.yml --ref master -f release_tag=v0.5.0
 ```
 
+Before dispatching, check **Settings → Environments → PyPI**. If deployment refs
+are restricted, allow the `master` branch as well as the release tags matching
+`v*`; retain the required reviewer approval. Recovery uses the triggering
+`master` ref for environment access, even though it tests the original tag.
+See [account and environment setup](README.md#account-and-environment-setup).
+
 The non-empty `release_tag` selects publication recovery. Leaving it empty still
 runs a [rehearsal](release-rehearsal.md) without publishing. Recovery accepts only
 an already published release whose tag resolves to a commit in `master` history,

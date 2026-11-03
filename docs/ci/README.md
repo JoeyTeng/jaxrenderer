@@ -26,7 +26,7 @@ The tests require the requested JAX device and reject CPU fallback. TPU tests us
 
 ### Account and environment setup
 
-Create these environments under **Settings → Environments** in the GitHub repository. Allow `master` for manual checks and add a separate deployment tag rule for `v*` to both provider environments. The `PyPI` environment must also allow the release tags. Environment rules use the triggering ref, including when a release calls a reusable workflow. Provider credentials are used by the trusted controller and are not passed to the remote test process.
+Create these environments under **Settings → Environments** in the GitHub repository. Both provider environments and `PyPI` must allow the `master` branch and release tags matching `v*`. For selected deployment refs, add a branch rule for `master` and a separate tag rule for `v*`. An existing tag-only `PyPI` configuration needs the branch rule before using publication recovery. Retain its required reviewer approval. Environment rules use the triggering ref, including when a release calls a reusable workflow: recovery runs use `master`, while ordinary releases use their tag. Provider credentials are used by the trusted controller and are not passed to the remote test process.
 
 | Environment | Secrets | Variables |
 | --- | --- | --- |
