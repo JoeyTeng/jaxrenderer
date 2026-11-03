@@ -144,7 +144,7 @@ def _run_cli(
     args: list[str], *, env: dict[str, str], timeout: float = CLI_TIMEOUT_SECONDS
 ) -> subprocess.CompletedProcess[str]:
     """Run one CLI command with wall-clock and combined-output limits."""
-    command = [sys.executable, "-m", "kaggle", "--no-warn", *args[1:]]
+    command = [sys.executable, "-m", "tools.kaggle_cli", "--no-warn", *args[1:]]
     try:
         process = subprocess.Popen(
             command,
