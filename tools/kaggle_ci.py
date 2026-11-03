@@ -6,7 +6,9 @@ import argparse
 from collections.abc import Mapping
 from datetime import datetime, timezone
 import hashlib
+import importlib
 import json
+import math
 import os
 from pathlib import Path
 import re
@@ -20,6 +22,8 @@ from typing import Any, cast
 
 QUEUE_TIMEOUT_SECONDS = 285 * 60
 EXECUTION_TIMEOUT_SECONDS = 45 * 60
+RELAY_QUEUE_TIMEOUT_SECONDS = 22 * 60 * 60
+RELAY_SEGMENT_TIMEOUT_SECONDS = 345 * 60
 POLL_INTERVAL_SECONDS = 20
 CLI_TIMEOUT_SECONDS = 90
 MAX_CLI_OUTPUT_BYTES = 64 * 1024
@@ -248,8 +252,141 @@ def _append_controller_log(path: Path, value: dict[str, object]) -> None:
         stream.flush()
 
 
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
 def _timestamp() -> str:
-    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+    return _utc_now().isoformat(timespec="seconds")
+
+
+def _parse_timestamp(value: object, field: str) -> datetime:
+    if not isinstance(value, str):
+        raise KaggleError(f"resume state {field} is invalid")
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError as error:
+        raise KaggleError(f"resume state {field} is invalid") from error
+    if parsed.tzinfo is None:
+        raise KaggleError(f"resume state {field} is invalid")
+    return parsed.astimezone(timezone.utc)
+
+
+def _verify_version_one(binding: dict[str, object], state_path: Path) -> None:
+    """Run the collector's existing, version-pinned metadata check lazily."""
+    try:
+        collector = importlib.import_module("tools.kaggle_collect")
+        _ = collector.verify_version_one(binding, state_path)
+    except Exception as error:
+        if type(error).__name__ == "CollectionError":
+            raise KaggleError(str(error)) from error
+        if isinstance(error, KaggleError):
+            raise
+        raise KaggleError(
+            f"Kaggle version verification failed ({type(error).__name__})"
+        ) from error
+
+
+def _load_continuation_state(
+    binding: dict[str, object],
+    state_path: Path,
+    continue_state_path: Path,
+    output_dir: Path,
+    username: str,
+) -> tuple[dict[str, object], dict[str, Any] | None, float, float]:
+    if continue_state_path.resolve() != state_path.resolve():
+        raise KaggleError(
+            "--continue-state must be the controller state in --output-dir"
+        )
+    try:
+        stored_value: object = json.loads(state_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as error:
+        raise KaggleError(f"could not read continuation state: {error}") from error
+    if not isinstance(stored_value, dict):
+        raise KaggleError("continuation state has an unsupported controller schema")
+    state = cast(dict[str, object], stored_value)
+    if set(state) != CONTROLLER_STATE_FIELDS:
+        raise KaggleError("continuation state has an unsupported controller schema")
+    if state["binding"] != binding:
+        raise KaggleError("continuation state binding does not exactly match --binding")
+    kernel_id = state["kernel_id"]
+    run_tag = hashlib.sha256(
+        json.dumps(binding, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()[:16]
+    if (
+        type(state["submitted_version"]) is not int
+        or state["submitted_version"] != 1
+        or not isinstance(kernel_id, str)
+        or re.fullmatch(
+            rf"{re.escape(username)}/jaxr-{run_tag}-[0-9a-f]{{10}}", kernel_id
+        )
+        is None
+    ):
+        raise KaggleError("continuation state kernel identity or version is invalid")
+
+    phase = state["phase"]
+    status = state["status"]
+    outcome = state["outcome"]
+    if not isinstance(status, str):
+        raise KaggleError("continuation state status is invalid")
+    if not isinstance(phase, str) or phase not in {"queue", "execution"}:
+        raise KaggleError("continuation state phase is invalid")
+    if not isinstance(outcome, str):
+        raise KaggleError("continuation state outcome is invalid")
+    if state["last_error"] is not None:
+        raise KaggleError("continuation state contains a prior error")
+    for field in ("queue_elapsed_seconds", "execution_elapsed_seconds"):
+        value = state[field]
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise KaggleError(f"continuation state {field} is invalid")
+        number = value
+        if not math.isfinite(number) or number < 0:
+            raise KaggleError(f"continuation state {field} is invalid")
+    queue_elapsed = float(cast(int | float, state["queue_elapsed_seconds"]))
+    execution_elapsed = float(cast(int | float, state["execution_elapsed_seconds"]))
+    submitted_at = _parse_timestamp(state["submitted_at"], "submitted_at")
+    updated_at = _parse_timestamp(state["updated_at"], "updated_at")
+    phase_started_at = _parse_timestamp(state["phase_started_at"], "phase_started_at")
+    execution_started_value = state["execution_started_at"]
+    execution_started_at = (
+        None
+        if execution_started_value is None
+        else _parse_timestamp(execution_started_value, "execution_started_at")
+    )
+    if (
+        submitted_at > updated_at
+        or phase_started_at > updated_at
+        or (execution_started_at is not None and execution_started_at > updated_at)
+    ):
+        raise KaggleError("continuation state timestamps are inconsistent")
+    now = _utc_now()
+    if updated_at > now:
+        raise KaggleError("continuation state updated_at is in the future")
+
+    if outcome == "success":
+        if status not in TERMINAL_SUCCESS:
+            raise KaggleError("successful continuation state has no terminal success")
+        result = validate_downloaded_result(output_dir / "result.json", binding)
+        return state, result, queue_elapsed, execution_elapsed
+    if outcome != "handover":
+        raise KaggleError("continuation state is not eligible for handover")
+    if status not in IN_PROGRESS | {"submitted"}:
+        raise KaggleError("handover state does not contain an in-progress kernel")
+    if phase != ("execution" if execution_started_at is not None else "queue"):
+        raise KaggleError("handover state phase does not match its execution history")
+    if (output_dir / "result.json").exists():
+        raise KaggleError("handover output directory already contains result.json")
+    elapsed_gap = (now - updated_at).total_seconds()
+    if execution_started_at is None:
+        queue_elapsed = max(
+            queue_elapsed + elapsed_gap, (now - submitted_at).total_seconds()
+        )
+    else:
+        execution_elapsed = max(
+            execution_elapsed + elapsed_gap,
+            (now - execution_started_at).total_seconds(),
+        )
+    return state, None, queue_elapsed, execution_elapsed
 
 
 def _bootstrap_source(binding: dict[str, object], runner_path: Path) -> str:
@@ -418,44 +555,85 @@ def validate_downloaded_result(
     return cast(dict[str, Any], result)
 
 
-def _run(binding: dict[str, object], backend: str, output_dir: Path) -> dict[str, Any]:
-    """Submit one private TPU kernel and return its binding-checked result."""
+def _run(
+    binding: dict[str, object],
+    backend: str,
+    output_dir: Path,
+    *,
+    relay: bool = False,
+    continue_state_path: Path | None = None,
+    final_segment: bool = False,
+) -> dict[str, Any]:
+    """Submit or continue one private TPU kernel and validate its bound result."""
     binding = validate_binding(binding)
     if backend != "tpu":
         raise KaggleError("Kaggle adapter only supports the TPU backend")
+    if not relay and (continue_state_path is not None or final_segment):
+        raise KaggleError("continuation options require --relay")
+    if final_segment and continue_state_path is None:
+        raise KaggleError("--final-segment requires --continue-state")
     env = os.environ.copy()
     username = _require_credentials(env)
     output_dir.mkdir(parents=True, exist_ok=True)
-    if (output_dir / "result.json").exists():
-        raise KaggleError("output directory already contains result.json")
     state_path = output_dir / "kaggle-controller-state.json"
-    if state_path.exists():
-        raise KaggleError("output directory already contains controller state")
     log_path = output_dir / "kaggle-controller.log"
+    segment_started = time.monotonic()
+    segment_deadline = (
+        segment_started + RELAY_SEGMENT_TIMEOUT_SECONDS if relay else None
+    )
     runner_path = Path(__file__).with_name("accelerator_runner.py")
-    slug = _kernel_slug(binding)
-    kernel_id = f"{username}/{slug}"
-    state: dict[str, object] = {
-        "binding": binding,
-        "kernel_id": kernel_id,
-        "submitted_version": None,
-        "status": "not_submitted",
-        "phase": "quota_preflight",
-        "phase_started_at": _timestamp(),
-        "submitted_at": None,
-        "execution_started_at": None,
-        "updated_at": None,
-        "queue_elapsed_seconds": 0.0,
-        "execution_elapsed_seconds": 0.0,
-        "outcome": "pending",
-        "last_error": None,
-    }
+    continuation = continue_state_path is not None
     queue_started: float | None = None
     queue_finished: float | None = None
     execution_started: float | None = None
     execution_started_at: str | None = None
     execution_finished: float | None = None
+    queue_elapsed_base = 0.0
+    execution_elapsed_base = 0.0
     last_logged_state: tuple[object, object, object] | None = None
+
+    if continuation:
+        assert continue_state_path is not None
+        state, prior_result, queue_elapsed_base, execution_elapsed_base = (
+            _load_continuation_state(
+                binding,
+                state_path,
+                continue_state_path,
+                output_dir,
+                username,
+            )
+        )
+        if prior_result is not None:
+            return prior_result
+        kernel_id = cast(str, state["kernel_id"])
+        execution_started_at = cast(str | None, state["execution_started_at"])
+        if execution_started_at is None:
+            queue_started = segment_started
+        else:
+            execution_started = segment_started
+            queue_finished = segment_started
+    else:
+        if (output_dir / "result.json").exists():
+            raise KaggleError("output directory already contains result.json")
+        if state_path.exists():
+            raise KaggleError("output directory already contains controller state")
+        slug = _kernel_slug(binding)
+        kernel_id = f"{username}/{slug}"
+        state: dict[str, object] = {
+            "binding": binding,
+            "kernel_id": kernel_id,
+            "submitted_version": None,
+            "status": "not_submitted",
+            "phase": "quota_preflight",
+            "phase_started_at": _timestamp(),
+            "submitted_at": None,
+            "execution_started_at": None,
+            "updated_at": None,
+            "queue_elapsed_seconds": 0.0,
+            "execution_elapsed_seconds": 0.0,
+            "outcome": "pending",
+            "last_error": None,
+        }
 
     def persist(
         *,
@@ -470,32 +648,25 @@ def _run(binding: dict[str, object], backend: str, output_dir: Path) -> dict[str
         nonlocal last_logged_state
         current = time.monotonic() if now is None else now
         status = _redact(status, env)
-        phase_changed = phase != state["phase"]
-        if phase_changed:
+        if phase != state["phase"]:
             state["phase_started_at"] = _timestamp()
+        elapsed_queue = queue_elapsed_base
+        if queue_started is not None:
+            queue_end = queue_finished if queue_finished is not None else current
+            elapsed_queue += max(0.0, queue_end - queue_started)
+        elapsed_execution = execution_elapsed_base
+        if execution_started is not None:
+            execution_end = (
+                execution_finished if execution_finished is not None else current
+            )
+            elapsed_execution += max(0.0, execution_end - execution_started)
         state.update(
             status=status,
             phase=phase,
             outcome=outcome,
             updated_at=_timestamp(),
-            queue_elapsed_seconds=(
-                max(
-                    0.0,
-                    (queue_finished if queue_finished is not None else current)
-                    - queue_started,
-                )
-                if queue_started is not None
-                else 0.0
-            ),
-            execution_elapsed_seconds=(
-                max(
-                    0.0,
-                    (execution_finished if execution_finished is not None else current)
-                    - execution_started,
-                )
-                if execution_started is not None
-                else 0.0
-            ),
+            queue_elapsed_seconds=elapsed_queue,
+            execution_elapsed_seconds=elapsed_execution,
             last_error=last_error,
         )
         if isinstance(state["last_error"], str):
@@ -524,71 +695,132 @@ def _run(binding: dict[str, object], backend: str, output_dir: Path) -> dict[str
             print(line, flush=True)
             last_logged_state = key
 
+    def segment_handover(now: float, phase: str) -> dict[str, Any]:
+        error = "Kaggle relay controller segment reached its soft limit"
+        if final_segment:
+            persist(
+                status=str(state["status"]),
+                phase=phase,
+                outcome="segment_timeout",
+                now=now,
+                last_error=error,
+            )
+            raise KaggleError(f"{error}; final segment cannot continue")
+        persist(
+            status=str(state["status"]),
+            phase=phase,
+            outcome="handover",
+            now=now,
+        )
+        return {
+            "binding": binding,
+            "kernel_id": kernel_id,
+            "submitted_version": 1,
+            "success": False,
+            "pending": True,
+            "outcome": "handover",
+        }
+
     with tempfile.TemporaryDirectory(prefix="jaxrenderer-kaggle-") as temporary:
         config_dir = Path(temporary) / "config"
         config_dir.mkdir()
         env["KAGGLE_CONFIG_DIR"] = str(config_dir)
-        persist(status="not_submitted", phase="quota_preflight")
-        try:
-            quota = _command_ok(["kaggle", "quota", "--format", "json"], env=env)
-            _ = _read_quota(quota.stdout)
-        except KaggleError as error:
-            persist(
-                status="preflight_error",
-                phase="quota_preflight",
-                outcome="preflight_error",
-                last_error=str(error),
-            )
-            raise
+        if not continuation:
+            persist(status="not_submitted", phase="quota_preflight")
+            try:
+                quota = _command_ok(["kaggle", "quota", "--format", "json"], env=env)
+                _ = _read_quota(quota.stdout)
+            except KaggleError as error:
+                persist(
+                    status="preflight_error",
+                    phase="quota_preflight",
+                    outcome="preflight_error",
+                    last_error=str(error),
+                )
+                raise
 
-        kernel_dir = Path(temporary) / "kernel"
-        _make_kernel(kernel_dir, username, slug, binding, runner_path)
-        try:
-            pushed = _command_ok(
-                [
-                    "kaggle",
-                    "kernels",
-                    "push",
-                    "--path",
-                    str(kernel_dir),
-                    "--accelerator",
-                    "TpuV5E8",
-                    "--timeout",
-                    str(EXECUTION_TIMEOUT_SECONDS),
-                ],
-                env=env,
+            kernel_dir = Path(temporary) / "kernel"
+            _make_kernel(
+                kernel_dir,
+                username,
+                kernel_id.split("/", maxsplit=1)[1],
+                binding,
+                runner_path,
             )
-        except KaggleError as error:
+            try:
+                pushed = _command_ok(
+                    [
+                        "kaggle",
+                        "kernels",
+                        "push",
+                        "--path",
+                        str(kernel_dir),
+                        "--accelerator",
+                        "TpuV5E8",
+                        "--timeout",
+                        str(EXECUTION_TIMEOUT_SECONDS),
+                    ],
+                    env=env,
+                )
+            except KaggleError as error:
+                persist(
+                    status="submission_error",
+                    phase="submission",
+                    outcome="submission_error_unknown",
+                    now=time.monotonic(),
+                    last_error=str(error),
+                )
+                raise
+            version_match = VERSION_RE.search(pushed.stdout)
+            if version_match is None or version_match.group(1) != "1":
+                error = "fresh private Kaggle kernel did not report version 1"
+                persist(
+                    status="submission_version_unknown",
+                    phase="submission",
+                    outcome="submission_version_unknown",
+                    now=time.monotonic(),
+                    last_error=error,
+                )
+                raise KaggleError(error)
+            state["submitted_version"] = 1
+            queue_started = time.monotonic()
+            submitted_at = _timestamp()
+            queue_deadline = queue_started + (
+                RELAY_QUEUE_TIMEOUT_SECONDS if relay else QUEUE_TIMEOUT_SECONDS
+            )
+            execution_deadline: float | None = None
             persist(
-                status="submission_error",
-                phase="submission",
-                outcome="submission_error_unknown",
+                status="submitted",
+                phase="queue",
                 now=time.monotonic(),
-                last_error=str(error),
+                submitted_at=submitted_at,
             )
-            raise
-        version_match = VERSION_RE.search(pushed.stdout)
-        if version_match is None or version_match.group(1) != "1":
-            error = "fresh private Kaggle kernel did not report version 1"
-            persist(
-                status="submission_version_unknown",
-                phase="submission",
-                outcome="submission_version_unknown",
-                now=time.monotonic(),
-                last_error=error,
+        else:
+            queue_deadline = (
+                queue_started
+                + max(0.0, RELAY_QUEUE_TIMEOUT_SECONDS - queue_elapsed_base)
+                if queue_started is not None
+                else None
             )
-            raise KaggleError(error)
-        state["submitted_version"] = 1
-        queue_started = time.monotonic()
-        submitted_at = _timestamp()
-        queue_deadline = queue_started + QUEUE_TIMEOUT_SECONDS
-        execution_deadline: float | None = None
-        persist(
-            status="submitted",
-            phase="queue",
-            now=time.monotonic(),
-            submitted_at=submitted_at,
-        )
+            execution_deadline = (
+                execution_started
+                + max(0.0, EXECUTION_TIMEOUT_SECONDS - execution_elapsed_base)
+                if execution_started is not None
+                else None
+            )
+
+        if relay:
+            try:
+                _verify_version_one(binding, state_path)
+            except KaggleError as error:
+                persist(
+                    status=str(state["status"]),
+                    phase=str(state["phase"]),
+                    outcome="version_verification_error",
+                    last_error=str(error),
+                )
+                raise
+
         remote_failure = ""
         terminal_outcome = ""
         while True:
@@ -597,9 +829,10 @@ def _run(binding: dict[str, object], backend: str, output_dir: Path) -> dict[str
             deadline = (
                 execution_deadline if execution_started is not None else queue_deadline
             )
-            assert deadline is not None
-            remaining = deadline - now
-            if remaining <= 0:
+            if deadline is None:
+                raise KaggleError("Kaggle controller deadline was not initialised")
+            phase_remaining = deadline - now
+            if phase_remaining <= 0:
                 timeout_outcome = (
                     "execution_timeout"
                     if execution_started is not None
@@ -624,6 +857,15 @@ def _run(binding: dict[str, object], backend: str, output_dir: Path) -> dict[str
                 raise KaggleError(
                     f"{timeout_error}; the remote TPU session may continue because the CLI has no cancellation command"
                 )
+            segment_remaining = (
+                segment_deadline - now if segment_deadline is not None else None
+            )
+            if segment_remaining is not None and segment_remaining <= 0:
+                return segment_handover(now, phase)
+            remaining = min(
+                phase_remaining,
+                segment_remaining if segment_remaining is not None else phase_remaining,
+            )
             try:
                 status_result = _command_ok(
                     ["kaggle", "kernels", "status", kernel_id],
@@ -656,6 +898,12 @@ def _run(binding: dict[str, object], backend: str, output_dir: Path) -> dict[str
                     raise KaggleError(
                         f"{timeout_error}; the remote TPU session may continue because the CLI has no cancellation command"
                     ) from error
+                if (
+                    segment_deadline is not None
+                    and now >= segment_deadline
+                    and str(error) == "Kaggle CLI command exceeded its local timeout"
+                ):
+                    return segment_handover(now, phase)
                 persist(
                     status="cli_error",
                     phase=phase,
@@ -688,6 +936,8 @@ def _run(binding: dict[str, object], backend: str, output_dir: Path) -> dict[str
                 timeout_error = f"Kaggle {timeout_label} polling timed out"
                 if execution_started is None:
                     queue_finished = now
+                else:
+                    execution_finished = now
                 persist(
                     status=remote_status,
                     phase=phase,
@@ -701,12 +951,11 @@ def _run(binding: dict[str, object], backend: str, output_dir: Path) -> dict[str
             if execution_started is None and remote_status in ACTIVE:
                 execution_started = now
                 queue_finished = now
-                execution_deadline = execution_started + EXECUTION_TIMEOUT_SECONDS
+                execution_deadline = execution_started + max(
+                    0.0, EXECUTION_TIMEOUT_SECONDS - execution_elapsed_base
+                )
                 execution_started_at = _timestamp()
-            if execution_started is None:
-                current_phase = "queue"
-            else:
-                current_phase = "execution"
+            current_phase = "execution" if execution_started is not None else "queue"
             persist(
                 status=remote_status,
                 phase=current_phase,
@@ -766,12 +1015,26 @@ def _run(binding: dict[str, object], backend: str, output_dir: Path) -> dict[str
             )
             assert phase_deadline is not None
             remaining = phase_deadline - time.monotonic()
+            if segment_deadline is not None:
+                remaining = min(remaining, segment_deadline - time.monotonic())
             if remaining <= 0:
                 continue
             time.sleep(min(POLL_INTERVAL_SECONDS, remaining))
 
-        # CLI 2.2.4 accepts a version suffix but fetches output by slug. The
-        # random one-use slug and verified first version bind it to this run.
+        # The CLI accepts a version suffix but fetches output by slug. Relay
+        # mode checks Kaggle metadata before and after this same scoped fetch.
+        if relay:
+            try:
+                _verify_version_one(binding, state_path)
+            except KaggleError as error:
+                persist(
+                    status=str(state["status"]),
+                    phase=str(state["phase"]),
+                    outcome="version_verification_error",
+                    last_error=str(error),
+                )
+                raise
+        output_error: KaggleError | None = None
         try:
             _ = _command_ok(
                 [
@@ -788,23 +1051,36 @@ def _run(binding: dict[str, object], backend: str, output_dir: Path) -> dict[str
                 env=env,
             )
         except KaggleError as error:
+            output_error = error
+        if relay:
+            try:
+                _verify_version_one(binding, state_path)
+            except KaggleError as error:
+                persist(
+                    status=str(state["status"]),
+                    phase=str(state["phase"]),
+                    outcome="version_verification_error",
+                    last_error=str(error),
+                )
+                raise
+        if output_error is not None:
             if remote_failure:
                 persist(
                     status=str(state["status"]),
                     phase=str(state["phase"]),
                     outcome=terminal_outcome,
-                    last_error=f"{remote_failure}; output retrieval failed: {error}",
+                    last_error=f"{remote_failure}; output retrieval failed: {output_error}",
                 )
                 raise KaggleError(
-                    f"{remote_failure}; output retrieval failed: {error}"
-                ) from error
+                    f"{remote_failure}; output retrieval failed: {output_error}"
+                ) from output_error
             persist(
                 status=str(state["status"]),
                 phase=str(state["phase"]),
                 outcome="output_retrieval_error",
-                last_error=str(error),
+                last_error=str(output_error),
             )
-            raise
+            raise output_error
         if remote_failure:
             raise KaggleError(remote_failure)
     try:
@@ -826,11 +1102,26 @@ def _run(binding: dict[str, object], backend: str, output_dir: Path) -> dict[str
     return result
 
 
-def run(binding: dict[str, object], backend: str, output_dir: Path) -> dict[str, Any]:
+def run(
+    binding: dict[str, object],
+    backend: str,
+    output_dir: Path,
+    *,
+    relay: bool = False,
+    continue_state_path: Path | None = None,
+    final_segment: bool = False,
+) -> dict[str, Any]:
     """Run Kaggle and preserve a short failure diagnostic with its artefacts."""
     output_dir.mkdir(parents=True, exist_ok=True)
     try:
-        return _run(binding, backend, output_dir)
+        return _run(
+            binding,
+            backend,
+            output_dir,
+            relay=relay,
+            continue_state_path=continue_state_path,
+            final_segment=final_segment,
+        )
     except KaggleError as error:
         message = _redact(str(error), os.environ)
         try:
@@ -954,6 +1245,9 @@ def parser() -> argparse.ArgumentParser:
     _ = root.add_argument("--binding", type=Path, required=True)
     _ = root.add_argument("--output-dir", type=Path, required=True)
     _ = root.add_argument("--resume-state", type=Path)
+    _ = root.add_argument("--relay", action="store_true")
+    _ = root.add_argument("--continue-state", type=Path)
+    _ = root.add_argument("--final-segment", action="store_true")
     return root
 
 
@@ -962,10 +1256,19 @@ def main(argv: list[str] | None = None) -> int:
     try:
         binding = _load_binding_file(args.binding)
         if args.resume_state is not None:
+            if args.relay or args.continue_state is not None or args.final_segment:
+                raise KaggleError("--resume-state remains a status-only query")
             report = resume_status(binding, args.resume_state, args.output_dir)
             print(json.dumps(report, sort_keys=True))
             return 0
-        result = run(binding, "tpu", args.output_dir)
+        result = run(
+            binding,
+            "tpu",
+            args.output_dir,
+            relay=args.relay,
+            continue_state_path=args.continue_state,
+            final_segment=args.final_segment,
+        )
         print(json.dumps(result, sort_keys=True))
         return 0
     except KaggleError as error:

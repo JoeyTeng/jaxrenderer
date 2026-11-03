@@ -215,6 +215,45 @@ def _versioned_metadata(api: Any, request_type: Any, username: str, slug: str) -
     return version_number
 
 
+def verify_version_one(
+    binding: Mapping[str, object], controller_state_path: Path
+) -> int:
+    """Verify that the frozen controller kernel still has only version 1."""
+    token = ""
+    client = None
+    try:
+        checked_binding = validate_binding(dict(binding))
+        token, username = _credentials(os.environ)
+        kernel_id, submitted_version = _controller_identity(
+            checked_binding, Path(controller_state_path), username
+        )
+        if submitted_version != 1:
+            raise CollectionError(
+                "resume state kernel version is not controller version 1"
+            )
+        owner, slug = kernel_identity(checked_binding, kernel_id)
+        if owner != username:
+            raise CollectionError(
+                "resume state kernel identity does not match credentials"
+            )
+        client, get_request, _, _ = _load_sdk(token)
+        client = _bounded_client(client)
+        api = client.kernels.kernels_api_client
+        return _versioned_metadata(api, get_request, username, slug)
+    except Exception as error:
+        if isinstance(error, (CollectionError, KaggleError)):
+            detail = str(error)
+        else:
+            detail = f"Kaggle version verification failed ({type(error).__name__})"
+        raise CollectionError(_redact(detail, token)) from error
+    finally:
+        if client is not None and hasattr(client, "http_client"):
+            http_client = client.http_client()
+            session = getattr(http_client, "_session", None)
+            if session is not None:
+                session.close()
+
+
 def _remote_status(api: Any, request_type: Any, username: str, slug: str) -> str:
     request = request_type()
     request.user_name = username

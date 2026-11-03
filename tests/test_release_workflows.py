@@ -36,6 +36,21 @@ def checkout_steps(job: dict[str, Any]) -> list[dict[str, Any]]:
     ]
 
 
+def needs_list(job: dict[str, Any]) -> list[str]:
+    """Normalise GitHub's scalar and list forms for a single or multiple need."""
+    value = job["needs"]
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, list):
+        needs: list[str] = []
+        for item in cast(list[object], value):
+            if not isinstance(item, str):
+                raise AssertionError("workflow needs entries must be strings")
+            needs.append(item)
+        return needs
+    raise AssertionError("workflow needs must be a string or list of strings")
+
+
 def assert_checkout_precedes_run_steps(job: dict[str, Any]) -> None:
     steps = job["steps"]
     checkout_indexes = [
@@ -237,6 +252,7 @@ def test_release_checkouts_and_reusable_workflows_use_the_frozen_commit() -> Non
             step
             for step in provider_job["steps"]
             if step.get("uses", "").startswith("actions/download-artifact@")
+            and step.get("with", {}).get("name") == uploaded_bindings[0]["with"]["name"]
         ]
         assert len(uploaded_bindings) == len(downloaded_bindings) == 1
         binding_name = uploaded_bindings[0]["with"]["name"]
@@ -244,37 +260,107 @@ def test_release_checkouts_and_reusable_workflows_use_the_frozen_commit() -> Non
         assert downloaded_bindings[0]["with"]["name"] == binding_name
 
 
-def test_release_tpu_wait_budgets_fit_the_hosted_job_and_keep_failure_reports() -> None:
+def test_release_tpu_relay_fits_the_hosted_jobs_and_keeps_final_failure_reports() -> (
+    None
+):
     workflow = load_workflow("release-tpu.yml")
     jobs = workflow["jobs"]
-    tpu = jobs["tpu"]
-    provider = step_with_id(tpu, "provider")
+    stage_names = tuple(name for name in jobs if name != "prepare")
+    assert len(stage_names) == 4
+    assert stage_names[-1] == "tpu"
+    assert needs_list(jobs[stage_names[0]]) == ["prepare"]
+    for previous, current in zip(stage_names, stage_names[1:], strict=False):
+        assert needs_list(jobs[current]) == ["prepare", previous]
 
-    provider_seconds = int(provider["timeout-minutes"]) * 60
-    job_seconds = int(tpu["timeout-minutes"]) * 60
-    phase_seconds = (
-        kaggle_ci.QUEUE_TIMEOUT_SECONDS + kaggle_ci.EXECUTION_TIMEOUT_SECONDS
+    binding_artifact = next(
+        step["with"]["name"]
+        for step in jobs["prepare"]["steps"]
+        if step.get("uses", "").startswith("actions/upload-artifact@")
     )
-    # Keep 15 minutes in the provider step for bounded CLI calls and output collection.
-    assert provider_seconds - phase_seconds >= 15 * 60
-    # Keep 15 minutes outside the provider step for setup, finish and artefact upload.
-    assert job_seconds - provider_seconds >= 15 * 60
-    assert int(tpu["timeout-minutes"]) <= 360  # GitHub-hosted job maximum.
+    previous_state_artifact: str | None = None
+
+    for index, job_name in enumerate(stage_names, start=1):
+        job = jobs[job_name]
+        provider = step_with_id(job, "provider")
+        assert job["environment"] == "kaggle-tpu"
+        job_seconds = int(job["timeout-minutes"]) * 60
+        provider_seconds = int(provider["timeout-minutes"]) * 60
+        assert job_seconds <= 360 * 60
+        # Leave time for CLI polling/output collection and for setup/upload/finish.
+        assert provider_seconds - kaggle_ci.RELAY_SEGMENT_TIMEOUT_SECONDS >= 5 * 60
+        assert job_seconds - provider_seconds >= 10 * 60
+        assert provider["env"] == {
+            "KAGGLE_API_TOKEN": "${{ secrets.KAGGLE_API_TOKEN }}",
+            "KAGGLE_USERNAME": "${{ vars.KAGGLE_USERNAME }}",
+        }
+        assert_checkout_precedes_run_steps(job)
+        assert checkout_steps(job)[0]["with"]["ref"] == "${{ github.sha }}"
+        downloads = [
+            step
+            for step in job["steps"]
+            if step.get("uses", "").startswith("actions/download-artifact@")
+        ]
+        assert any(step["with"]["name"] == binding_artifact for step in downloads)
+        if index == 1:
+            assert "--relay" in provider["run"]
+            assert "--continue-state" not in provider["run"]
+        else:
+            assert "--relay" in provider["run"]
+            assert (
+                "--continue-state release-artifacts/tpu/kaggle-controller-state.json"
+                in provider["run"]
+            )
+            state_download = next(
+                step
+                for step in downloads
+                if step["with"].get("name") == previous_state_artifact
+            )
+            assert state_download["with"]["path"] == "release-artifacts/tpu/"
+        if index == len(stage_names):
+            assert "--final-segment" in provider["run"]
+        else:
+            assert "--final-segment" not in provider["run"]
+            assert not any(
+                step.get("if") == "always()"
+                and "PROVIDER_SUCCESS" in step.get("env", {})
+                for step in job["steps"]
+            )
+
+        uploads = [
+            step
+            for step in job["steps"]
+            if step.get("uses", "").startswith("actions/upload-artifact@")
+        ]
+        assert len(uploads) == 1
+        assert uploads[0]["if"] == "always()"
+        assert "release-artifacts/tpu/" in uploads[0]["with"]["path"]
+        assert "${{ github.run_attempt }}" in uploads[0]["with"]["name"]
+        previous_state_artifact = uploads[0]["with"]["name"]
+
+    relay_queue_seconds = kaggle_ci.RELAY_QUEUE_TIMEOUT_SECONDS
+    execution_seconds = kaggle_ci.EXECUTION_TIMEOUT_SECONDS
+    # Four job windows must cover all queue handovers and TPU execution.
+    assert relay_queue_seconds + execution_seconds <= len(stage_names) * (
+        kaggle_ci.RELAY_SEGMENT_TIMEOUT_SECONDS
+    )
     finish = next(
         step
-        for step in tpu["steps"]
+        for step in jobs["tpu"]["steps"]
         if step.get("if") == "always()" and "PROVIDER_SUCCESS" in step.get("env", {})
     )
     upload = next(
         step
-        for step in tpu["steps"]
+        for step in jobs["tpu"]["steps"]
         if step.get("uses", "").startswith("actions/upload-artifact@")
-        and "release-artifacts/tpu/" in step.get("with", {}).get("path", "")
+        and step.get("with", {}).get("name", "").startswith("release-tpu-${{")
     )
     assert finish["if"] == "always()"
     assert "continue-on-error" not in finish
     assert upload["if"] == "always()"
     assert upload["uses"].startswith("actions/upload-artifact@")
+    assert upload["with"]["name"] == (
+        "release-tpu-${{ needs.prepare.outputs.head_sha }}-${{ github.run_attempt }}"
+    )
 
 
 def test_cpu_reuse_requires_frozen_candidate_and_all_cpu_gates() -> None:
