@@ -313,6 +313,7 @@ def test_queue_timeout_persists_submitted_identity_without_downloading_output(
         "def run(binding, backend, output_dir):\n    return {}\n", encoding="utf-8"
     )
     monkeypatch.setattr(kaggle_ci, "__file__", str(tmp_path / "kaggle_ci.py"))
+    monkeypatch.setattr(kaggle_ci, "QUEUE_TIMEOUT_SECONDS", 5)
     monkeypatch.setattr(kaggle_ci, "POLL_INTERVAL_SECONDS", 3)
     fake_time = [0.0]
     monkeypatch.setattr(kaggle_ci.time, "monotonic", lambda: fake_time[0])
@@ -345,7 +346,7 @@ def test_queue_timeout_persists_submitted_identity_without_downloading_output(
 
     monkeypatch.setattr(kaggle_ci, "_command_ok", fake_command)
     with pytest.raises(kaggle_ci.KaggleError, match="queue polling timed out"):
-        _ = kaggle_ci.run(BINDING, "tpu", tmp_path / "output", queue_timeout_seconds=5)
+        _ = kaggle_ci.run(BINDING, "tpu", tmp_path / "output")
     assert sum(command[1:3] == ["kernels", "push"] for command in commands) == 1
     state = json.loads(
         (tmp_path / "output" / "kaggle-controller-state.json").read_text()

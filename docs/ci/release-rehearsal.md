@@ -31,12 +31,6 @@ step's environment. Those jobs retain their `modal-gpu` and `kaggle-tpu`
 environments. Only the release-only upload step assigns the PyPI token to its
 execution environment.
 
-The TPU queue budget is eight hours from the original submission, followed by a
-separate 45-minute execution budget. A still-queued notebook is handed to a
-second job after four hours, with the same binding, notebook version and workflow
-attempt. The handover also counts towards the queue budget. This continuation
-collects the existing notebook's result; it does not submit another notebook.
-
 If the TPU wait times out while queued or running, the remote state is unknown.
 The workflow records controller state and does not automatically resubmit. To
 inspect the original notebook, download `tpu-release-binding-<attempt>` and

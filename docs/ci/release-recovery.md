@@ -33,12 +33,6 @@ still requires the `PyPI` environment's approval and credential. There is no pai
 fallback or automatic retry. A successful GitHub Release alone does not establish
 that the version has reached PyPI.
 
-The TPU wait can span two jobs within the same recovery attempt, allowing up to
-eight hours in the queue without exceeding GitHub's per-job limit. The second
-job continues the original notebook and version from its saved state; it does
-not submit another notebook or restart the waiting budget. See the
-[TPU waiting budgets](README.md#account-and-environment-setup).
-
 ## A delayed TPU run
 
 An Actions timeout does not prove that the remote notebook has stopped. Inspect
