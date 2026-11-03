@@ -63,7 +63,9 @@ def test_publish_waits_for_every_release_gate_and_cannot_skip_failed_needs() -> 
     publish = jobs["publish"]
 
     assert set(publish["needs"]) == {"prepare", "cpu", "build", "gpu", "tpu"}
-    assert publish["if"] == "${{ success() && github.event_name == 'release' }}"
+    assert (
+        publish["if"] == "${{ success() && needs.prepare.outputs.publish == 'true' }}"
+    )
     assert jobs["gpu"]["needs"] == ["prepare", "cpu", "build"]
     assert jobs["tpu"]["needs"] == ["prepare", "cpu", "build"]
     assert jobs["gpu"]["secrets"] == "inherit"
@@ -79,11 +81,14 @@ def test_manual_rehearsal_shares_gates_and_cannot_publish() -> None:
     jobs = workflow["jobs"]
     rehearsal = jobs["rehearsal"]
 
-    assert workflow["on"]["workflow_dispatch"] in (None, {}, "")
+    tag_input = workflow["on"]["workflow_dispatch"]["inputs"]["release_tag"]
+    assert tag_input["required"] == "false"
+    assert tag_input["default"] == ""
+    assert tag_input["type"] == "string"
     assert set(rehearsal["needs"]) == {"prepare", "cpu", "build", "gpu", "tpu"}
     assert (
         rehearsal["if"]
-        == "${{ success() && github.event_name == 'workflow_dispatch' }}"
+        == "${{ success() && needs.prepare.outputs.publish == 'false' }}"
     )
     assert "environment" not in rehearsal
     assert all("PYPI_API_TOKEN" not in str(step) for step in rehearsal["steps"])
@@ -94,7 +99,13 @@ def test_manual_rehearsal_shares_gates_and_cannot_publish() -> None:
     )
 
     freeze = step_with_id(jobs["prepare"], "freeze")
-    assert freeze["env"]["RELEASE_COMMIT"] == "${{ github.sha }}"
+    assert freeze["env"]["RELEASE_COMMIT"] == "${{ steps.candidate.outputs.head_sha }}"
+    candidate = step_with_id(jobs["prepare"], "candidate")
+    assert candidate["env"]["RECOVERY_TAG"] == "${{ inputs.release_tag }}"
+    assert (
+        jobs["prepare"]["outputs"]["publish"]
+        == "${{ steps.candidate.outputs.publish }}"
+    )
 
     steps = rehearsal["steps"]
     binding_recheck = next(
@@ -108,26 +119,18 @@ def test_manual_rehearsal_shares_gates_and_cannot_publish() -> None:
         for index, step in enumerate(steps)
         if step.get("uses", "").startswith("actions/download-artifact@")
     ]
-    assert len(downloads) == 2 and binding_recheck < downloads[1]
+    assert len(downloads) == 3 and downloads[1] < binding_recheck < downloads[2]
     assert all(
         "${{ github.run_attempt }}" in steps[index]["with"]["name"]
         for index in downloads
     )
 
 
-def test_release_tag_check_is_release_only_and_smoke_uses_frozen_version(
+def test_candidate_version_drives_the_installed_wheel_smoke_check(
     tmp_path: Path,
 ) -> None:
     prepare = load_workflow("pypi.yml")["jobs"]["prepare"]
-    assert prepare["outputs"]["version"] == "${{ steps.version.outputs.version }}"
-
-    version = step_with_id(prepare, "version")
-    assert "GITHUB_OUTPUT" in version["run"]
-    tag_check = next(
-        step for step in prepare["steps"] if "RELEASE_TAG" in step.get("env", {})
-    )
-    assert tag_check["if"] == "github.event_name == 'release'"
-    assert tag_check["env"]["PACKAGE_VERSION"] == "${{ steps.version.outputs.version }}"
+    assert prepare["outputs"]["version"] == "${{ steps.candidate.outputs.version }}"
 
     smoke = next(
         step
@@ -192,8 +195,11 @@ def test_release_checkouts_and_reusable_workflows_use_the_frozen_commit() -> Non
     assert_checkout_precedes_run_steps(prepare)
     for checkout in prepare_checkouts:
         assert checkout["with"]["ref"] == "${{ github.sha }}"
-    for job_name in ("build", "publish"):
-        assert checkout_steps(release[job_name])[0]["with"]["ref"] == FROZEN_SHA
+    assert checkout_steps(release["build"])[0]["with"]["ref"] == FROZEN_SHA
+    for job_name in ("publish", "rehearsal"):
+        assert (
+            checkout_steps(release[job_name])[0]["with"]["ref"] == "${{ github.sha }}"
+        )
 
     for job_name in ("cpu", "gpu", "tpu"):
         assert release[job_name]["with"]["commit"] == FROZEN_SHA

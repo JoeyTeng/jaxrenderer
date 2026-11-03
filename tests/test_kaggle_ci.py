@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 import re
 import subprocess
+import sys
 from typing import Any, cast
 from unittest.mock import patch
 
@@ -61,6 +62,8 @@ def test_quota_requires_unambiguous_tpu_headroom() -> None:
     )
     for response in (
         "not json",
+        "",
+        "No quota information available",
         "[]",
         '[{"resource":"TPU","remaining":"unknown"}]',
         '[{"resource":"TPU","remaining":"0.74h"}]',
@@ -68,6 +71,74 @@ def test_quota_requires_unambiguous_tpu_headroom() -> None:
     ):
         with pytest.raises(kaggle_ci.KaggleError):
             _ = _private_helper("_read_quota")(response)
+
+
+def test_run_cli_places_no_warn_before_the_subcommand(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    actual_popen = subprocess.Popen
+    commands: list[list[str]] = []
+
+    def harmless_popen(command: list[str], **kwargs: object) -> subprocess.Popen[bytes]:
+        commands.append(command)
+        return cast(
+            Any,
+            actual_popen(
+                [sys.executable, "-c", "print('[]')"],
+                **cast(Any, kwargs),
+            ),
+        )
+
+    monkeypatch.setattr(kaggle_ci.subprocess, "Popen", harmless_popen)
+    result = _private_helper("_run_cli")(
+        ["kaggle", "quota", "--format", "json"], env={}
+    )
+
+    assert result.stdout == "[]\n"
+    assert commands == [
+        [sys.executable, "-m", "kaggle", "--no-warn", "quota", "--format", "json"]
+    ]
+
+
+@pytest.mark.parametrize(
+    ("quota_stdout", "expected_error"),
+    [
+        ("", "Kaggle quota response was empty"),
+        ("No quota information available", "Kaggle quota information is unavailable"),
+        (
+            f"not JSON; token={SYNTHETIC_API_KEY}; https://example.invalid/signed?sig=secret",
+            "Kaggle quota response was not valid JSON",
+        ),
+    ],
+)
+def test_quota_preflight_diagnostics_fail_closed_without_submitting(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    quota_stdout: str,
+    expected_error: str,
+) -> None:
+    authenticated(monkeypatch)
+    commands: list[list[str]] = []
+
+    def fake_command(args: list[str], *, env: dict[str, str], timeout: float = 90):
+        del env, timeout
+        commands.append(args)
+        return completed(args, quota_stdout)
+
+    monkeypatch.setattr(kaggle_ci, "_command_ok", fake_command)
+    with pytest.raises(kaggle_ci.KaggleError, match=expected_error):
+        _ = kaggle_ci.run(BINDING, "tpu", tmp_path / "output")
+
+    state_text = (tmp_path / "output" / "kaggle-controller-state.json").read_text()
+    log_text = (tmp_path / "output" / "kaggle-controller.log").read_text()
+    captured = capsys.readouterr().out
+    assert len(commands) == 1
+    assert commands[0][1:3] == ["quota", "--format"]
+    assert "kernels" not in " ".join(commands[0])
+    assert expected_error in state_text + log_text + captured
+    assert SYNTHETIC_API_KEY not in state_text + log_text + captured
+    assert "signed?sig=secret" not in state_text + log_text + captured
 
 
 def test_status_accepts_kaggle_worker_status_enum_output() -> None:

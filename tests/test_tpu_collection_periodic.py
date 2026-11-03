@@ -334,6 +334,8 @@ def test_discover_returns_exact_candidates_and_matrix(
         assert body is None
         if "actions/workflows/pypi.yml/runs?" in route:
             return {"total_count": 1, "workflow_runs": [run]}
+        if route.endswith(f"/actions/runs/{SOURCE_RUN}/artifacts?per_page=100&page=1"):
+            return {"total_count": 0, "artifacts": []}
         if route.endswith(f"/actions/runs/{SOURCE_RUN}"):
             return run
         if route.startswith(f"repos/{periodic.REPOSITORY}/actions/artifacts?"):
@@ -442,6 +444,8 @@ def test_discover_skips_only_explicitly_ineligible_sources(
     def api(route: str, body: object = None) -> Any:
         if "actions/workflows/pypi.yml/runs?" in route:
             return {"total_count": 1, "workflow_runs": [run]}
+        if route.endswith(f"/actions/runs/{SOURCE_RUN}/artifacts?per_page=100&page=1"):
+            return {"total_count": 0, "artifacts": []}
         if route.endswith(f"/actions/runs/{SOURCE_RUN}"):
             return run
         raise AssertionError(route)
@@ -487,6 +491,12 @@ def test_discover_skips_valid_legacy_source_and_keeps_timeout_candidate(
         assert body is None
         if "actions/workflows/pypi.yml/runs?" in route:
             return {"total_count": 2, "workflow_runs": [legacy_run, timeout_run]}
+        if route.endswith(
+            "/actions/runs/788/artifacts?per_page=100&page=1"
+        ) or route.endswith(
+            f"/actions/runs/{SOURCE_RUN}/artifacts?per_page=100&page=1"
+        ):
+            return {"total_count": 0, "artifacts": []}
         for run_id, run in runs.items():
             if route.endswith(f"/actions/runs/{run_id}"):
                 return run
@@ -553,6 +563,87 @@ def test_discover_skips_valid_legacy_source_and_keeps_timeout_candidate(
                 "source_attempt": SOURCE_ATTEMPT,
                 "commit": SOURCE_SHA,
             }
+        ]
+    }
+
+
+def test_discover_skips_recovery_marker_and_keeps_ordinary_candidate(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _set_periodic_context(monkeypatch)
+    ordinary_run = _run(run_id=788, attempt=1)
+    recovery_run = _run(run_id=790, attempt=2)
+    recovery_sha = "c" * 40
+    recovery_run["head_sha"] = recovery_sha
+    runs = {788: ordinary_run, 790: recovery_run}
+    prepared: list[str] = []
+
+    def api(route: str, body: object = None) -> Any:
+        assert body is None
+        if "actions/workflows/pypi.yml/runs?" in route:
+            return {"total_count": 2, "workflow_runs": [ordinary_run, recovery_run]}
+        for run_id, run in runs.items():
+            if route.endswith(f"/actions/runs/{run_id}"):
+                return run
+            if route.endswith(f"/actions/runs/{run_id}/artifacts?per_page=100&page=1"):
+                if run_id == 790:
+                    return {
+                        "total_count": 1,
+                        "artifacts": [
+                            {
+                                "id": 505,
+                                "name": "recovery-source-binding-2",
+                                "expired": False,
+                                "size_in_bytes": 512,
+                                "workflow_run": {"id": 790, "head_sha": recovery_sha},
+                            }
+                        ],
+                    }
+                return {"total_count": 0, "artifacts": []}
+        if route.startswith(f"repos/{periodic.REPOSITORY}/actions/artifacts?"):
+            return {"total_count": 0, "artifacts": []}
+        raise AssertionError(route)
+
+    def prepare(
+        source_run: str,
+        source_attempt: str,
+        commit: str,
+        output: Path,
+        github_output: Path,
+    ) -> dict[str, object]:
+        prepared.append(source_run)
+        output.mkdir(parents=True)
+        binding = _binding(source_run, source_attempt)
+        source: dict[str, object] = {
+            "source_run_id": int(source_run),
+            "source_attempt": int(source_attempt),
+            "head_sha": commit,
+            "collector_run_id": f"{COLLECTOR_RUN}.1",
+            "collector_sha": COLLECTOR_SHA,
+            "binding_artifact_id": 101,
+            "controller_artifact_id": 102,
+        }
+        _ = (output / "binding.json").write_text(json.dumps(binding), encoding="utf-8")
+        state = _controller_state()
+        _ = (output / "kaggle-controller-state.json").write_text(
+            json.dumps({**state, "binding": binding}), encoding="utf-8"
+        )
+        _ = (output / "collection-source.json").write_text(
+            json.dumps(source), encoding="utf-8"
+        )
+        _ = github_output.write_text("", encoding="utf-8")
+        return source
+
+    monkeypatch.setattr(accelerator_gate, "gh_api", api)
+    monkeypatch.setattr(collection_gate, "prepare", prepare)
+    monkeypatch.setattr(periodic, "_source_expired", _not_expired)
+
+    report = periodic.discover(tmp_path / "discovery", tmp_path / "github-output")
+
+    assert prepared == ["788"]
+    assert report["matrix"] == {
+        "include": [
+            {"source_run_id": "788", "source_attempt": "1", "commit": SOURCE_SHA}
         ]
     }
 

@@ -225,6 +225,60 @@ def _list_recent_runs(budget: _Budget) -> list[dict[str, object]]:
     return runs
 
 
+def _has_recovery_marker(run: dict[str, object], budget: _Budget) -> bool:
+    """Recognise a recovery source attempt by its owned marker artefact."""
+    run_id = run["id"]
+    attempt = run["run_attempt"]
+    marker_name = f"recovery-source-binding-{attempt}"
+    query = urlencode({"per_page": str(MAX_RUNS), "page": "1"})
+    budget.check()
+    page = accelerator_gate.gh_api(
+        f"repos/{REPOSITORY}/actions/runs/{run_id}/artifacts?{query}"
+    )
+    if not isinstance(page, dict):
+        raise PeriodicError("source artefact inventory is incomplete or too large")
+    page = cast(dict[str, object], page)
+    total = page.get("total_count")
+    items = page.get("artifacts")
+    if (
+        type(total) is not int
+        or total < 0
+        or total > MAX_RUNS
+        or not isinstance(items, list)
+        or total != len(cast(list[object], items))
+    ):
+        raise PeriodicError("source artefact inventory is incomplete or too large")
+    inventory = cast(list[object], items)
+    if any(not isinstance(item, dict) for item in inventory):
+        raise PeriodicError("source artefact metadata is malformed")
+    matches = [
+        cast(dict[str, object], item)
+        for item in inventory
+        if cast(dict[str, object], item).get("name") == marker_name
+    ]
+    if len(matches) > 1:
+        raise PeriodicError("multiple recovery markers have the same source identity")
+    if not matches:
+        return False
+    marker = matches[0]
+    owner = marker.get("workflow_run")
+    artifact_id = marker.get("id")
+    size = marker.get("size_in_bytes")
+    owner_map = cast(dict[str, object], owner) if isinstance(owner, dict) else {}
+    if (
+        type(artifact_id) is not int
+        or artifact_id <= 0
+        or type(size) is not int
+        or not 0 < size <= collection_gate.MAX_ARCHIVE_BYTES
+        or marker.get("expired") is not False
+        or not isinstance(owner, dict)
+        or owner_map.get("id") != run_id
+        or owner_map.get("head_sha") != run.get("head_sha")
+    ):
+        raise PeriodicError("recovery marker identity, size or availability is invalid")
+    return True
+
+
 def _terminal_artifact(
     source_run: int, artifact_name: str, budget: _Budget
 ) -> dict[str, object] | None:
@@ -436,6 +490,8 @@ def discover(output_dir: Path, github_output: Path) -> dict[str, object]:
                     raise PeriodicError("manual source run branch metadata is missing")
                 if branch != "master":
                     continue
+            if _has_recovery_marker(run, budget):
+                continue
             run_id, attempt = str(run["id"]), str(run["run_attempt"])
             commit = str(run["head_sha"])
             try:

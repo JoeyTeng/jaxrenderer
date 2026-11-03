@@ -8,6 +8,10 @@ inputs:
 gh workflow run pypi.yml --ref master
 ```
 
+Leave `release_tag` empty for a rehearsal. Supplying an existing published tag
+instead selects [publication recovery](release-recovery.md), which can enter
+the protected PyPI upload job after all gates pass.
+
 The rehearsal freezes `github.sha`, builds and smoke-tests the package, then
 runs both provider tests afresh. It uses the configured Modal and Kaggle
 environments, so it consumes Modal compute credits and Kaggle accelerator quota;
@@ -50,7 +54,7 @@ prove the remote run stopped.
 
 ## Collecting delayed TPU results
 
-For a rehearsal whose CPU, build and GPU gates passed but whose TPU wait timed out, use the original publishing run ID and attempt with the full commit SHA to ask the manual collector to retrieve the saved Kaggle state and result:
+For an ordinary release or rehearsal whose CPU, build and GPU gates passed but whose TPU wait timed out, use the original publishing run ID and attempt with the full commit SHA to ask the manual collector to retrieve the saved Kaggle state and result. The controller and candidate commits must match; existing-tag recovery runs are excluded from periodic discovery and are not supported by either collector.
 
 ```sh
 gh workflow run collect-tpu.yml --ref master \
