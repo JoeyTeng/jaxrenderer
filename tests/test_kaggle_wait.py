@@ -4,6 +4,7 @@ from datetime import datetime, timedelta, timezone
 import hashlib
 import json
 from pathlib import Path
+from typing import Callable
 
 import pytest
 from tools import kaggle_ci, kaggle_collect, kaggle_wait
@@ -168,6 +169,8 @@ def test_continue_polls_same_kernel_and_collects_result_without_submission(
     monotonic = [0.0]
     monkeypatch.setattr(kaggle_wait, "_utc_now", lambda: current[0])
     monkeypatch.setattr(kaggle_wait, "_monotonic", lambda: monotonic[0])
+    monkeypatch.setattr(kaggle_wait, "POLL_INTERVAL_SECONDS", 20)
+    monkeypatch.setattr(kaggle_wait, "POLL_INTERVAL_SECONDS", 20)
 
     def sleep(seconds: float) -> None:
         current[0] += timedelta(seconds=seconds)
@@ -178,12 +181,18 @@ def test_continue_polls_same_kernel_and_collects_result_without_submission(
     collector_dirs: list[Path] = []
 
     def collect(
-        binding: dict[str, object], state_path: Path, output_dir: Path
+        binding: dict[str, object],
+        state_path: Path,
+        output_dir: Path,
+        *,
+        on_status: Callable[[str], None] | None = None,
     ) -> dict[str, object]:
         assert binding == BINDING
         assert state_path.parent.name == "previous"
         collector_dirs.append(output_dir)
         status = next(statuses)
+        assert on_status is not None
+        on_status(status)
         return _report(
             output_dir,
             status,
@@ -229,12 +238,18 @@ def test_continue_applies_eight_hour_total_from_original_submission(
     calls = 0
 
     def collect(
-        binding: dict[str, object], state_path: Path, output_dir: Path
+        binding: dict[str, object],
+        state_path: Path,
+        output_dir: Path,
+        *,
+        on_status: Callable[[str], None] | None = None,
     ) -> dict[str, object]:
         nonlocal calls
         calls += 1
         current[0] += timedelta(seconds=15)
         monotonic[0] += 15
+        assert on_status is not None
+        on_status("queued")
         return _report(output_dir, "queued")
 
     monkeypatch.setattr(kaggle_collect, "collect", collect)
@@ -271,11 +286,18 @@ def test_execution_deadline_does_not_reset_when_status_returns_to_queued(
     calls = 0
 
     def collect(
-        binding: dict[str, object], state_path: Path, output_dir: Path
+        binding: dict[str, object],
+        state_path: Path,
+        output_dir: Path,
+        *,
+        on_status: Callable[[str], None] | None = None,
     ) -> dict[str, object]:
         nonlocal calls
         calls += 1
-        return _report(output_dir, next(statuses))
+        status = next(statuses)
+        assert on_status is not None
+        on_status(status)
+        return _report(output_dir, status)
 
     monkeypatch.setattr(kaggle_collect, "collect", collect)
     with pytest.raises(kaggle_ci.KaggleError, match="execution wait timed out"):
@@ -290,6 +312,131 @@ def test_execution_deadline_does_not_reset_when_status_returns_to_queued(
     assert state["status"] == "queued"
     assert state["outcome"] == "execution_timeout"
     assert state["execution_elapsed_seconds"] == 30
+
+
+@pytest.mark.parametrize("phase", ["queue", "execution"])
+def test_terminal_status_before_deadline_survives_slow_collection(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, phase: str
+) -> None:
+    monkeypatch.setenv("KAGGLE_USERNAME", "test-user")
+    current = [SUBMITTED + timedelta(seconds=kaggle_wait.FIRST_QUEUE_WAIT_SECONDS + 5)]
+    monotonic = [0.0]
+    monkeypatch.setattr(kaggle_wait, "_utc_now", lambda: current[0])
+    monkeypatch.setattr(kaggle_wait, "_monotonic", lambda: monotonic[0])
+    monkeypatch.setattr(kaggle_wait, "POLL_INTERVAL_SECONDS", 20)
+
+    def sleep(seconds: float) -> None:
+        current[0] += timedelta(seconds=seconds)
+        monotonic[0] += seconds
+
+    monkeypatch.setattr(kaggle_wait, "_sleep", sleep)
+    if phase == "queue":
+        queue_limit = kaggle_wait.FIRST_QUEUE_WAIT_SECONDS + 15
+        monkeypatch.setattr(kaggle_ci, "QUEUE_TIMEOUT_SECONDS", queue_limit)
+        delay = 20
+    else:
+        monkeypatch.setattr(kaggle_ci, "EXECUTION_TIMEOUT_SECONDS", 30)
+        delay = 20
+
+    calls = 0
+
+    def collect(
+        binding: dict[str, object],
+        state_path: Path,
+        output_dir: Path,
+        *,
+        on_status: Callable[[str], None] | None = None,
+    ) -> dict[str, object]:
+        nonlocal calls
+        calls += 1
+        assert on_status is not None
+        if phase == "execution" and calls == 1:
+            on_status("running")
+            return _report(output_dir, "running")
+        on_status("complete")
+        current[0] += timedelta(seconds=delay)
+        monotonic[0] += delay
+        return _report(output_dir, "complete", outcome="success", success=True)
+
+    monkeypatch.setattr(kaggle_collect, "collect", collect)
+    assert (
+        kaggle_wait.continue_wait(
+            _binding_file(tmp_path), _resume_dir(tmp_path), tmp_path / "output"
+        )
+        == 0
+    )
+    state = json.loads(
+        (tmp_path / "output" / "kaggle-controller-state.json").read_text()
+    )
+    assert state["outcome"] == "success"
+    assert state["queue_elapsed_seconds"] <= kaggle_ci.QUEUE_TIMEOUT_SECONDS
+    assert state["execution_elapsed_seconds"] <= kaggle_ci.EXECUTION_TIMEOUT_SECONDS
+
+
+def test_status_observed_after_queue_deadline_is_rejected(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("KAGGLE_USERNAME", "test-user")
+    current = [SUBMITTED + timedelta(seconds=kaggle_wait.FIRST_QUEUE_WAIT_SECONDS + 5)]
+    monotonic = [0.0]
+    monkeypatch.setattr(kaggle_wait, "_utc_now", lambda: current[0])
+    monkeypatch.setattr(kaggle_wait, "_monotonic", lambda: monotonic[0])
+    monkeypatch.setattr(
+        kaggle_ci, "QUEUE_TIMEOUT_SECONDS", kaggle_wait.FIRST_QUEUE_WAIT_SECONDS + 15
+    )
+
+    def collect(
+        binding: dict[str, object],
+        state_path: Path,
+        output_dir: Path,
+        *,
+        on_status: Callable[[str], None] | None = None,
+    ) -> dict[str, object]:
+        assert on_status is not None
+        current[0] += timedelta(seconds=20)
+        monotonic[0] += 20
+        on_status("complete")
+        return _report(output_dir, "complete", outcome="success", success=True)
+
+    monkeypatch.setattr(kaggle_collect, "collect", collect)
+    with pytest.raises(kaggle_ci.KaggleError, match="total queue wait timed out"):
+        _ = kaggle_wait.continue_wait(
+            _binding_file(tmp_path), _resume_dir(tmp_path), tmp_path / "output"
+        )
+    state = json.loads(
+        (tmp_path / "output" / "kaggle-controller-state.json").read_text()
+    )
+    assert state["status"] == "complete"
+    assert state["outcome"] == "queue_timeout"
+
+
+def test_invalid_output_after_terminal_status_remains_fatal(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("KAGGLE_USERNAME", "test-user")
+    current = [SUBMITTED + timedelta(seconds=kaggle_wait.FIRST_QUEUE_WAIT_SECONDS + 5)]
+    monotonic = [0.0]
+    monkeypatch.setattr(kaggle_wait, "_utc_now", lambda: current[0])
+    monkeypatch.setattr(kaggle_wait, "_monotonic", lambda: monotonic[0])
+
+    def collect(
+        binding: dict[str, object],
+        state_path: Path,
+        output_dir: Path,
+        *,
+        on_status: Callable[[str], None] | None = None,
+    ) -> dict[str, object]:
+        assert on_status is not None
+        on_status("complete")
+        _ = _report(output_dir, "complete", outcome="success", success=True)
+        _ = (output_dir / "result.json").write_text("{}", encoding="utf-8")
+        return json.loads((output_dir / "kaggle-collection-report.json").read_text())
+
+    monkeypatch.setattr(kaggle_collect, "collect", collect)
+    with pytest.raises(kaggle_ci.KaggleError, match="missing or unexpected fields"):
+        _ = kaggle_wait.continue_wait(
+            _binding_file(tmp_path), _resume_dir(tmp_path), tmp_path / "output"
+        )
 
 
 @pytest.mark.parametrize("invalid", ["binding", "future", "version", "nonfinite"])

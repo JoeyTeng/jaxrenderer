@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import argparse
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from datetime import datetime, timezone
 import hashlib
 import importlib
@@ -390,7 +390,11 @@ def _write_report(output_dir: Path, report: dict[str, Any]) -> None:
 
 
 def collect(
-    binding: Mapping[str, object], resume_state_path: Path, output_dir: Path
+    binding: Mapping[str, object],
+    resume_state_path: Path,
+    output_dir: Path,
+    *,
+    on_status: Callable[[str], None] | None = None,
 ) -> dict[str, Any]:
     """Collect only version 1 outputs from the frozen, already-submitted kernel."""
     output_dir = Path(output_dir)
@@ -442,6 +446,8 @@ def collect(
         _ = _versioned_metadata(api, get_request, username, slug)
         status = _remote_status(api, status_request, username, slug)
         report.update(status=status, remote_status=status, version_verified=True)
+        if on_status is not None:
+            on_status(status)
         if status in {
             "queued",
             "running",

@@ -214,6 +214,29 @@ def test_collect_requests_version_one_and_keeps_frozen_result_binding(
     )
 
 
+def test_collect_notifies_status_before_downloading_outputs(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _ = _install_fake_api(monkeypatch)
+    _install_files(monkeypatch)
+    state, output = _prepare(monkeypatch, tmp_path)
+    events: list[str] = []
+    original_download = _helper("_download_file")
+
+    def download(url: str, destination: Path, remaining: int) -> int:
+        events.append("download")
+        return original_download(url, destination, remaining)
+
+    monkeypatch.setattr(collector, "_download_file", download)
+    report = collector.collect(
+        BINDING, state, output, on_status=lambda status: events.append(status)
+    )
+
+    assert report["success"] is True
+    assert events[0] == "complete"
+    assert events[1] == "download"
+
+
 def test_optional_diagnostics_log_is_collected_when_present(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

@@ -313,12 +313,18 @@ def continue_wait(binding_path: Path, resume_dir: Path, output_dir: Path) -> int
     phase = "queue"
     last_updated = now
 
-    def record(outcome: str, last_error: str | None = None) -> None:
+    def record(
+        outcome: str,
+        last_error: str | None = None,
+        *,
+        observed_monotonic: float | None = None,
+    ) -> None:
         nonlocal last_event, last_updated
         last_updated = max(last_updated, _utc_now().astimezone(timezone.utc), submitted)
-        queue_elapsed_now = initial_elapsed + max(0.0, _monotonic() - start_monotonic)
+        clock = _monotonic() if observed_monotonic is None else observed_monotonic
+        queue_elapsed_now = initial_elapsed + max(0.0, clock - start_monotonic)
         execution_elapsed = (
-            max(0.0, _monotonic() - execution_started_mono)
+            max(0.0, clock - execution_started_mono)
             if execution_started_mono is not None
             else 0.0
         )
@@ -356,10 +362,11 @@ def continue_wait(binding_path: Path, resume_dir: Path, output_dir: Path) -> int
             print(json.dumps(event, sort_keys=True), flush=True)
             last_event = key
 
-    def check_deadline() -> None:
-        elapsed = initial_elapsed + max(0.0, _monotonic() - start_monotonic)
+    def check_deadline(observed_monotonic: float | None = None) -> None:
+        clock = _monotonic() if observed_monotonic is None else observed_monotonic
+        elapsed = initial_elapsed + max(0.0, clock - start_monotonic)
         execution_elapsed = (
-            max(0.0, _monotonic() - execution_started_mono)
+            max(0.0, clock - execution_started_mono)
             if execution_started_mono is not None
             else 0.0
         )
@@ -378,11 +385,23 @@ def continue_wait(binding_path: Path, resume_dir: Path, output_dir: Path) -> int
         record("pending")
 
         try:
+            observed_status: str | None = None
+            observed_monotonic: float | None = None
+            observed_at: datetime | None = None
+
+            def observe_status(value: str) -> None:
+                nonlocal observed_status, observed_monotonic, observed_at
+                observed_status = value
+                observed_monotonic = _monotonic()
+                observed_at = _utc_now().astimezone(timezone.utc)
+
             with tempfile.TemporaryDirectory(
                 prefix="jaxrenderer-kaggle-wait-"
             ) as temporary:
                 collector_dir = Path(temporary) / "collector"
-                report = kaggle_collect.collect(binding, state_path, collector_dir)
+                report = kaggle_collect.collect(
+                    binding, state_path, collector_dir, on_status=observe_status
+                )
                 _copy_files(
                     collector_dir,
                     output_dir,
@@ -392,10 +411,12 @@ def continue_wait(binding_path: Path, resume_dir: Path, output_dir: Path) -> int
             record("collection_error", "Kaggle collection failed")
             raise kaggle_ci.KaggleError("Kaggle collection failed") from error
 
-        now = max(last_updated, _utc_now().astimezone(timezone.utc), submitted)
-        elapsed = initial_elapsed + max(0.0, _monotonic() - start_monotonic)
+        if observed_status is None or observed_monotonic is None or observed_at is None:
+            record("collection_error", "Kaggle status observation was missing")
+            raise kaggle_ci.KaggleError("Kaggle collection did not observe a status")
+        elapsed = initial_elapsed + max(0.0, observed_monotonic - start_monotonic)
         execution_elapsed = (
-            max(0.0, _monotonic() - execution_started_mono)
+            max(0.0, observed_monotonic - execution_started_mono)
             if execution_started_mono is not None
             else 0.0
         )
@@ -415,10 +436,15 @@ def continue_wait(binding_path: Path, resume_dir: Path, output_dir: Path) -> int
             raise kaggle_ci.KaggleError(
                 "Kaggle collection did not verify controller version 1"
             )
-        check_deadline()
-
         outcome = report.get("outcome")
         remote_status = report.get("remote_status")
+        if remote_status != observed_status:
+            record("collection_error", "Kaggle status observation did not match report")
+            raise kaggle_ci.KaggleError(
+                "Kaggle status observation did not match collection report"
+            )
+        status = cast(str, observed_status)
+        check_deadline(observed_monotonic)
         if outcome == "success" and report.get("success") is True:
             _ = kaggle_ci.validate_downloaded_result(
                 output_dir / "result.json", binding
@@ -426,7 +452,7 @@ def continue_wait(binding_path: Path, resume_dir: Path, output_dir: Path) -> int
             status = cast(str, remote_status)
             if execution_started is None:
                 queue_finished_elapsed = elapsed
-            record("success")
+            record("success", observed_monotonic=observed_monotonic)
             print("Kaggle continuation collected a validated result.", flush=True)
             return 0
         if outcome == "remote_failure" or outcome == "collection_error":
@@ -448,8 +474,8 @@ def continue_wait(binding_path: Path, resume_dir: Path, output_dir: Path) -> int
                 "Kaggle continuation returned an unsupported status"
             )
         if remote_status in ACTIVE and execution_started is None:
-            execution_started = now
-            execution_started_mono = _monotonic()
+            execution_started = observed_at
+            execution_started_mono = observed_monotonic
             queue_finished_elapsed = elapsed
             phase = "execution"
         status = remote_status
