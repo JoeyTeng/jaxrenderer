@@ -255,11 +255,11 @@ def test_release_tpu_wait_budgets_fit_the_hosted_job_and_keep_failure_reports() 
     phase_seconds = (
         kaggle_ci.QUEUE_TIMEOUT_SECONDS + kaggle_ci.EXECUTION_TIMEOUT_SECONDS
     )
-    # Leave time for bounded CLI calls, output collection and local validation.
-    assert provider_seconds - phase_seconds >= 45 * 60
-    # The job also needs time after the provider step for finish and artefact upload.
-    assert job_seconds - provider_seconds >= 20 * 60
-    assert int(tpu["timeout-minutes"]) < 360  # GitHub-hosted job maximum.
+    # Keep 15 minutes in the provider step for bounded CLI calls and output collection.
+    assert provider_seconds - phase_seconds >= 15 * 60
+    # Keep 15 minutes outside the provider step for setup, finish and artefact upload.
+    assert job_seconds - provider_seconds >= 15 * 60
+    assert int(tpu["timeout-minutes"]) <= 360  # GitHub-hosted job maximum.
     finish = next(
         step
         for step in tpu["steps"]

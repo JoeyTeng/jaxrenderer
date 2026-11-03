@@ -56,7 +56,7 @@ jobs:
   tpu:
     needs: prepare
     runs-on: ubuntu-latest
-    timeout-minutes: 350
+    timeout-minutes: 360
     environment: kaggle-tpu
     steps:
       - uses: actions/checkout@v7
@@ -77,7 +77,7 @@ jobs:
         run: uv sync --locked --only-group ci-kaggle --python 3.14
       - name: Confirm the release candidate on a Kaggle TPU
         id: provider
-        timeout-minutes: 330
+        timeout-minutes: 345
         env:
           KAGGLE_API_TOKEN: ${{ secrets.KAGGLE_API_TOKEN }}
           KAGGLE_USERNAME: ${{ vars.KAGGLE_USERNAME }}
