@@ -96,7 +96,15 @@ def test_run_cli_places_no_warn_before_the_subcommand(
 
     assert result.stdout == "[]\n"
     assert commands == [
-        [sys.executable, "-m", "kaggle", "--no-warn", "quota", "--format", "json"]
+        [
+            sys.executable,
+            "-m",
+            "tools.kaggle_cli",
+            "--no-warn",
+            "quota",
+            "--format",
+            "json",
+        ]
     ]
 
 

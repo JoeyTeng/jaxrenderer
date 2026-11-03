@@ -46,3 +46,12 @@ commits. Recovery runs record a `recovery-source-binding-<attempt>` marker and
 are excluded from periodic discovery. Neither manual nor periodic collection
 currently supports recovery runs. A collected receipt cannot complete a later
 publication attempt's TPU gate.
+
+## Kaggle quota output
+
+Kaggle 2.2.4 authenticates during module import, before parsing `--no-warn`.
+Initialisation can therefore print notices before a quota command emits its
+JSON result. The controller's CLI adapter sends import-time output to standard
+error, keeping it separate from the command result. Both streams retain the
+existing size and time limits. Missing, unavailable or malformed quota data
+still blocks notebook submission; no quota value is inferred from notices.
