@@ -1,6 +1,7 @@
 from abc import ABC, abstractmethod
+from enum import Enum
 from functools import partial
-from typing import Generic, NamedTuple, TypeAlias, TypeVar, Union
+from typing import ClassVar, Generic, NamedTuple, TypeAlias, TypeVar
 
 from jax import Array
 import jax.lax as lax
@@ -13,7 +14,7 @@ from jaxtyping import (
     Shaped,
 )
 
-from ._meta_utils import add_tracing_name, is_array_type
+from ._meta_utils import add_tracing_name, is_array_type, typed_array
 from ._meta_utils import typed_jaxtyped as jaxtyped
 from ._meta_utils import typed_jit as jit
 from .geometry import Camera, Interpolation, interpolate
@@ -24,12 +25,14 @@ from .types import (
     BoolV,
     FloatV,
     IntV,
+    PixelState,
     Vec2f,
     Vec3f,
     Vec4f,
 )
 
 ID: TypeAlias = IntV
+_ONE_FLOAT_ARRAY: FloatV = typed_array(1.0)
 
 ShaderExtraInputT = TypeVar(
     "ShaderExtraInputT",
@@ -67,24 +70,35 @@ VaryingT = TypeVar(
     "VaryingT",
     bound=tuple[Shaped[Array, "..."], ...],
 )
-"""The user-defined input and second (extra) output of fragment shader."""
+"""Interpolated vertex output consumed by the fragment shader."""
 
 MixedExtraT = TypeVar(
     "MixedExtraT",
     bound=tuple[Shaped[Array, "..."], ...],
 )
-"""The user-defined second (extra) output of mix shader."""
+"""User-defined fragment target layout shared by fragment and mix stages."""
+
+
+class Fragment(NamedTuple, Generic[MixedExtraT]):
+    """Fragment targets and their opacity."""
+
+    targets: MixedExtraT
+    alpha: FloatV = _ONE_FLOAT_ARRAY
+
+
+class FragmentCollection(Enum):
+    """Primitive candidates retained for fragment processing."""
+
+    NEAREST = "nearest"
+    ALL = "all"
 
 
 class MixerOutput(NamedTuple):
-    """Built-in output from `Shader.mix`.
-
-    keep: bool, whether the output should be used to update buffers
-    zbuffer: store depth value, and the result is used to set zbuffer.
-    """
+    """Independent target and depth writes produced by mix."""
 
     keep: BoolV
     zbuffer: FloatV
+    write_depth: BoolV
 
 
 class Shader(ABC, Generic[ShaderExtraInputT, VaryingT, MixedExtraT]):
@@ -93,6 +107,8 @@ class Shader(ABC, Generic[ShaderExtraInputT, VaryingT, MixedExtraT]):
     Since JAX is pure functional (stateless), the state will be passed by
     returned values (the second return value in each function) in each process.
     """
+
+    fragment_collection: ClassVar[FragmentCollection] = FragmentCollection.NEAREST
 
     @staticmethod
     @jaxtyped
@@ -153,7 +169,7 @@ class Shader(ABC, Generic[ShaderExtraInputT, VaryingT, MixedExtraT]):
 
     @staticmethod
     @jaxtyped
-    @partial(jit, inline=True)
+    @partial(jit, static_argnames=("collection",), inline=True)
     @add_tracing_name
     def primitive_chooser(
         gl_FragCoord: Float[Array, "primitives 4"],
@@ -165,6 +181,7 @@ class Shader(ABC, Generic[ShaderExtraInputT, VaryingT, MixedExtraT]):
         barycentric_clip: Float[Array, "primitives 3"],
         *,
         double_sided: Bool[Array, "primitives"] | BoolV = FALSE_ARRAY,
+        collection: FragmentCollection = FragmentCollection.NEAREST,
     ) -> tuple[  #
         Float[Array, "kept_primitives 4"],  # gl_FragCoord
         Bool[Array, "kept_primitives"],  # gl_FrontFacing
@@ -205,6 +222,8 @@ class Shader(ABC, Generic[ShaderExtraInputT, VaryingT, MixedExtraT]):
           - barycentric_clip: barycentric coordinates in clip space of the
             point to interpolate
 
+        Candidate collection is selected statically by collection.
+
         Return:
           tuple of values from kept primitives, in same order and structure of
           the input parameters. The returned fields must be batched.
@@ -218,16 +237,30 @@ class Shader(ABC, Generic[ShaderExtraInputT, VaryingT, MixedExtraT]):
             Bool[Array, "primitives"],
         )
 
-        depths: Float[Array, "primitives"]
-        depths = jnp.where(
-            keeps & (gl_FrontFacing | double_sided_per_primitive),
+        eligible: Bool[Array, "primitives"] = keeps & (
+            gl_FrontFacing | double_sided_per_primitive
+        )
+        assert is_array_type(eligible, Bool[Array, "primitives"])
+
+        if collection is FragmentCollection.ALL or gl_FragCoord.shape[0] == 0:
+            return (
+                gl_FragCoord,
+                gl_FrontFacing,
+                gl_PointCoord,
+                eligible,
+                values,
+                barycentric_screen,
+                barycentric_clip,
+            )
+
+        depths: Float[Array, "primitives"] = jnp.where(
+            eligible,
             gl_FragCoord[:, 2],
             jnp.inf,
         )
         assert is_array_type(depths, Float[Array, "primitives"])
 
-        # when all keeps are false, all depths will be inf, and there will
-        # still be a valid idx generated, as promised by argmin.
+        # An all-false mask still selects a slot; its eligibility stays false.
         idx: IntV = jnp.argmin(depths)
         assert is_array_type(idx, IntV)
 
@@ -246,7 +279,7 @@ class Shader(ABC, Generic[ShaderExtraInputT, VaryingT, MixedExtraT]):
         assert is_array_type(_gl_FrontFacing, Bool[Array, "kept_primitives"])
         _gl_PointCoord: Float[Array, "kept_primitives 2"] = _get(gl_PointCoord)
         assert is_array_type(_gl_PointCoord, Float[Array, "kept_primitives 2"])
-        _keeps: Bool[Array, "kept_primitives"] = _get(keeps)
+        _keeps: Bool[Array, "kept_primitives"] = _get(eligible)
         assert is_array_type(_keeps, Bool[Array, "kept_primitives"])
         _values: VaryingT = tree_map(_get, values)
         _screen: Float[Array, "kept_primitives 3"] = _get(barycentric_screen)
@@ -304,47 +337,20 @@ class Shader(ABC, Generic[ShaderExtraInputT, VaryingT, MixedExtraT]):
         return varying
 
     @staticmethod
-    @jaxtyped
-    @partial(jit, inline=True)
-    @add_tracing_name
+    @abstractmethod
     def fragment(
         gl_FragCoord: Vec4f,
         gl_FrontFacing: BoolV,
         gl_PointCoord: Vec2f,
         varying: VaryingT,
         extra: ShaderExtraInputT,
-    ) -> tuple[PerFragment, VaryingT]:
-        """Override this to implement the vertex shader as defined by OpenGL.
+    ) -> tuple[PerFragment, Fragment[MixedExtraT]]:
+        """Convert interpolated values into fragment targets and opacity.
 
-        This is optional. The default implementation writes nothing and thus
-        `gl_FragDepth` further down the pipeline will use `gl_FragCoord[2]`.
-        For the `varying` input, it will be returned directly untouched.
-
-        If the output from this default implementation is re-used, noticed that
-        `use_default_depth` needs to be updated to False, otherwise the default
-        depth (`gl_FragCoord[2]`) will be used in further process.
-
-        Parameters:
-          - gl_FragCoord: homogeneous coordinates in screen device space.
-          - gl_FrontFacing: True if the primitive is NOT back facing.
-          - gl_PointCoord: 2d coordinates in screen device space.
-          - varying: interpolated values from `Shader.interpolate`; these are
-            generated from `Shader.vertex`.
-          - extra: ShaderExtraInputT, same as `extra` in `Shader.vertex`.
-
-        Return: PerFragment for depth test and further mixing process.
-          - gl_FragDepth: if not set (remains None), gl_FragCoord[2] will be
-            used later.
-          - varying: defined by user, passed as `varying` in `Shader.mix`.
-            **NOTE** the return type must be the same type as `values` in
-            `Shader.interpolate`, as that will be used as the dummy value for
-            this return value, when `PerFragment` suggests `keeps` is False.
-
-        Reference:
-          - [Fragment Shader/Defined Inputs](https://www.khronos.org/opengl/wiki/Fragment_Shader/Defined_Inputs)
-          - [Fragment Shader#Outputs](https://www.khronos.org/opengl/wiki/Fragment_Shader#Outputs)
+        Subclasses define this conversion. Use PassthroughShader when the
+        interpolated values already have the target layout.
         """
-        return PerFragment(use_default_depth=TRUE_ARRAY), varying
+        ...
 
     @staticmethod
     @jaxtyped
@@ -353,50 +359,28 @@ class Shader(ABC, Generic[ShaderExtraInputT, VaryingT, MixedExtraT]):
     def mix(
         gl_FragDepth: Float[Array, "kept_primitives"],
         keeps: Bool[Array, "kept_primitives"],
-        extra: VaryingT,
-    ) -> tuple[MixerOutput, Union[VaryingT, MixedExtraT]]:
-        """Override this to customise the mixing behaviour per fragment over
-            different primitives (triangles).
+        extra: Fragment[MixedExtraT],
+        *,
+        destination: PixelState[MixedExtraT],
+    ) -> tuple[MixerOutput, MixedExtraT]:
+        """Select the nearest kept fragment, preserving the destination otherwise."""
+        if gl_FragDepth.shape[0] == 0:
+            return (
+                MixerOutput(
+                    keep=FALSE_ARRAY,
+                    zbuffer=destination.zbuffer,
+                    write_depth=FALSE_ARRAY,
+                ),
+                destination.targets,
+            )
 
-        Use this to implement the `blending` behaviour if needed.
-
-        For the default behaviour, the values from fragment with minimum
-        `gl_FragDepth` value AND `keeps` being True will be used as the output.
-        In the default implementation, if no fragment has `keeps` being True,
-        then mixed value will be the an arbitrary fragment's value for both
-        `gl_FragDepth` and `extra`.
-
-        Returns: Built-in MixerOutput and user-defined extras.
-          - MixerOutput:
-            - keep: bool, whether uses this value to set the corresponding
-              pixel in the buffers
-            - zbuffer, the value used to update the zbuffer
-          - User-defined outputs, must be a tuple (can be NamedTuple)
-            Each field must be defined as same order as in the class `Buffers`.
-            The values will be directly set to the `Buffers` **in the same
-            order of the given definition** as if a usual `tuple`, but not
-            based on field name.
-            This type must be `MixedExtraT` when override; `VaryingT` is used for the
-            default implementation here simply due to the limitation that we cannot
-            know how to create a MixedExtraT from a VaryingT at this time.
-            TODO: figure out a better way to define these generics.
-
-        Reference:
-          - [Blending](https://www.khronos.org/opengl/wiki/Blending)
-        """
-
-        depths: Float[Array, "primitives"]
-        depths = jnp.where(
+        depths: Float[Array, "kept_primitives"] = jnp.where(
             keeps,
             gl_FragDepth,
             jnp.inf,
         )
-        assert is_array_type(depths, Float[Array, "primitives"])
-
-        # when all keeps are false, all depths will be inf, and there will
-        # still be a valid idx generated, as promised by argmin.
-        idx: IntV
-        idx = jnp.argmin(depths)
+        assert is_array_type(depths, Float[Array, "kept_primitives"])
+        idx: IntV = jnp.argmin(depths)
         assert is_array_type(idx, IntV)
 
         keep: BoolV = keeps[idx]
@@ -407,7 +391,34 @@ class Shader(ABC, Generic[ShaderExtraInputT, VaryingT, MixedExtraT]):
         def select(value: Array) -> Array:
             return value[idx]
 
+        selected_targets: MixedExtraT = tree_map(select, extra.targets)
+
         return (
-            MixerOutput(keep=keep, zbuffer=depth),
-            tree_map(select, extra),
+            MixerOutput(keep=keep, zbuffer=depth, write_depth=keep),
+            selected_targets,
+        )
+
+
+class PassthroughShader(
+    Shader[ShaderExtraInputT, VaryingT, VaryingT],
+    Generic[ShaderExtraInputT, VaryingT],
+):
+    """Shader base that uses interpolated values as fragment targets."""
+
+    @staticmethod
+    @jaxtyped
+    @partial(jit, inline=True)
+    @add_tracing_name
+    def fragment(
+        gl_FragCoord: Vec4f,
+        gl_FrontFacing: BoolV,
+        gl_PointCoord: Vec2f,
+        varying: VaryingT,
+        extra: ShaderExtraInputT,
+    ) -> tuple[PerFragment, Fragment[VaryingT]]:
+        """Keep interpolated target values and use fully opaque coverage."""
+        del gl_FragCoord, gl_FrontFacing, gl_PointCoord, extra
+        return (
+            PerFragment(use_default_depth=TRUE_ARRAY),
+            Fragment(targets=varying),
         )

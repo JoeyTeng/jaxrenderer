@@ -1,6 +1,6 @@
 from collections.abc import Sequence
 from functools import partial
-from typing import Any, NamedTuple, Optional, TypeAlias, TypeVar, Union
+from typing import NamedTuple, Optional, TypeAlias, Union
 
 import jax
 import jax.lax as lax
@@ -28,10 +28,12 @@ from .model import MergedModel, ModelObject, merge_objects
 from .pipeline import render
 from .shaders.phong_reflection import (
     PhongReflectionTextureExtraInput,
+    PhongReflectionTextureExtraMixerOutput,
     PhongReflectionTextureShader,
 )
 from .shaders.phong_reflection_shadow import (
     PhongReflectionShadowTextureExtraInput,
+    PhongReflectionShadowTextureExtraMixerOutput,
     PhongReflectionShadowTextureShader,
 )
 from .shadow import Shadow
@@ -50,8 +52,6 @@ from .types import (
 
 DoubleSidedFaces: TypeAlias = Bool[Array, "faces"]
 """Whether to render both sides of each face (triangle primitive)."""
-
-TargetT = TypeVar("TargetT", bound=tuple[Any])
 
 
 class CameraParameters(NamedTuple):
@@ -239,10 +239,10 @@ class Renderer:
         model: MergedModel,
         light: LightParameters,
         camera: Camera,
-        buffers: Buffers[TargetT],
+        buffers: Buffers[tuple[Canvas]],
         shadow_param: Optional[ShadowParameters] = None,
         loop_unroll: int = 1,
-    ) -> Buffers[TargetT]:
+    ) -> Buffers[tuple[Canvas]]:
         """Render the scene with the given camera.
 
         Parameters:
@@ -304,17 +304,20 @@ class Renderer:
 
         if shadow_param is None:
             # no shadows
-            buffers = render(
+            rendered = render(
                 camera=camera,
                 shader=PhongReflectionTextureShader,
-                buffers=buffers,
+                buffers=Buffers(
+                    zbuffer=buffers.zbuffer,
+                    targets=PhongReflectionTextureExtraMixerOutput(
+                        canvas=buffers.targets[0]
+                    ),
+                ),
                 face_indices=face_indices,
                 extra=extra,
                 loop_unroll=loop_unroll,
             )
-            assert isinstance(buffers, Buffers), f"{buffers}"
-
-            return buffers
+            return Buffers(zbuffer=rendered.zbuffer, targets=(rendered.targets.canvas,))
         else:
             # with shadows
             assert isinstance(shadow_param, ShadowParameters), f"{shadow_param}"
@@ -347,17 +350,23 @@ class Renderer:
             )
 
             # second pass: actual rendering
-            buffers = render(
+            rendered_shadow = render(
                 camera=camera,
                 shader=PhongReflectionShadowTextureShader,
-                buffers=buffers,
+                buffers=Buffers(
+                    zbuffer=buffers.zbuffer,
+                    targets=PhongReflectionShadowTextureExtraMixerOutput(
+                        canvas=buffers.targets[0]
+                    ),
+                ),
                 face_indices=face_indices,
                 extra=_extra,
                 loop_unroll=loop_unroll,
             )
-            assert isinstance(buffers, Buffers), f"{buffers}"
-
-            return buffers
+            return Buffers(
+                zbuffer=rendered_shadow.zbuffer,
+                targets=(rendered_shadow.targets.canvas,),
+            )
 
     @classmethod
     @jaxtyped

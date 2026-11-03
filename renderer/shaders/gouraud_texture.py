@@ -5,7 +5,6 @@ import jax.lax as lax
 import jax.numpy as jnp
 from jaxtyping import (
     Array,
-    Bool,
     Float,
 )
 
@@ -19,8 +18,18 @@ from .._meta_utils import (
 from .._meta_utils import typed_jaxtyped as jaxtyped
 from .._meta_utils import typed_jit as jit
 from ..geometry import Camera, normalise, to_homogeneous
-from ..shader import ID, MixerOutput, PerFragment, PerVertex, Shader
-from ..types import BoolV, Colour, FloatV, LightSource, Texture, Vec2f, Vec3f, Vec4f
+from ..shader import ID, Fragment, PerFragment, PerVertex, Shader
+from ..types import (
+    TRUE_ARRAY,
+    BoolV,
+    Colour,
+    FloatV,
+    LightSource,
+    Texture,
+    Vec2f,
+    Vec3f,
+    Vec4f,
+)
 
 
 class GouraudTextureExtraInput(NamedTuple):
@@ -109,20 +118,7 @@ class GouraudTextureShader(
         gl_PointCoord: Vec2f,
         varying: GouraudTextureExtraFragmentData,
         extra: GouraudTextureExtraInput,
-    ) -> tuple[PerFragment, GouraudTextureExtraFragmentData]:
-        built_in: PerFragment = Shader[
-            GouraudTextureExtraInput,
-            GouraudTextureExtraFragmentData,
-            GouraudTextureExtraMixerOutput,
-        ].fragment(
-            gl_FragCoord,
-            gl_FrontFacing,
-            gl_PointCoord,
-            varying,
-            extra,
-        )[0]
-        assert isinstance(built_in, PerFragment)
-
+    ) -> tuple[PerFragment, Fragment[GouraudTextureExtraMixerOutput]]:
         # repeat texture
         uv = lax.floor(varying.uv).astype(int)
         uv = uv % typed_asarray(extra.texture.shape[:2])
@@ -133,43 +129,15 @@ class GouraudTextureShader(
             PerFragment(
                 keeps=typed_array(
                     (
-                        built_in.keeps,
                         gl_FrontFacing,
                         (light_colour >= 0).all(),
                     )
                 ).all(),
-                use_default_depth=built_in.use_default_depth,
+                use_default_depth=TRUE_ARRAY,
             ),
-            GouraudTextureExtraFragmentData(
-                colour=texture_colour * light_colour,
-                uv=varying.uv,
+            Fragment(
+                targets=GouraudTextureExtraMixerOutput(
+                    canvas=texture_colour * light_colour,
+                ),
             ),
-        )
-
-    @staticmethod
-    @jaxtyped
-    @partial(jit, inline=True)
-    @add_tracing_name
-    def mix(
-        gl_FragDepth: Float[Array, "primitives"],
-        keeps: Bool[Array, "primitives"],
-        extra: GouraudTextureExtraFragmentData,
-    ) -> tuple[MixerOutput, GouraudTextureExtraMixerOutput]:
-        mixer_output: MixerOutput
-        extra_output: GouraudTextureExtraFragmentData
-        mixer_output, extra_output = Shader[
-            GouraudTextureExtraInput,
-            GouraudTextureExtraFragmentData,
-            GouraudTextureExtraFragmentData,
-        ].mix(
-            gl_FragDepth,
-            keeps,
-            extra,
-        )
-        assert isinstance(mixer_output, MixerOutput)
-        assert isinstance(extra_output, GouraudTextureExtraFragmentData)
-
-        return (
-            mixer_output,
-            GouraudTextureExtraMixerOutput(canvas=extra_output.colour),
         )

@@ -1,11 +1,10 @@
-from typing import NamedTuple, cast
+from typing import NamedTuple
 
 import jax
 import jax.lax as lax
 import jax.numpy as jnp
 from jaxtyping import (
     Array,
-    Bool,
     Float,
     jaxtyped,  # pyright: ignore[reportUnknownVariableType]
 )
@@ -14,9 +13,14 @@ import matplotlib.pyplot as plt
 from renderer import jit
 from renderer.geometry import Camera, normalise, to_homogeneous
 from renderer.pipeline import render
-from renderer.shader import ID, MixerOutput, PerFragment, PerVertex, Shader
-from renderer.shaders.gouraud import GouraudExtraInput, GouraudShader
+from renderer.shader import ID, Fragment, PerFragment, PerVertex, Shader
+from renderer.shaders.gouraud import (
+    GouraudExtraInput,
+    GouraudExtraMixerOutput,
+    GouraudShader,
+)
 from renderer.types import (
+    TRUE_ARRAY,
     BoolV,
     Buffers,
     Colour,
@@ -55,7 +59,7 @@ camera: Camera = Camera.create(
 
 buffers = Buffers(
     zbuffer=lax.full((width, height), 1.0),
-    targets=(lax.full((width, height, 3), 0.0),),
+    targets=GouraudExtraMixerOutput(canvas=lax.full((width, height, 3), 0.0)),
 )
 face_indices = jnp.array(  # pyright: ignore[reportUnknownMemberType]
     (
@@ -155,11 +159,7 @@ class _Shader(Shader[ExtraInput, ExtraFragmentData, ExtraMixerOutput]):
         gl_PointCoord: Vec2f,
         varying: ExtraFragmentData,
         extra: ExtraInput,
-    ) -> tuple[PerFragment, ExtraFragmentData]:
-        built_in: PerFragment
-        built_in, _varying = Shader[
-            ExtraInput, ExtraFragmentData, ExtraMixerOutput
-        ].fragment(gl_FragCoord, gl_FrontFacing, gl_PointCoord, varying, extra)
+    ) -> tuple[PerFragment, Fragment[ExtraMixerOutput]]:
         texture_colour: Colour = varying.colour
         a = jnp.modf(varying.uv)[0] < 0.5  # pyright: ignore[reportUnknownMemberType]
         texture_colour = jnp.where(
@@ -169,31 +169,8 @@ class _Shader(Shader[ExtraInput, ExtraFragmentData, ExtraMixerOutput]):
         )
 
         return (
-            built_in,
-            ExtraFragmentData(colour=texture_colour, uv=varying.uv),
-        )
-
-    @staticmethod
-    @jaxtyped
-    @jit
-    def mix(
-        gl_FragDepth: Float[Array, "primitives"],
-        keeps: Bool[Array, "primitives"],
-        extra: ExtraFragmentData,
-    ) -> tuple[MixerOutput, ExtraMixerOutput]:
-        mixer_output: MixerOutput
-        extra_output: ExtraFragmentData
-        mixer_output, extra_output = cast(
-            tuple[MixerOutput, ExtraFragmentData],
-            Shader[ExtraInput, ExtraFragmentData, ExtraMixerOutput].mix(
-                gl_FragDepth, keeps, extra
-            ),
-        )
-        assert isinstance(extra_output, ExtraFragmentData)
-
-        return (
-            mixer_output,
-            ExtraMixerOutput(canvas=extra_output.colour),
+            PerFragment(use_default_depth=TRUE_ARRAY),
+            Fragment(targets=ExtraMixerOutput(canvas=texture_colour)),
         )
 
 
@@ -218,7 +195,7 @@ camera: Camera = Camera.create(
 
 buffers = Buffers(
     zbuffer=lax.full((width, height), 1.0),
-    targets=(lax.full((width, height, 3), 0.0),),
+    targets=ExtraMixerOutput(canvas=lax.full((width, height, 3), 0.0)),
 )
 face_indices = jnp.array(((0, 1, 2),))  # pyright: ignore[reportUnknownMemberType]
 position = jnp.array(  # pyright: ignore[reportUnknownMemberType]

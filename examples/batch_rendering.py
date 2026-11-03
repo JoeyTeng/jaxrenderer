@@ -4,7 +4,6 @@ from typing import cast
 
 import jax
 import jax.numpy as jnp
-from jaxtyping import Array, Float
 import matplotlib.animation as animation
 import matplotlib.figure as figure
 import matplotlib.image as mimage
@@ -89,7 +88,7 @@ merged_models = [merge_objects([scene.objects[obj_id]]) for obj_id in capsule_ob
 buffers = Renderer.create_buffers(width, height, len(capsule_obj_ids))
 camera = Renderer.create_camera_from_parameters(camera_params)
 
-_, (images,) = jax.vmap(  # pyright: ignore[reportUnknownVariableType]
+_, (images,) = jax.vmap(
     lambda model, buffer: Renderer.render(  # pyright: ignore
         model=model,  # pyright: ignore[reportUnknownArgumentType]
         light=light,
@@ -108,8 +107,8 @@ fig, ax = plt.subplots()  # pyright: ignore
 # current frame; here we are just animating one artist, the image, in
 # each frame
 ims: list[list[mimage.AxesImage]] = []
-for i in range(cast(Float[Array, "_b _w _h _c"], images).shape[0]):
-    img = cast(Float[Array, "_w _h _c"], images[i])
+for i in range(images.shape[0]):
+    img = images[i]
     im = cast(
         mimage.AxesImage,
         ax.imshow(transpose_for_display(img), animated=True),  # pyright: ignore[reportUnknownMemberType]

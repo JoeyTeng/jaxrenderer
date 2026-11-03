@@ -12,7 +12,7 @@ from .._meta_utils import add_tracing_name, is_array_type
 from .._meta_utils import typed_jaxtyped as jaxtyped
 from .._meta_utils import typed_jit as jit
 from ..geometry import Camera, to_homogeneous
-from ..shader import ID, MixerOutput, PerFragment, PerVertex, Shader
+from ..shader import ID, Fragment, FragmentCollection, PerFragment, PerVertex, Shader
 from ..types import FALSE_ARRAY, TRUE_ARRAY, BoolV, Vec2f, Vec3f, Vec4f
 
 
@@ -79,7 +79,7 @@ class DepthShader(
 
     @staticmethod
     @jaxtyped
-    @partial(jit, inline=True)
+    @partial(jit, static_argnames=("collection",), inline=True)
     @add_tracing_name
     @override
     def primitive_chooser(
@@ -92,6 +92,7 @@ class DepthShader(
         barycentric_clip: Float[Array, "primitives 3"],
         *,
         double_sided: Bool[Array, "primitives"] | BoolV = FALSE_ARRAY,
+        collection: FragmentCollection = FragmentCollection.NEAREST,
     ) -> tuple[
         Float[Array, "kept_primitives 4"],
         Bool[Array, "kept_primitives"],
@@ -114,6 +115,7 @@ class DepthShader(
             barycentric_screen,
             barycentric_clip,
             double_sided=double_sided | values.double_sided[:, 0],
+            collection=collection,
         )
 
     @staticmethod
@@ -127,28 +129,11 @@ class DepthShader(
         gl_PointCoord: Vec2f,
         varying: DepthExtraFragmentData,
         extra: DepthExtraInput,
-    ) -> tuple[PerFragment, DepthExtraFragmentData]:
+    ) -> tuple[PerFragment, Fragment[DepthExtraMixerOutput]]:
         return (
             PerFragment(
                 keeps=gl_FrontFacing | varying.double_sided,
                 use_default_depth=TRUE_ARRAY,
             ),
-            varying,
+            Fragment(targets=DepthExtraMixerOutput()),
         )
-
-    @staticmethod
-    @jaxtyped
-    @partial(jit, inline=True)
-    @add_tracing_name
-    @override
-    def mix(
-        gl_FragDepth: Float[Array, "kept_primitives"],
-        keeps: Bool[Array, "kept_primitives"],
-        extra: DepthExtraFragmentData,
-    ) -> tuple[MixerOutput, DepthExtraMixerOutput]:
-        mixed = Shader[
-            DepthExtraInput,
-            DepthExtraFragmentData,
-            DepthExtraMixerOutput,
-        ].mix(gl_FragDepth, keeps, extra)
-        return mixed[0], DepthExtraMixerOutput()

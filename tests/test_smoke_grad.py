@@ -17,7 +17,11 @@ from renderer import (
     render,
 )
 from renderer._meta_utils import typed_array, typed_asarray, typed_grad, typed_zeros
-from renderer.shaders.gouraud import GouraudExtraInput, GouraudShader
+from renderer.shaders.gouraud import (
+    GouraudExtraInput,
+    GouraudExtraMixerOutput,
+    GouraudShader,
+)
 from renderer.types import FloatV
 
 
@@ -68,8 +72,8 @@ buffers = Buffers(
         (width, height),
         0.0,
     ),
-    targets=(
-        lax.full(
+    targets=GouraudExtraMixerOutput(
+        canvas=lax.full(
             (width, height, 3),
             0.0,
         ),

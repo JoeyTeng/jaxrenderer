@@ -1,10 +1,9 @@
-from typing import NamedTuple, cast
+from typing import NamedTuple
 
 import jax.lax as lax
 import jax.numpy as jnp
 from jaxtyping import (
     Array,
-    Bool,
     Float,
 )
 
@@ -20,9 +19,14 @@ from renderer._meta_utils import (
 )
 from renderer.geometry import Camera, normalise, to_homogeneous
 from renderer.pipeline import render
-from renderer.shader import ID, MixerOutput, PerFragment, PerVertex, Shader
-from renderer.shaders.gouraud import GouraudExtraInput, GouraudShader
+from renderer.shader import ID, Fragment, PerFragment, PerVertex, Shader
+from renderer.shaders.gouraud import (
+    GouraudExtraInput,
+    GouraudExtraMixerOutput,
+    GouraudShader,
+)
 from renderer.types import (
+    TRUE_ARRAY,
     BoolV,
     Buffers,
     Colour,
@@ -68,8 +72,8 @@ def test_render_batched_triangles():
             (width, height),
             default_z,
         ),
-        targets=(
-            lax.full(
+        targets=GouraudExtraMixerOutput(
+            canvas=lax.full(
                 (width, height, 3),
                 default_ch,
             ),
@@ -120,7 +124,8 @@ def test_render_batched_triangles():
     assert len(result) == 2, "The result should be a tuple of two elements"
     assert len(result[1]) == 1, "The resultant attachment should has only one canvas"
 
-    zbuffer, (canvas,) = result
+    zbuffer, targets = result
+    canvas = targets.canvas
     zbuffer = transpose_for_display(zbuffer)
     canvas = transpose_for_display(canvas)
 
@@ -206,11 +211,8 @@ class _Shader(Shader[ExtraInput, ExtraFragmentData, ExtraMixerOutput]):
         gl_PointCoord: Vec2f,
         varying: ExtraFragmentData,
         extra: ExtraInput,
-    ) -> tuple[PerFragment, ExtraFragmentData]:
-        built_in: PerFragment
-        built_in, _varying = Shader[
-            ExtraInput, ExtraFragmentData, ExtraMixerOutput
-        ].fragment(gl_FragCoord, gl_FrontFacing, gl_PointCoord, varying, extra)
+    ) -> tuple[PerFragment, Fragment[ExtraMixerOutput]]:
+        del gl_FragCoord, gl_FrontFacing, gl_PointCoord, extra
         texture_colour: Colour = varying.colour
         a = typed_modf(varying.uv)[0] < 0.5
         texture_colour = jnp.where(
@@ -220,31 +222,8 @@ class _Shader(Shader[ExtraInput, ExtraFragmentData, ExtraMixerOutput]):
         )
 
         return (
-            built_in,
-            ExtraFragmentData(colour=texture_colour, uv=varying.uv),
-        )
-
-    @staticmethod
-    @jaxtyped
-    @jit
-    def mix(
-        gl_FragDepth: Float[Array, "primitives"],
-        keeps: Bool[Array, "primitives"],
-        extra: ExtraFragmentData,
-    ) -> tuple[MixerOutput, ExtraMixerOutput]:
-        mixer_output: MixerOutput
-        extra_output: ExtraFragmentData
-        mixer_output, extra_output = cast(
-            tuple[MixerOutput, ExtraFragmentData],
-            Shader[ExtraInput, ExtraFragmentData, ExtraMixerOutput].mix(
-                gl_FragDepth, keeps, extra
-            ),
-        )
-        assert isinstance(extra_output, ExtraFragmentData)
-
-        return (
-            mixer_output,
-            ExtraMixerOutput(canvas=extra_output.colour),
+            PerFragment(use_default_depth=TRUE_ARRAY),
+            Fragment(targets=ExtraMixerOutput(canvas=texture_colour)),
         )
 
 
@@ -281,8 +260,8 @@ def test_perspective_interpolation():
             (width, height),
             1.0,
         ),
-        targets=(
-            lax.full(
+        targets=ExtraMixerOutput(
+            canvas=lax.full(
                 (width, height, 3),
                 0.0,
             ),
@@ -326,7 +305,8 @@ def test_perspective_interpolation():
     assert len(result) == 2, "The result should be a tuple of two elements"
     assert len(result[1]) == 1, "The resultant attachment should has only one canvas"
 
-    zbuffer, (canvas,) = result
+    zbuffer, targets = result
+    canvas = targets.canvas
     zbuffer = transpose_for_display(zbuffer)
     canvas = transpose_for_display(canvas)
 
@@ -397,15 +377,16 @@ def test_perspective_interpolation():
     )
     proof_buffers = Buffers(
         zbuffer=lax.full((proof_width, proof_height), 1.0),
-        targets=(lax.full((proof_width, proof_height, 3), 0.0),),
+        targets=ExtraMixerOutput(canvas=lax.full((proof_width, proof_height, 3), 0.0)),
     )
-    _, (proof_canvas,) = render(
+    _, proof_targets = render(
         proof_camera,
         _Shader,
         proof_buffers,
         face_indices,
         proof_extra,
     )
+    proof_canvas = proof_targets.canvas
     assert jnp.all(
         jnp.abs(proof_canvas[20, 20] - typed_array((9.0 / 16.0,) * 3)) < 1e-5
     )

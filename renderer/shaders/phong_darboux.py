@@ -5,7 +5,6 @@ from jax import Array
 import jax.lax as lax
 import jax.numpy as jnp
 from jaxtyping import (
-    Bool,
     Float,
     Integer,
 )
@@ -27,8 +26,9 @@ from ..geometry import (
     to_cartesian,
     to_homogeneous,
 )
-from ..shader import ID, MixerOutput, PerFragment, PerVertex, Shader
+from ..shader import ID, Fragment, PerFragment, PerVertex, Shader
 from ..types import (
+    TRUE_ARRAY,
     BoolV,
     Colour,
     FaceIndices,
@@ -216,19 +216,7 @@ class PhongTextureDarbouxShader(
         gl_PointCoord: Vec2f,
         varying: PhongTextureDarbouxExtraFragmentData,
         extra: PhongTextureDarbouxExtraInput,
-    ) -> tuple[PerFragment, PhongTextureDarbouxExtraFragmentData]:
-        built_in: PerFragment = Shader[
-            PhongTextureDarbouxExtraInput,
-            PhongTextureDarbouxExtraFragmentData,
-            PhongTextureDarbouxExtraFragmentData,
-        ].fragment(
-            gl_FragCoord,
-            gl_FrontFacing,
-            gl_PointCoord,
-            varying,
-            extra,
-        )[0]
-        assert isinstance(built_in, PerFragment)
+    ) -> tuple[PerFragment, Fragment[PhongTextureDarbouxExtraMixerOutput]]:
         assert isinstance(varying, PhongTextureDarbouxExtraFragmentData), (
             f"Expected PhongTextureDarbouxExtraFragmentData, got {varying}"
         )
@@ -273,41 +261,16 @@ class PhongTextureDarbouxShader(
 
         return (
             PerFragment(
-                keeps=jnp.logical_and(
-                    built_in.keeps,
-                    gl_FrontFacing,
-                ),
-                use_default_depth=built_in.use_default_depth,
+                keeps=gl_FrontFacing,
+                use_default_depth=TRUE_ARRAY,
             ),
-            varying._replace(
-                colour=lax.cond(  # pyright: ignore[reportUnknownMemberType]
-                    jnp.all(light_colour >= 0),
-                    lambda: texture_colour * light_colour,
-                    lambda: typed_zeros(3),
+            Fragment(
+                targets=PhongTextureDarbouxExtraMixerOutput(
+                    canvas=lax.cond(  # pyright: ignore[reportUnknownMemberType]
+                        jnp.all(light_colour >= 0),
+                        lambda: texture_colour * light_colour,
+                        lambda: typed_zeros(3),
+                    ),
                 )
             ),
-        )
-
-    @staticmethod
-    @jaxtyped
-    @partial(jit, inline=True)
-    @add_tracing_name
-    def mix(
-        gl_FragDepth: Float[Array, "primitives"],
-        keeps: Bool[Array, "primitives"],
-        extra: PhongTextureDarbouxExtraFragmentData,
-    ) -> tuple[MixerOutput, PhongTextureDarbouxExtraMixerOutput]:
-        mixer_output: MixerOutput
-        extra_output: PhongTextureDarbouxExtraFragmentData
-        mixer_output, extra_output = Shader[
-            PhongTextureDarbouxExtraInput,
-            PhongTextureDarbouxExtraFragmentData,
-            PhongTextureDarbouxExtraFragmentData,
-        ].mix(gl_FragDepth, keeps, extra)
-        assert isinstance(mixer_output, MixerOutput)
-        assert isinstance(extra_output, PhongTextureDarbouxExtraFragmentData)
-
-        return (
-            mixer_output,
-            PhongTextureDarbouxExtraMixerOutput(canvas=extra_output.colour),
         )

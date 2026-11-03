@@ -117,10 +117,13 @@ See [`renderer/shaders`](renderer/shaders) for more details.
 You may implement your own shaders by inheriting from `Shader` and implement the following methods:
 
 - `vertex`: this is like vertex shader in OpenGL; it must be overridden.
-- `primitive_chooser`: at this stage the visibility at each pixel level is tested, it works like pre-z test in OpenGL, makes the pipeline works like a deferred shading pipeline. Noted that you may override and return more than one primitive for each pixel to support transparency. The default implementation simply chooses the primitive with minimum z value (depth).
+- `primitive_chooser`: filters geometry candidates before fragment processing, similarly to a pre-Z stage. The inherited `fragment_collection` mode selects the nearest candidate by default, or retains all candidate slots for custom multi-layer mixing.
 - `interpolate`: this controls how attributes associated with a fragment is interpolated from the vertices; the default implementation interpolates everything using perspective interpolation.
-- `fragment`: this is like fragment shader in OpenGL; a default implementation is provided if you do not need to process any data in the fragment shader.
-- `mix`: this is like blending stage in OpenGL; the default implementation simple uses the data from the fragment with minimum screen-space z value (depth).
+- `fragment`: shades interpolated values and returns a typed `Fragment` containing target values and alpha. `PassthroughShader` provides the unchanged-data default.
+- `mix`: resolves the retained fragment batch against a destination pixel. The inherited opaque implementation selects the nearest kept fragment; custom mixing can control target and depth writes independently.
+
+See [the shader contract and migration guide](docs/shader-contract.md) for types,
+candidate collection and custom mixing. Alpha blending is not implemented yet.
 
 ## Gallery
 

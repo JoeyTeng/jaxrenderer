@@ -5,7 +5,6 @@ import jax.lax as lax
 import jax.numpy as jnp
 from jaxtyping import (
     Array,
-    Bool,
     Float,
 )
 
@@ -19,8 +18,8 @@ from .._meta_utils import (
 from .._meta_utils import typed_jaxtyped as jaxtyped
 from .._meta_utils import typed_jit as jit
 from ..geometry import Camera, normalise, to_homogeneous
-from ..shader import ID, MixerOutput, PerFragment, PerVertex, Shader
-from ..types import BoolV, Colour, LightSource, Texture, Vec2f, Vec3f, Vec4f
+from ..shader import ID, Fragment, PerFragment, PerVertex, Shader
+from ..types import TRUE_ARRAY, BoolV, Colour, LightSource, Texture, Vec2f, Vec3f, Vec4f
 
 
 class PhongTextureExtraInput(NamedTuple):
@@ -113,20 +112,7 @@ class PhongTextureShader(
         gl_PointCoord: Vec2f,
         varying: PhongTextureExtraFragmentData,
         extra: PhongTextureExtraInput,
-    ) -> tuple[PerFragment, PhongTextureExtraFragmentData]:
-        built_in: PerFragment = Shader[
-            PhongTextureExtraInput,
-            PhongTextureExtraFragmentData,
-            PhongTextureExtraMixerOutput,
-        ].fragment(
-            gl_FragCoord,
-            gl_FrontFacing,
-            gl_PointCoord,
-            varying,
-            extra,
-        )[0]
-        assert isinstance(built_in, PerFragment)
-
+    ) -> tuple[PerFragment, Fragment[PhongTextureExtraMixerOutput]]:
         # repeat texture
         uv = lax.floor(varying.uv).astype(int)
         uv = uv % typed_asarray(extra.texture.shape[:2])
@@ -140,50 +126,19 @@ class PhongTextureShader(
 
         return (
             PerFragment(
-                keeps=jnp.logical_and(
-                    built_in.keeps,
-                    gl_FrontFacing,
-                ),
-                use_default_depth=built_in.use_default_depth,
+                keeps=gl_FrontFacing,
+                use_default_depth=TRUE_ARRAY,
             ),
-            PhongTextureExtraFragmentData(
-                colour=cast(
-                    Vec3f,
-                    lax.cond(  # pyright: ignore[reportUnknownMemberType]
-                        jnp.all(light_colour >= 0),
-                        lambda: texture_colour * light_colour,
-                        lambda: typed_zeros(3),
+            Fragment(
+                targets=PhongTextureExtraMixerOutput(
+                    canvas=cast(
+                        Vec3f,
+                        lax.cond(  # pyright: ignore[reportUnknownMemberType]
+                            jnp.all(light_colour >= 0),
+                            lambda: texture_colour * light_colour,
+                            lambda: typed_zeros(3),
+                        ),
                     ),
                 ),
-                uv=varying.uv,
-                normal=varying.normal,
             ),
-        )
-
-    @staticmethod
-    @jaxtyped
-    @partial(jit, inline=True)
-    @add_tracing_name
-    def mix(
-        gl_FragDepth: Float[Array, "primitives"],
-        keeps: Bool[Array, "primitives"],
-        extra: PhongTextureExtraFragmentData,
-    ) -> tuple[MixerOutput, PhongTextureExtraMixerOutput]:
-        mixer_output: MixerOutput
-        extra_output: PhongTextureExtraFragmentData
-        mixer_output, extra_output = Shader[
-            PhongTextureExtraInput,
-            PhongTextureExtraFragmentData,
-            PhongTextureExtraFragmentData,
-        ].mix(
-            gl_FragDepth,
-            keeps,
-            extra,
-        )
-        assert isinstance(mixer_output, MixerOutput)
-        assert isinstance(extra_output, PhongTextureExtraFragmentData)
-
-        return (
-            mixer_output,
-            PhongTextureExtraMixerOutput(canvas=extra_output.colour),
         )
