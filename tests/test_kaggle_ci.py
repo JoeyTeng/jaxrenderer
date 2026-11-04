@@ -1,5 +1,5 @@
 from collections.abc import Callable
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import hashlib
 import json
 from pathlib import Path
@@ -58,10 +58,6 @@ def _record_version_verification(
 ) -> None:
     del binding
     calls.append(path)
-
-
-def _ignore_version_verification(binding: dict[str, object], path: Path) -> None:
-    del binding, path
 
 
 def authenticated(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -258,9 +254,21 @@ def test_private_kernel_embeds_only_the_trusted_runner(
     assert json.dumps(BINDING, sort_keys=True) in bootstrap
 
 
-@pytest.mark.parametrize("relay", [False, True])
-def test_success_uses_a_fresh_private_slug_polls_and_downloads_bound_result(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, relay: bool
+@pytest.mark.parametrize(
+    ("relay", "submit_only", "push_version"),
+    [
+        (False, False, 1),
+        (True, False, 1),
+        (True, True, 1),
+        (True, True, 2),
+    ],
+)
+def test_fresh_private_submit_and_relay_controller_paths(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    relay: bool,
+    submit_only: bool,
+    push_version: int,
 ) -> None:
     authenticated(monkeypatch)
     runner = tmp_path / "accelerator_runner.py"
@@ -268,12 +276,10 @@ def test_success_uses_a_fresh_private_slug_polls_and_downloads_bound_result(
         "def run(binding, backend, output_dir):\n    return {}\n", encoding="utf-8"
     )
     monkeypatch.setattr(kaggle_ci, "__file__", str(tmp_path / "kaggle_ci.py"))
-    if relay:
-        monkeypatch.setattr(
-            kaggle_ci, "_verify_version_one", _ignore_version_verification
-        )
     fake_time = [0.0]
     monkeypatch.setattr(kaggle_ci.time, "monotonic", lambda: fake_time[0])
+    wall_now = [datetime(2026, 10, 8, 10, 0, tzinfo=timezone.utc)]
+    monkeypatch.setattr(kaggle_ci, "_utc_now", lambda: wall_now[0])
 
     def advance_time(duration: float) -> None:
         fake_time[0] += duration
@@ -285,6 +291,14 @@ def test_success_uses_a_fresh_private_slug_polls_and_downloads_bound_result(
     )
     monkeypatch.setattr(kaggle_ci, "POLL_INTERVAL_SECONDS", 1900)
     commands: list[list[str]] = []
+    verify_calls: list[Path] = []
+    if relay:
+
+        def record_verification(binding: dict[str, object], path: Path) -> None:
+            assert binding == BINDING
+            verify_calls.append(path)
+
+        monkeypatch.setattr(kaggle_ci, "_verify_version_one", record_verification)
     status_responses = iter(
         (
             'has status "KernelWorkerStatus.QUEUED"',
@@ -322,7 +336,9 @@ def test_success_uses_a_fresh_private_slug_polls_and_downloads_bound_result(
             assert args[args.index("--timeout") + 1] == str(
                 kaggle_ci.EXECUTION_TIMEOUT_SECONDS
             )
-            return completed(args, "Kernel version 1 successfully pushed.\n")
+            return completed(
+                args, f"Kernel version {push_version} successfully pushed.\n"
+            )
         if args[1:3] == ["kernels", "status"]:
             return completed(args, next(status_responses))
         if args[1:3] == ["kernels", "output"]:
@@ -339,7 +355,54 @@ def test_success_uses_a_fresh_private_slug_polls_and_downloads_bound_result(
         pytest.fail(f"unexpected Kaggle command: {args}")
 
     monkeypatch.setattr(kaggle_ci, "_command_ok", fake_command)
-    result = kaggle_ci.run(BINDING, "tpu", tmp_path / "output", relay=relay)
+    output_dir = tmp_path / "output"
+    submitted_at: object | None = None
+    if submit_only:
+        if push_version != 1:
+            with pytest.raises(kaggle_ci.KaggleError, match="did not report version 1"):
+                _ = kaggle_ci.run(
+                    BINDING, "tpu", output_dir, relay=True, submit_only=True
+                )
+            assert [command[1:3] for command in commands] == [
+                ["quota", "--format"],
+                ["kernels", "push"],
+            ]
+            assert verify_calls == []
+            state = json.loads(
+                (output_dir / "kaggle-controller-state.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+            assert state["outcome"] == "submission_version_unknown"
+            assert state["submitted_version"] is None
+            return
+        acknowledgement = kaggle_ci.run(
+            BINDING, "tpu", output_dir, relay=True, submit_only=True
+        )
+        assert acknowledgement["pending"] is True
+        assert acknowledgement["outcome"] == "handover"
+        assert [command[1:3] for command in commands] == [
+            ["quota", "--format"],
+            ["kernels", "push"],
+        ]
+        assert verify_calls == []
+        submitted_state = json.loads(
+            (output_dir / "kaggle-controller-state.json").read_text(encoding="utf-8")
+        )
+        assert submitted_state["status"] == "submitted"
+        assert submitted_state["outcome"] == "handover"
+        assert submitted_state["submitted_version"] == 1
+        submitted_at = submitted_state["submitted_at"]
+        wall_now[0] += timedelta(seconds=37)
+        result = kaggle_ci.run(
+            BINDING,
+            "tpu",
+            output_dir,
+            relay=True,
+            continue_state_path=output_dir / "kaggle-controller-state.json",
+        )
+    else:
+        result = kaggle_ci.run(BINDING, "tpu", output_dir, relay=relay)
 
     assert result == success_result()
     assert fake_time[0] == 3800
@@ -351,7 +414,11 @@ def test_success_uses_a_fresh_private_slug_polls_and_downloads_bound_result(
     assert controller_state["submitted_version"] == 1
     assert controller_state["binding"] == BINDING
     assert controller_state["outcome"] == "success"
-    assert controller_state["queue_elapsed_seconds"] == 1900
+    assert controller_state["queue_elapsed_seconds"] == 1900 + (
+        37 if submit_only else 0
+    )
+    if submit_only:
+        assert controller_state["submitted_at"] == submitted_at
     pushes = [command for command in commands if command[1:3] == ["kernels", "push"]]
     assert len(pushes) == 1
     # The private slug includes a random suffix so output from an older run cannot match.
@@ -838,6 +905,47 @@ def _continue(path: Path, *, final_segment: bool = False) -> dict[str, object]:
         continue_state_path=path,
         final_segment=final_segment,
     )
+
+
+@pytest.mark.parametrize(
+    ("options", "message"),
+    [
+        (("--submit-only",), "requires --relay"),
+        (
+            ("--relay", "--submit-only", "--continue-state", "state.json"),
+            "cannot be combined",
+        ),
+        (
+            ("--relay", "--submit-only", "--final-segment"),
+            "cannot be combined",
+        ),
+        (
+            ("--submit-only", "--resume-state", "state.json"),
+            "status-only query",
+        ),
+    ],
+)
+def test_submit_only_cli_requires_relay_and_excludes_other_modes(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    options: tuple[str, ...],
+    message: str,
+) -> None:
+    binding_path = tmp_path / "binding.json"
+    _ = binding_path.write_text(json.dumps(BINDING), encoding="utf-8")
+
+    exit_code = kaggle_ci.main(
+        [
+            "--binding",
+            str(binding_path),
+            "--output-dir",
+            str(tmp_path / "output"),
+            *options,
+        ]
+    )
+
+    assert exit_code == 1
+    assert message in capsys.readouterr().err
 
 
 @pytest.mark.parametrize(

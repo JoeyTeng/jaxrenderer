@@ -43,9 +43,9 @@ completed result.
 
 Within a new recovery attempt, TPU confirmation uses the same
 [four-job relay](README.md#account-and-environment-setup) as ordinary releases.
-It submits once and continues that notebook within the attempt. It does not
-resume the original failed Actions run or reuse its notebook's result in a new
-attempt.
+The `prepare` job submits once and saves its controller state; the four relay
+jobs continue that notebook within the attempt. Recovery does not resume the
+original failed Actions run or reuse its notebook's result in a new attempt.
 
 The legacy delayed-result collectors require matching controller and candidate
 commits. Recovery runs record a `recovery-source-binding-<attempt>` marker and

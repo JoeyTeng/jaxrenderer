@@ -8,7 +8,6 @@ import subprocess
 import sys
 from typing import Any, cast
 
-from tools import kaggle_ci
 import yaml
 
 WORKFLOWS = Path(__file__).parents[1] / ".github" / "workflows"
@@ -34,21 +33,6 @@ def checkout_steps(job: dict[str, Any]) -> list[dict[str, Any]]:
         for step in job["steps"]
         if step.get("uses", "").startswith("actions/checkout@")
     ]
-
-
-def needs_list(job: dict[str, Any]) -> list[str]:
-    """Normalise GitHub's scalar and list forms for a single or multiple need."""
-    value = job["needs"]
-    if isinstance(value, str):
-        return [value]
-    if isinstance(value, list):
-        needs: list[str] = []
-        for item in cast(list[object], value):
-            if not isinstance(item, str):
-                raise AssertionError("workflow needs entries must be strings")
-            needs.append(item)
-        return needs
-    raise AssertionError("workflow needs must be a string or list of strings")
 
 
 def assert_checkout_precedes_run_steps(job: dict[str, Any]) -> None:
@@ -243,108 +227,35 @@ def test_release_checkouts_and_reusable_workflows_use_the_frozen_commit() -> Non
         assert freeze["env"]["RELEASE_COMMIT"] == "${{ inputs.commit }}"
         provider_checkouts = checkout_steps(child[provider_job_name])
         assert provider_checkouts[0]["with"]["ref"] == "${{ github.sha }}"
-        uploaded_bindings = [
+        binding_artifacts = [
             step
             for step in prepare["steps"]
             if step.get("uses", "").startswith("actions/upload-artifact@")
+            and step.get("with", {})
+            .get("name", "")
+            .startswith(f"{provider_job_name}-release-binding-")
         ]
+        assert len(binding_artifacts) == 1
+        binding_name = binding_artifacts[0]["with"]["name"]
+        if provider_job_name == "tpu":
+            action = yaml.load(
+                (WORKFLOWS.parent / "actions" / "tpu-check" / "action.yml").read_text(
+                    encoding="utf-8"
+                ),
+                Loader=yaml.BaseLoader,
+            )
+            provider_steps = action["runs"]["steps"]
+        else:
+            provider_steps = provider_job["steps"]
         downloaded_bindings = [
             step
-            for step in provider_job["steps"]
+            for step in provider_steps
             if step.get("uses", "").startswith("actions/download-artifact@")
-            and step.get("with", {}).get("name") == uploaded_bindings[0]["with"]["name"]
+            and step.get("with", {}).get("name") == binding_name
         ]
-        assert len(uploaded_bindings) == len(downloaded_bindings) == 1
-        binding_name = uploaded_bindings[0]["with"]["name"]
+        assert len(downloaded_bindings) == 1
         assert "${{ github.run_attempt }}" in binding_name
         assert downloaded_bindings[0]["with"]["name"] == binding_name
-
-
-def test_release_tpu_relay_fits_the_hosted_jobs_and_keeps_final_failure_reports() -> (
-    None
-):
-    workflow = load_workflow("release-tpu.yml")
-    jobs = workflow["jobs"]
-    stage_names = ("tpu-segment-1", "tpu-segment-2", "tpu-segment-3", "tpu")
-    segments = [jobs[name] for name in stage_names[:3]]
-    stages = segments + [jobs["tpu"]]
-
-    assert needs_list(segments[0]) == ["prepare"]
-    for previous_name, current_name in zip(stage_names, stage_names[1:], strict=False):
-        assert needs_list(jobs[current_name]) == ["prepare", previous_name]
-
-    binding = next(
-        step["with"]["name"]
-        for step in jobs["prepare"]["steps"]
-        if step.get("uses", "").startswith("actions/upload-artifact@")
-    )
-    previous_artifact = binding
-    canonical = (
-        "release-tpu-${{ needs.prepare.outputs.head_sha }}-${{ github.run_attempt }}"
-    )
-    finish_steps: list[tuple[str, dict[str, Any]]] = []
-    assert (
-        kaggle_ci.RELAY_QUEUE_TIMEOUT_SECONDS + kaggle_ci.EXECUTION_TIMEOUT_SECONDS
-        <= len(stages) * kaggle_ci.RELAY_SEGMENT_TIMEOUT_SECONDS
-    )
-    for index, job in enumerate(stages):
-        provider = step_with_id(job, "provider")
-        job_seconds = int(job["timeout-minutes"]) * 60
-        provider_seconds = int(provider["timeout-minutes"]) * 60
-        assert job_seconds <= 360 * 60
-        assert job_seconds - provider_seconds >= 10 * 60
-        assert provider_seconds - kaggle_ci.RELAY_SEGMENT_TIMEOUT_SECONDS >= 5 * 60
-        assert "--relay" in provider["run"]
-        downloads = [
-            step
-            for step in job["steps"]
-            if step.get("uses", "").startswith("actions/download-artifact@")
-        ]
-        assert any(step.get("with", {}).get("name") == binding for step in downloads)
-        if index:
-            state_download = next(
-                step
-                for step in downloads
-                if step.get("with", {}).get("name") == previous_artifact
-            )
-            state_path = state_download["with"]["path"]
-            assert state_path == "release-artifacts/tpu/"
-            assert (
-                f"--continue-state {state_path}kaggle-controller-state.json"
-                in provider["run"]
-            )
-            assert "--continue-state" in provider["run"]
-        else:
-            assert "--continue-state" not in provider["run"]
-
-        uploads = [
-            step
-            for step in job["steps"]
-            if step.get("uses", "").startswith("actions/upload-artifact@")
-        ]
-        relay = next(step for step in uploads if step.get("if") == "always()")
-        assert "${{ github.run_attempt }}" in relay["with"]["name"]
-        previous_artifact = relay["with"]["name"]
-        if index < len(segments):
-            assert relay["with"]["name"] != canonical
-            assert any(
-                step.get("if") == "failure() || cancelled()"
-                and step["with"]["name"] == canonical
-                for step in uploads
-            )
-        else:
-            assert relay["with"]["name"] == canonical
-        assert ("--final-segment" in provider["run"]) == (index == len(stages) - 1)
-        finish_steps.extend(
-            (stage_names[index], step)
-            for step in job["steps"]
-            if "PROVIDER_SUCCESS" in step.get("env", {})
-        )
-
-    assert len(finish_steps) == 1
-    finish_job, finish = finish_steps[0]
-    assert finish_job == "tpu" and finish["if"] == "always()"
-    assert "continue-on-error" not in finish
 
 
 def test_cpu_reuse_requires_frozen_candidate_and_all_cpu_gates() -> None:

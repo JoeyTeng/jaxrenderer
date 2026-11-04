@@ -26,7 +26,8 @@ concurrency:
 jobs:
   prepare:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 30
+    environment: kaggle-tpu
     outputs:
       head_sha: ${{ steps.freeze.outputs.head_sha }}
     steps:
@@ -35,8 +36,7 @@ jobs:
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
-      - &release-python
-        uses: actions/setup-python@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.14"
       - name: Freeze the release candidate and workflow attempt
@@ -54,6 +54,35 @@ jobs:
           path: tpu-release-binding.json
           if-no-files-found: error
           retention-days: 30
+      - uses: astral-sh/setup-uv@v10.2.0
+        with:
+          version: "0.12.20"
+          enable-cache: true
+      - name: Install the locked Kaggle controller
+        run: uv sync --locked --only-group ci-kaggle --python 3.14
+      - name: Submit the release candidate to a Kaggle TPU
+        timeout-minutes: 10
+        env: &kaggle-provider-env
+          KAGGLE_API_TOKEN: ${{ secrets.KAGGLE_API_TOKEN }}
+          KAGGLE_USERNAME: ${{ vars.KAGGLE_USERNAME }}
+        run: >-
+          .venv/bin/python -u -m tools.kaggle_ci --binding tpu-release-binding.json
+          --relay --submit-only --output-dir release-artifacts/tpu
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: release-tpu-submission-${{ steps.freeze.outputs.head_sha }}-${{ github.run_attempt }}
+          path: release-artifacts/tpu/
+          if-no-files-found: warn
+          retention-days: 30
+      - name: Preserve the canonical TPU failure report
+        if: failure() || cancelled()
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-tpu-${{ steps.freeze.outputs.head_sha }}-${{ github.run_attempt }}
+          path: release-artifacts/tpu/
+          if-no-files-found: warn
+          retention-days: 30
 
   tpu-segment-1:
     needs: prepare
@@ -62,29 +91,14 @@ jobs:
     environment: kaggle-tpu
     steps:
       - *release-checkout
-      - &release-binding-download
-        uses: actions/download-artifact@v7
-        with:
-          name: tpu-release-binding-${{ github.run_attempt }}
-      - *release-python
-      - &kaggle-uv-setup
-        uses: astral-sh/setup-uv@v10.2.0
-        with:
-          version: "0.12.20"
-          enable-cache: true
-      - &kaggle-controller-install
-        name: Install the locked Kaggle controller
-        run: uv sync --locked --only-group ci-kaggle --python 3.14
-      - name: Submit the release candidate to a Kaggle TPU
+      - name: Continue the Kaggle TPU confirmation
         id: provider
-        timeout-minutes: 350
-        env: &kaggle-provider-env
-          KAGGLE_API_TOKEN: ${{ secrets.KAGGLE_API_TOKEN }}
-          KAGGLE_USERNAME: ${{ vars.KAGGLE_USERNAME }}
-        run: >-
-          .venv/bin/python -u -m tools.kaggle_ci --binding tpu-release-binding.json
-          --relay
-          --output-dir release-artifacts/tpu
+        timeout-minutes: 355
+        uses: ./.github/actions/tpu-check
+        env: *kaggle-provider-env
+        with:
+          previous-artifact: release-tpu-submission-${{ needs.prepare.outputs.head_sha }}-${{ github.run_attempt }}
+          final-segment: "false"
       - name: Upload TPU relay state
         if: always()
         uses: actions/upload-artifact@v7
@@ -110,23 +124,14 @@ jobs:
     environment: kaggle-tpu
     steps:
       - *release-checkout
-      - *release-binding-download
-      - uses: actions/download-artifact@v7
-        with:
-          name: release-tpu-segment-1-${{ needs.prepare.outputs.head_sha }}-${{ github.run_attempt }}
-          path: release-artifacts/tpu/
-      - *release-python
-      - *kaggle-uv-setup
-      - *kaggle-controller-install
-      - &continue-tpu-provider
-        name: Continue the Kaggle TPU confirmation
+      - name: Continue the Kaggle TPU confirmation
         id: provider
-        timeout-minutes: 350
+        timeout-minutes: 355
+        uses: ./.github/actions/tpu-check
         env: *kaggle-provider-env
-        run: >-
-          .venv/bin/python -u -m tools.kaggle_ci --binding tpu-release-binding.json
-          --relay --continue-state release-artifacts/tpu/kaggle-controller-state.json
-          --output-dir release-artifacts/tpu
+        with:
+          previous-artifact: release-tpu-segment-1-${{ needs.prepare.outputs.head_sha }}-${{ github.run_attempt }}
+          final-segment: "false"
       - name: Upload TPU relay state
         if: always()
         uses: actions/upload-artifact@v7
@@ -144,15 +149,14 @@ jobs:
     environment: kaggle-tpu
     steps:
       - *release-checkout
-      - *release-binding-download
-      - uses: actions/download-artifact@v7
+      - name: Continue the Kaggle TPU confirmation
+        id: provider
+        timeout-minutes: 355
+        uses: ./.github/actions/tpu-check
+        env: *kaggle-provider-env
         with:
-          name: release-tpu-segment-2-${{ needs.prepare.outputs.head_sha }}-${{ github.run_attempt }}
-          path: release-artifacts/tpu/
-      - *release-python
-      - *kaggle-uv-setup
-      - *kaggle-controller-install
-      - *continue-tpu-provider
+          previous-artifact: release-tpu-segment-2-${{ needs.prepare.outputs.head_sha }}-${{ github.run_attempt }}
+          final-segment: "false"
       - name: Upload TPU relay state
         if: always()
         uses: actions/upload-artifact@v7
@@ -170,22 +174,14 @@ jobs:
     environment: kaggle-tpu
     steps:
       - *release-checkout
-      - *release-binding-download
-      - uses: actions/download-artifact@v7
-        with:
-          name: release-tpu-segment-3-${{ needs.prepare.outputs.head_sha }}-${{ github.run_attempt }}
-          path: release-artifacts/tpu/
-      - *release-python
-      - *kaggle-uv-setup
-      - *kaggle-controller-install
       - name: Finish the Kaggle TPU confirmation
         id: provider
-        timeout-minutes: 350
+        timeout-minutes: 355
+        uses: ./.github/actions/tpu-check
         env: *kaggle-provider-env
-        run: >-
-          .venv/bin/python -u -m tools.kaggle_ci --binding tpu-release-binding.json
-          --relay --continue-state release-artifacts/tpu/kaggle-controller-state.json
-          --final-segment --output-dir release-artifacts/tpu
+        with:
+          previous-artifact: release-tpu-segment-3-${{ needs.prepare.outputs.head_sha }}-${{ github.run_attempt }}
+          final-segment: "true"
       - name: Validate the bound TPU result
         if: always()
         env:

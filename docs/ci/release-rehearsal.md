@@ -31,10 +31,11 @@ step's environment. Those jobs retain their `modal-gpu` and `kaggle-tpu`
 environments. Only the release-only upload step assigns the PyPI token to its
 execution environment.
 
-TPU confirmation [waits across four jobs](README.md#account-and-environment-setup)
-for the same notebook, with a 22-hour queue budget and a separate 45-minute
-execution budget. State and any validated result pass between jobs in the same
-workflow attempt. Intermediate handovers do not pass the TPU gate.
+TPU confirmation first submits one notebook in `prepare`, then
+[continues across four jobs](README.md#account-and-environment-setup) with a
+22-hour queue budget and a separate 45-minute execution budget. The submission
+state and later handovers remain separate artefacts within the same workflow
+attempt. Intermediate handovers do not pass the TPU gate.
 
 If the workflow stops before observing a terminal TPU status, the remote state
 is unknown. A failed intermediate segment also uploads its
