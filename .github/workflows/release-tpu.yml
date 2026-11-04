@@ -90,6 +90,11 @@ jobs:
     timeout-minutes: 360
     environment: kaggle-tpu
     steps:
+      - name: Restore TPU relay state before checkout
+        uses: actions/download-artifact@v7
+        with:
+          name: release-tpu-submission-${{ needs.prepare.outputs.head_sha }}-${{ github.run_attempt }}
+          path: &tpu-relay-state-directory ${{ runner.temp }}/tpu-relay-state
       - *release-checkout
       - name: Continue the Kaggle TPU confirmation
         id: provider
@@ -97,13 +102,13 @@ jobs:
         uses: ./.github/actions/tpu-check
         env: *kaggle-provider-env
         with:
-          previous-artifact: release-tpu-submission-${{ needs.prepare.outputs.head_sha }}-${{ github.run_attempt }}
+          state-directory: *tpu-relay-state-directory
       - name: Upload TPU relay state
         if: always()
         uses: actions/upload-artifact@v7
         with:
           name: release-tpu-segment-1-${{ needs.prepare.outputs.head_sha }}-${{ github.run_attempt }}
-          path: release-artifacts/tpu/
+          path: *tpu-relay-state-directory
           if-no-files-found: warn
           retention-days: 30
       - &canonical-tpu-failure-upload
@@ -112,7 +117,7 @@ jobs:
         uses: actions/upload-artifact@v7
         with: &canonical-tpu-report
           name: release-tpu-${{ needs.prepare.outputs.head_sha }}-${{ github.run_attempt }}
-          path: release-artifacts/tpu/
+          path: *tpu-relay-state-directory
           if-no-files-found: warn
           retention-days: 30
 
@@ -122,6 +127,11 @@ jobs:
     timeout-minutes: 360
     environment: kaggle-tpu
     steps:
+      - name: Restore TPU relay state before checkout
+        uses: actions/download-artifact@v7
+        with:
+          name: release-tpu-segment-1-${{ needs.prepare.outputs.head_sha }}-${{ github.run_attempt }}
+          path: *tpu-relay-state-directory
       - *release-checkout
       - name: Continue the Kaggle TPU confirmation
         id: provider
@@ -129,13 +139,13 @@ jobs:
         uses: ./.github/actions/tpu-check
         env: *kaggle-provider-env
         with:
-          previous-artifact: release-tpu-segment-1-${{ needs.prepare.outputs.head_sha }}-${{ github.run_attempt }}
+          state-directory: *tpu-relay-state-directory
       - name: Upload TPU relay state
         if: always()
         uses: actions/upload-artifact@v7
         with:
           name: release-tpu-segment-2-${{ needs.prepare.outputs.head_sha }}-${{ github.run_attempt }}
-          path: release-artifacts/tpu/
+          path: *tpu-relay-state-directory
           if-no-files-found: warn
           retention-days: 30
       - *canonical-tpu-failure-upload
@@ -146,6 +156,11 @@ jobs:
     timeout-minutes: 360
     environment: kaggle-tpu
     steps:
+      - name: Restore TPU relay state before checkout
+        uses: actions/download-artifact@v7
+        with:
+          name: release-tpu-segment-2-${{ needs.prepare.outputs.head_sha }}-${{ github.run_attempt }}
+          path: *tpu-relay-state-directory
       - *release-checkout
       - name: Continue the Kaggle TPU confirmation
         id: provider
@@ -153,13 +168,13 @@ jobs:
         uses: ./.github/actions/tpu-check
         env: *kaggle-provider-env
         with:
-          previous-artifact: release-tpu-segment-2-${{ needs.prepare.outputs.head_sha }}-${{ github.run_attempt }}
+          state-directory: *tpu-relay-state-directory
       - name: Upload TPU relay state
         if: always()
         uses: actions/upload-artifact@v7
         with:
           name: release-tpu-segment-3-${{ needs.prepare.outputs.head_sha }}-${{ github.run_attempt }}
-          path: release-artifacts/tpu/
+          path: *tpu-relay-state-directory
           if-no-files-found: warn
           retention-days: 30
       - *canonical-tpu-failure-upload
@@ -170,6 +185,11 @@ jobs:
     timeout-minutes: 360
     environment: kaggle-tpu
     steps:
+      - name: Restore TPU relay state before checkout
+        uses: actions/download-artifact@v7
+        with:
+          name: release-tpu-segment-3-${{ needs.prepare.outputs.head_sha }}-${{ github.run_attempt }}
+          path: *tpu-relay-state-directory
       - *release-checkout
       - name: Continue the Kaggle TPU confirmation
         id: provider
@@ -177,15 +197,16 @@ jobs:
         uses: ./.github/actions/tpu-check
         env: *kaggle-provider-env
         with:
-          previous-artifact: release-tpu-segment-3-${{ needs.prepare.outputs.head_sha }}-${{ github.run_attempt }}
+          state-directory: *tpu-relay-state-directory
       - name: Validate the bound TPU result
         if: always()
         env:
           GH_TOKEN: ${{ github.token }}
           PROVIDER_SUCCESS: ${{ steps.provider.outcome == 'success' }}
+          TPU_OUTPUT_DIR: ${{ runner.temp }}/tpu-relay-state
         run: >-
           python -m tools.release_tpu_gate finish
-          --binding tpu-release-binding.json --output-dir release-artifacts/tpu
+          --binding tpu-release-binding.json --output-dir "$TPU_OUTPUT_DIR"
           --provider-success "$PROVIDER_SUCCESS"
       - name: Upload TPU release confirmation artefacts
         if: always()

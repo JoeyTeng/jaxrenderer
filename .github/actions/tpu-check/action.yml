@@ -1,22 +1,20 @@
 name: Continue TPU release confirmation
-description: Restore a bound Kaggle TPU relay and continue its controller.
+description: Continue a restored, bound Kaggle TPU relay.
 inputs:
-  previous-artifact:
-    description: Same-attempt artefact containing the previous controller state.
+  state-directory:
+    description: Runner temporary directory containing the restored controller state.
     required: true
 runs:
   using: composite
   steps:
     - uses: actions/download-artifact@v7
       with:
-        name: ${{ inputs.previous-artifact }}
-        path: release-artifacts/tpu/
-    - uses: actions/download-artifact@v7
-      with:
         name: tpu-release-binding-${{ github.run_attempt }}
     - name: Verify the restored controller state
       shell: bash
-      run: test -s release-artifacts/tpu/kaggle-controller-state.json
+      env:
+        TPU_OUTPUT_DIR: ${{ inputs.state-directory }}
+      run: test -s "$TPU_OUTPUT_DIR/kaggle-controller-state.json"
     - uses: actions/setup-python@v7
       with:
         python-version: "3.14"
@@ -29,9 +27,11 @@ runs:
       run: uv sync --locked --only-group ci-kaggle --python 3.14
     - name: Continue the Kaggle TPU confirmation
       shell: bash
+      env:
+        TPU_OUTPUT_DIR: ${{ inputs.state-directory }}
       run: >-
         .venv/bin/python -u -m tools.kaggle_ci
         --binding tpu-release-binding.json
         --relay
-        --continue-state release-artifacts/tpu/kaggle-controller-state.json
-        --output-dir release-artifacts/tpu
+        --continue-state "$TPU_OUTPUT_DIR/kaggle-controller-state.json"
+        --output-dir "$TPU_OUTPUT_DIR"
