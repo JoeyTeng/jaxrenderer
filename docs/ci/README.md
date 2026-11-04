@@ -79,7 +79,7 @@ These manual entries help diagnose account and device problems before a release.
 
 ### Collecting delayed TPU results
 
-When a publishing run passed its CPU, build and GPU gates and submitted its TPU run, [the hourly workflow](release-rehearsal.md#collecting-delayed-tpu-results) can retrieve the saved Kaggle result and start release completion. A bounded manual replay from `master` accepts the original publishing run and attempt, commit, and collector run and attempt. The schedule runs at minute 17 each hour; GitHub Actions may delay it. Discovery covers the previous seven days of `pypi.yml` runs and considers each run's latest attempt. Source artefacts remain available for 30 days.
+When a publishing run passed its CPU, build and GPU gates and submitted its TPU run, [the hourly workflow](release-rehearsal.md#collecting-delayed-tpu-results) can retrieve the saved Kaggle result and start release completion. A bounded manual replay from `master` accepts the original publishing run and attempt, controller commit, and collector run and attempt. The schedule runs at minute 17 each hour; GitHub Actions may delay it. Discovery covers the previous seven days of `pypi.yml` runs and considers each run's latest attempt. Source artefacts remain available for 30 days.
 
 The hourly workflow runs collection and completion for each eligible source run. Pending or failed collections are not ready and cannot publish. Existing-tag recovery runs retain their separate controller and candidate commits and require validated recovery markers. Legacy sources without publication markers remain validation-only and cannot publish.
 

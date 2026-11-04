@@ -502,6 +502,7 @@ def _read_terminal(
     binding: Mapping[str, object],
     kernel_id: str,
     budget: _Budget,
+    require_job_proof: bool = False,
 ) -> dict[str, object] | None:
     owner = artifact["workflow_run"]
     assert isinstance(owner, dict)
@@ -585,19 +586,21 @@ def _read_terminal(
             raise PeriodicError("failure terminal record has no failed remote status")
     else:
         raise PeriodicError("terminal artefact outcome is not terminal")
-    if run_status in _ACTIVE_RUN_STATUSES and not _collector_job_completed(
-        collector_id,
-        collector_sha,
-        collector_attempt,
-        source_run_id,
-        source_attempt,
-        cast(str, outcome),
-        budget,
-    ):
-        # A marker can become visible before its upload step and job finish.
-        # Let the source remain eligible; the per-source job concurrency gate
-        # serialises any overlapping collection attempt.
-        return None
+    if run_status in _ACTIVE_RUN_STATUSES or require_job_proof:
+        if not _collector_job_completed(
+            collector_id,
+            collector_sha,
+            collector_attempt,
+            source_run_id,
+            source_attempt,
+            cast(str, outcome),
+            budget,
+        ):
+            # A marker can become visible before its upload step and job finish.
+            # Marker-bound publication candidates also require native collect-job
+            # evidence after the owner run completes; otherwise a failed marker
+            # upload could leave an orphan proof that suppresses future retries.
+            return None
     return record
 
 
@@ -619,6 +622,9 @@ def _has_terminal(
         return None
     if source.get("head_sha") != commit:
         raise PeriodicError("prepared source SHA does not match the terminal lookup")
+    publication_capable = set(source) == (
+        collection_gate.SOURCE_BASE_FIELDS | collection_gate.SOURCE_CANDIDATE_FIELDS
+    )
     kernel_id = state.get("kernel_id")
     if not isinstance(kernel_id, str):
         raise PeriodicError("original controller kernel identity is malformed")
@@ -632,6 +638,7 @@ def _has_terminal(
             binding=binding,
             kernel_id=kernel_id,
             budget=budget,
+            require_job_proof=publication_capable,
         )
         if record is None:
             continue
@@ -664,6 +671,59 @@ def _has_terminal(
         if collection_artifact is not None:
             verified.append(record)
     return _coalesce_verified_terminals(verified)
+
+
+def verified_terminal_artifacts(
+    source_run_id: str,
+    source_attempt: str,
+    commit: str,
+    binding: Mapping[str, object],
+    kernel_id: str,
+) -> list[tuple[dict[str, object], dict[str, object]]]:
+    """Return exact terminal marker artefacts with native collect-job proof.
+
+    Completion callers may use the returned metadata to pin one marker to a
+    previously validated collection receipt. Equivalent markers are returned
+    together; conflicting terminal results fail closed.
+    """
+    if (
+        re.fullmatch(r"[1-9][0-9]{0,19}", source_run_id) is None
+        or re.fullmatch(r"[1-9][0-9]{0,19}", source_attempt) is None
+        or not accelerator_gate.SHA_RE.fullmatch(commit)
+        or not kernel_id
+    ):
+        raise PeriodicError("terminal lookup source identity is malformed")
+    try:
+        verified_binding = release_tpu_gate.validate_binding(dict(binding))
+    except release_tpu_gate.ReleaseGateError as error:
+        raise PeriodicError("terminal lookup binding is invalid") from error
+
+    budget = _Budget()
+    name = f"tpu-periodic-terminal-{source_run_id}-{source_attempt}-{commit}"
+    pairs: list[tuple[dict[str, object], dict[str, object]]] = []
+    records: list[dict[str, object]] = []
+    with _bounded_github_calls(budget):
+        artifacts = _terminal_artifacts(int(source_run_id), name, budget)
+        for artifact in artifacts:
+            if artifact.get("name") != name:
+                raise PeriodicError("terminal marker artefact name changed")
+            record = _read_terminal(
+                artifact,
+                source_run_id=source_run_id,
+                source_attempt=source_attempt,
+                commit=commit,
+                binding=verified_binding,
+                kernel_id=kernel_id,
+                budget=budget,
+                require_job_proof=True,
+            )
+            if record is None:
+                continue
+            records.append(record)
+            pairs.append((artifact, record))
+
+    _ = _coalesce_verified_terminals(records)
+    return pairs
 
 
 def _candidate_batch(

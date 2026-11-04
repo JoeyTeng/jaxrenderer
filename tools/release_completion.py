@@ -55,6 +55,10 @@ COMPLETION_FIELDS = {
     "collector_artifact_name",
     "collector_artifact_digest",
     "collector_artifact_size",
+    "terminal_marker_artifact_id",
+    "terminal_marker_artifact_name",
+    "terminal_marker_artifact_digest",
+    "terminal_marker_artifact_size",
     "binding_artifact_id",
     "controller_artifact_id",
     "candidate_artifact_id",
@@ -688,6 +692,63 @@ def _validate_terminal(
     return record
 
 
+def _authenticated_terminal_marker_artifact(
+    source_run_id: int,
+    source_attempt: int,
+    commit: str,
+    binding: dict[str, object],
+    state: dict[str, object],
+    collector_identity: str,
+    collector_sha: str,
+    terminal: dict[str, object],
+) -> dict[str, object] | None:
+    marker_name = f"tpu-periodic-terminal-{source_run_id}-{source_attempt}-{commit}"
+    kernel_id = state.get("kernel_id")
+    if not isinstance(kernel_id, str):
+        raise CompletionError("original TPU kernel identity is malformed")
+    try:
+        verified_artifacts = periodic.verified_terminal_artifacts(
+            str(source_run_id),
+            str(source_attempt),
+            commit,
+            binding,
+            kernel_id,
+        )
+        matching_artifacts: list[dict[str, object]] = []
+        for artifact, record in verified_artifacts:
+            if artifact.get("name") != marker_name:
+                raise CompletionError("terminal marker artefact name changed")
+            if record == terminal:
+                matching_artifacts.append(artifact)
+    except periodic.PeriodicError as error:
+        raise CompletionError(
+            "terminal marker failed exact source and collector validation"
+        ) from error
+    if not matching_artifacts:
+        return None
+    if len(matching_artifacts) != 1:
+        raise CompletionError("terminal marker artefact identity is ambiguous")
+    artifact = matching_artifacts[0]
+    collector_id, collector_attempt = _parse_run_pair(collector_identity)
+    owner = _object(artifact.get("workflow_run"), "terminal marker owner is malformed")
+    owner_attempt = owner.get("run_attempt")
+    size = artifact.get("size_in_bytes")
+    if (
+        _artifact_id(artifact) <= 0
+        or not isinstance(artifact.get("name"), str)
+        or artifact.get("name") != marker_name
+        or type(size) is not int
+        or size <= 0
+        or artifact.get("expired") is not False
+        or owner.get("id") != collector_id
+        or owner.get("head_sha") != collector_sha
+        or (owner_attempt is not None and owner_attempt != collector_attempt)
+    ):
+        raise CompletionError("terminal marker artefact owner is not this collector")
+    _ = _artifact_digest(artifact)
+    return artifact
+
+
 def _source_candidate(
     source_dir: Path, source: dict[str, object], tpu_binding: dict[str, object]
 ) -> tuple[release_candidate.CandidateBinding, bytes]:
@@ -990,6 +1051,18 @@ def prepare(
                 "legacy collection receipt does not prove validation-only success"
             )
         return _not_ready(github_output, "validation_only")
+    terminal_marker_artifact = _authenticated_terminal_marker_artifact(
+        source_id,
+        attempt,
+        commit,
+        tpu_binding,
+        state,
+        collector_identity,
+        collector_sha,
+        terminal,
+    )
+    if terminal_marker_artifact is None:
+        return _not_ready(github_output, "terminal_marker_unconfirmed")
     candidate, candidate_raw = _source_candidate(source_dir, source, tpu_binding)
     candidate_artifact, marker_artifact = _source_artifact_identity(source, candidate)
     dist_artifact_name = f"release-dist-{attempt}"
@@ -1047,7 +1120,7 @@ def prepare(
         candidate_digest = hashlib.sha256(candidate_raw).hexdigest()
         publish = candidate["mode"] in {"release", "recovery"}
         completion: dict[str, object] = {
-            "schema_version": 1,
+            "schema_version": 2,
             "repository": REPOSITORY,
             "source_run_id": source_id,
             "source_attempt": attempt,
@@ -1059,6 +1132,12 @@ def prepare(
             "collector_artifact_name": collection_artifact_name,
             "collector_artifact_digest": _artifact_digest(collection_artifact),
             "collector_artifact_size": collection_artifact["size_in_bytes"],
+            "terminal_marker_artifact_id": _artifact_id(terminal_marker_artifact),
+            "terminal_marker_artifact_name": terminal_marker_artifact["name"],
+            "terminal_marker_artifact_digest": _artifact_digest(
+                terminal_marker_artifact
+            ),
+            "terminal_marker_artifact_size": terminal_marker_artifact["size_in_bytes"],
             "binding_artifact_id": source["binding_artifact_id"],
             "controller_artifact_id": source["controller_artifact_id"],
             "candidate_artifact_id": _artifact_id(candidate_artifact),
@@ -1099,7 +1178,7 @@ def prepare(
 
 def _validate_completion_binding(value: object) -> dict[str, object]:
     binding = _object(value, "completion binding is malformed")
-    if set(binding) != COMPLETION_FIELDS or binding.get("schema_version") != 1:
+    if set(binding) != COMPLETION_FIELDS or binding.get("schema_version") != 2:
         raise CompletionError("completion binding has missing or unexpected fields")
     if binding.get("repository") != REPOSITORY:
         raise CompletionError("completion binding repository is invalid")
@@ -1114,6 +1193,8 @@ def _validate_completion_binding(value: object) -> dict[str, object]:
     for field in (
         "collector_artifact_id",
         "collector_artifact_size",
+        "terminal_marker_artifact_id",
+        "terminal_marker_artifact_size",
         "binding_artifact_id",
         "controller_artifact_id",
         "candidate_artifact_id",
@@ -1131,6 +1212,7 @@ def _validate_completion_binding(value: object) -> dict[str, object]:
             raise CompletionError(f"completion binding {field} is invalid")
     for field in (
         "collector_artifact_digest",
+        "terminal_marker_artifact_digest",
         "candidate_artifact_digest",
         "marker_artifact_digest",
         "release_dist_artifact_digest",
@@ -1161,6 +1243,14 @@ def _validate_completion_binding(value: object) -> dict[str, object]:
         binding.get("release_dist_artifact_name"), str
     ):
         raise CompletionError("completion artefact names are malformed")
+    if (
+        not isinstance(binding.get("terminal_marker_artifact_name"), str)
+        or binding.get("terminal_marker_artifact_name")
+        != "tpu-periodic-terminal-"
+        f"{binding['source_run_id']}-{binding['source_attempt']}-"
+        f"{binding['source_head_sha']}"
+    ):
+        raise CompletionError("completion terminal marker name is malformed")
     for field in ("candidate_sha256", "collection_sha256"):
         value_digest = binding.get(field)
         if (
@@ -1249,7 +1339,7 @@ def verify(bundle_dir: Path, dist_dir: Path) -> dict[str, object]:
         or source.get("head_sha") != source_head
     ):
         raise CompletionError("original source attempt identity changed")
-    _ = _validate_terminal(
+    terminal = _validate_terminal(
         bundle_dir / "collection",
         source,
         tpu_binding,
@@ -1267,6 +1357,28 @@ def verify(bundle_dir: Path, dist_dir: Path) -> dict[str, object]:
         )
     except collection_gate.CollectionGateError as error:
         raise CompletionError("original TPU result failed fresh validation") from error
+    terminal_marker_artifact = _authenticated_terminal_marker_artifact(
+        source_id,
+        source_attempt,
+        source_head,
+        tpu_binding,
+        state,
+        collector_identity,
+        collector_sha,
+        terminal,
+    )
+    if terminal_marker_artifact is None:
+        raise CompletionError("periodic terminal marker is missing or unconfirmed")
+    if (
+        _artifact_id(terminal_marker_artifact) != binding["terminal_marker_artifact_id"]
+        or terminal_marker_artifact.get("name")
+        != binding["terminal_marker_artifact_name"]
+        or _artifact_digest(terminal_marker_artifact)
+        != binding["terminal_marker_artifact_digest"]
+        or terminal_marker_artifact.get("size_in_bytes")
+        != binding["terminal_marker_artifact_size"]
+    ):
+        raise CompletionError("periodic terminal marker artefact identity changed")
     candidate, candidate_raw = _source_candidate(source_dir, source, tpu_binding)
     if (
         candidate["mode"] != binding["candidate_mode"]

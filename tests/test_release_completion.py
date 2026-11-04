@@ -150,8 +150,9 @@ def completion_case(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str
     )
     report = {"terminal": True, "outcome": "success"}
     _ = (collection / "periodic-collection.json").write_text(json.dumps(report) + "\n")
+    terminal_record = _terminal_record(tpu_binding, state)
     _ = (collection / "periodic-terminal.json").write_text(
-        json.dumps(_terminal_record(tpu_binding, state)) + "\n"
+        json.dumps(terminal_record) + "\n"
     )
     _ = (collection / "collected").mkdir()
 
@@ -162,6 +163,19 @@ def completion_case(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str
         f"tpu-periodic-{SOURCE_SHA}-{SOURCE_RUN}-{SOURCE_ATTEMPT}-"
         f"{COLLECTOR_RUN}-{COLLECTOR_ATTEMPT}"
     )
+    terminal_name = f"tpu-periodic-terminal-{SOURCE_RUN}-{SOURCE_ATTEMPT}-{SOURCE_SHA}"
+    terminal_artifact: dict[str, object] = {
+        "id": 107,
+        "name": terminal_name,
+        "digest": "sha256:" + "7" * 64,
+        "size_in_bytes": 256,
+        "expired": False,
+        "workflow_run": {
+            "id": int(COLLECTOR_RUN),
+            "head_sha": COLLECTOR_SHA,
+        },
+    }
+    terminal_state = {"artifact_present": True, "upload_proven": True}
     names = {
         f"candidate-binding-{SOURCE_ATTEMPT}": 103,
         f"release-pending-{SOURCE_ATTEMPT}": 104,
@@ -226,6 +240,26 @@ def completion_case(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str
     monkeypatch.setattr(collection_gate, "finish", finish_collection)
     monkeypatch.setattr(collection_gate, "_artifact_metadata", artifact_metadata)
 
+    def verified_terminal_artifacts(
+        source_run_id: str,
+        source_attempt: str,
+        commit: str,
+        binding: dict[str, object],
+        kernel_id: str,
+    ) -> list[tuple[dict[str, object], dict[str, object]]]:
+        assert source_run_id == SOURCE_RUN
+        assert source_attempt == SOURCE_ATTEMPT
+        assert commit == SOURCE_SHA
+        assert binding == tpu_binding
+        assert kernel_id == state["kernel_id"]
+        if terminal_state["artifact_present"] and terminal_state["upload_proven"]:
+            return [(terminal_artifact, terminal_record)]
+        return []
+
+    monkeypatch.setattr(
+        periodic, "verified_terminal_artifacts", verified_terminal_artifacts
+    )
+
     def download_member(_artifact_id: int, member: str, destination: Path) -> None:
         assert member == "candidate-binding.json"
         _ = destination.write_bytes(candidate_bytes)
@@ -256,6 +290,9 @@ def completion_case(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str
         "github_output": tmp_path / "github-output",
         "source_sha": SOURCE_SHA,
         "collection_name": collection_name,
+        "terminal_artifact": terminal_artifact,
+        "terminal_name": terminal_name,
+        "terminal_state": terminal_state,
     }
 
 
@@ -286,6 +323,13 @@ def test_prepare_binds_terminal_success_and_original_distributions(
     assert binding["source_run_id"] == int(SOURCE_RUN)
     assert binding["collector_run_id"] == int(COLLECTOR_RUN)
     assert binding["release_dist_artifact_id"] == 106
+    assert binding["terminal_marker_artifact_id"] == 107
+    assert binding["terminal_marker_artifact_name"] == case["terminal_name"]
+    assert (
+        binding["terminal_marker_artifact_digest"]
+        == case["terminal_artifact"]["digest"]
+    )
+    assert binding["terminal_marker_artifact_size"] == 256
     assert (case["output"] / "completion-binding.json").is_file()
     assert (case["output"] / "candidate-binding.json").read_bytes() == case[
         "candidate_bytes"
@@ -300,6 +344,61 @@ def test_prepare_binds_terminal_success_and_original_distributions(
     dist = case["output"].parent / "dist"
     _write_original_distributions(case, dist)
     assert completion.verify(case["output"], dist) == binding
+
+
+@pytest.mark.parametrize("upload_state", ["missing", "failed"])
+def test_prepare_rejects_unconfirmed_native_terminal_marker_upload(
+    completion_case: dict[str, Any],
+    monkeypatch: pytest.MonkeyPatch,
+    upload_state: str,
+) -> None:
+    case = completion_case
+    if upload_state == "missing":
+        case["terminal_state"]["artifact_present"] = False
+    else:
+        case["terminal_state"]["upload_proven"] = False
+
+    def unexpected_distribution_download(*_args: object, **_kwargs: object) -> None:
+        pytest.fail("unconfirmed terminal markers must not retrieve distributions")
+
+    monkeypatch.setattr(
+        completion, "_download_archive", unexpected_distribution_download
+    )
+
+    result = _prepare(case)
+
+    assert result == {
+        "ready": False,
+        "publish": False,
+        "outcome": "terminal_marker_unconfirmed",
+    }
+    assert case["github_output"].read_text().splitlines()[0] == "ready=false"
+    assert not case["output"].exists()
+
+
+@pytest.mark.parametrize(
+    ("field", "changed"),
+    [
+        ("id", 777),
+        ("digest", "sha256:" + "8" * 64),
+        ("size_in_bytes", 257),
+    ],
+)
+def test_verify_rejects_terminal_marker_identity_drift_after_approval(
+    completion_case: dict[str, Any],
+    field: str,
+    changed: object,
+) -> None:
+    case = completion_case
+    _ = _prepare(case)
+    dist = case["output"].parent / "dist"
+    _write_original_distributions(case, dist)
+    case["terminal_artifact"][field] = changed
+
+    with pytest.raises(
+        completion.CompletionError, match="terminal marker artefact identity changed"
+    ):
+        _ = completion.verify(case["output"], dist)
 
 
 @pytest.mark.parametrize("outcome", ["pending", "remote_failure"])

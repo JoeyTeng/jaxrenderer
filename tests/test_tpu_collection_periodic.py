@@ -69,6 +69,20 @@ def _read_periodic_terminal(
     )
 
 
+def _has_periodic_terminal(
+    source_run_id: str,
+    source_attempt: str,
+    commit: str,
+    source_dir: Path,
+    budget: _BudgetLike,
+) -> dict[str, object] | None:
+    helper = cast(
+        Callable[[str, str, str, Path, _BudgetLike], dict[str, object] | None],
+        getattr(periodic, "_has_terminal"),
+    )
+    return helper(source_run_id, source_attempt, commit, source_dir, budget)
+
+
 def _source_expired(
     source_run_id: str,
     source_attempt: str,
@@ -402,6 +416,160 @@ def _complete_collect_job(
             )
         ],
     }
+
+
+def _terminal_source_dir(path: Path, *, publication_capable: bool) -> Path:
+    path.mkdir()
+    source = _source_record()
+    if publication_capable:
+        source.update(
+            candidate_artifact_id=103,
+            candidate_artifact_name=f"candidate-binding-{SOURCE_ATTEMPT}",
+            marker_artifact_id=104,
+            marker_artifact_name=f"release-pending-{SOURCE_ATTEMPT}",
+        )
+    _ = (path / "collection-source.json").write_text(
+        json.dumps(source), encoding="utf-8"
+    )
+    _ = (path / "binding.json").write_text(json.dumps(_binding()), encoding="utf-8")
+    _ = (path / "kaggle-controller-state.json").write_text(
+        json.dumps(_controller_state()), encoding="utf-8"
+    )
+    return path
+
+
+def _patch_completed_terminal_lookup(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    job: dict[str, object] | None,
+    record: dict[str, object] | None = None,
+) -> list[str]:
+    owner_attempt = _collector_run()
+    owner_attempt["conclusion"] = "failure"
+    routes: list[str] = []
+
+    def api(route: str, body: object = None) -> Any:
+        assert body is None
+        routes.append(route)
+        if route.endswith(
+            f"/actions/runs/{COLLECTOR_RUN}/attempts/{COLLECTOR_ATTEMPT}"
+        ):
+            return owner_attempt
+        if route.endswith(
+            f"/actions/runs/{COLLECTOR_RUN}/attempts/{COLLECTOR_ATTEMPT}/jobs?per_page=100"
+        ):
+            return {
+                "total_count": 1 if job is not None else 0,
+                "jobs": [job] if job is not None else [],
+            }
+        if route.endswith(f"/compare/{COLLECTOR_SHA}...master"):
+            return {"status": "ahead", "base_commit": {"sha": COLLECTOR_SHA}}
+        raise AssertionError(f"unexpected API route: {route}")
+
+    def terminal_artifacts(
+        source_run: int, name: str, budget: _BudgetLike
+    ) -> list[dict[str, object]]:
+        del source_run, name, budget
+        return [_terminal_artifact()]
+
+    def collection_artifact(
+        *,
+        source_run_id: str,
+        source_attempt: str,
+        commit: str,
+        collector_id: int,
+        collector_attempt: str,
+        collector_sha: str,
+        budget: _BudgetLike,
+    ) -> dict[str, object]:
+        del (
+            source_run_id,
+            source_attempt,
+            commit,
+            collector_id,
+            collector_attempt,
+            collector_sha,
+            budget,
+        )
+        return {"id": 600, "name": "verified-collection"}
+
+    terminal = _terminal_record() if record is None else record
+    monkeypatch.setattr(accelerator_gate, "gh_api", api)
+    monkeypatch.setattr(periodic, "_terminal_artifacts", terminal_artifacts)
+    monkeypatch.setattr(periodic, "_collection_artifact", collection_artifact)
+    monkeypatch.setattr(collection_gate, "download_member", _write_record(terminal))
+    monkeypatch.setattr(release_tpu_gate, "verify_master_history", _no_master_history)
+    return routes
+
+
+def test_completed_publication_source_with_failed_marker_upload_remains_eligible(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    job = _complete_collect_job(
+        int(COLLECTOR_RUN), COLLECTOR_SHA, SOURCE_RUN, SOURCE_ATTEMPT
+    )
+    job["conclusion"] = "failure"
+    steps = cast(list[dict[str, object]], job["steps"])
+    steps[-1]["conclusion"] = "failure"
+    routes = _patch_completed_terminal_lookup(monkeypatch, job=job)
+    source_dir = _terminal_source_dir(tmp_path / "source", publication_capable=True)
+
+    result = _has_periodic_terminal(
+        SOURCE_RUN, SOURCE_ATTEMPT, SOURCE_SHA, source_dir, _new_budget()
+    )
+
+    assert result is None
+    assert any(route.endswith("/jobs?per_page=100") for route in routes)
+
+
+def test_completed_publication_source_with_valid_collect_proof_is_terminal(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    job = _complete_collect_job(
+        int(COLLECTOR_RUN), COLLECTOR_SHA, SOURCE_RUN, SOURCE_ATTEMPT
+    )
+    _ = _patch_completed_terminal_lookup(monkeypatch, job=job)
+    source_dir = _terminal_source_dir(tmp_path / "source", publication_capable=True)
+
+    result = _has_periodic_terminal(
+        SOURCE_RUN, SOURCE_ATTEMPT, SOURCE_SHA, source_dir, _new_budget()
+    )
+
+    assert result == _terminal_record()
+
+
+def test_completed_legacy_base_receipt_keeps_validation_only_terminal_behavior(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    routes = _patch_completed_terminal_lookup(monkeypatch, job=None)
+    source_dir = _terminal_source_dir(tmp_path / "source", publication_capable=False)
+
+    result = _has_periodic_terminal(
+        SOURCE_RUN, SOURCE_ATTEMPT, SOURCE_SHA, source_dir, _new_budget()
+    )
+
+    assert result == _terminal_record()
+    assert not any(route.endswith("/jobs?per_page=100") for route in routes)
+
+
+def test_public_verified_terminal_artifacts_requires_job_proof(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    job = _complete_collect_job(
+        int(COLLECTOR_RUN), COLLECTOR_SHA, SOURCE_RUN, SOURCE_ATTEMPT
+    )
+    routes = _patch_completed_terminal_lookup(monkeypatch, job=job)
+
+    proofs = periodic.verified_terminal_artifacts(
+        SOURCE_RUN,
+        SOURCE_ATTEMPT,
+        SOURCE_SHA,
+        _binding(),
+        str(_controller_state()["kernel_id"]),
+    )
+
+    assert proofs == [(_terminal_artifact(), _terminal_record())]
+    assert any(route.endswith("/jobs?per_page=100") for route in routes)
 
 
 def test_equivalent_verified_terminal_proofs_choose_stable_collector_identity() -> None:

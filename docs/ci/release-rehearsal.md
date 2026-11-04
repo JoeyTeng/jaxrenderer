@@ -45,14 +45,16 @@ attempt. CPU, build and GPU gates and the original TPU submission must have
 passed. Original bindings, distributions, collection and completion artefacts
 are retained for 30 days.
 
-To manually collect a result, use the original publishing run ID and attempt,
-candidate SHA, and the periodic collector run ID and attempt:
+To replay completion after collection, use the original publishing run ID and
+attempt, its controller SHA (`head_sha` in the Actions run), and the periodic
+collector run ID and attempt. For an existing-tag recovery, the controller SHA
+differs from the candidate tag's commit; pass the controller SHA here:
 
 ```sh
 gh workflow run complete-release.yml --ref master \
   -f source_run_id=SOURCE_RUN_ID \
   -f source_attempt=SOURCE_ATTEMPT \
-  -f commit=FULL_COMMIT_SHA \
+  -f commit=CONTROLLER_COMMIT_SHA \
   -f collector_run_id=COLLECTOR_RUN_ID \
   -f collector_attempt=COLLECTOR_ATTEMPT
 ```
