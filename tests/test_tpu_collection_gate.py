@@ -25,9 +25,13 @@ def _context() -> str:
 
 
 def binding() -> dict[str, object]:
+    return binding_for(HEAD)
+
+
+def binding_for(head_sha: str) -> dict[str, object]:
     return {
         "kind": "release",
-        "head_sha": HEAD,
+        "head_sha": head_sha,
         "head_repository": gate.REPOSITORY,
         "run_id": "789.3",
     }
@@ -43,6 +47,61 @@ def state() -> dict[str, object]:
         submitted_version=1,
         status="queued",
         outcome="queue_timeout",
+    )
+    return value
+
+
+def candidate_binding(
+    *, controller_sha: str = HEAD, head_sha: str = "c" * 40, mode: str = "recovery"
+) -> dict[str, object]:
+    if mode == "rehearsal":
+        head_sha = controller_sha
+        tag = tag_ref = tag_object_sha = None
+        release_id = None
+        version = "0.2.0"
+    else:
+        tag = "v1.2.3"
+        tag_ref = f"refs/tags/{tag}"
+        tag_object_sha = "d" * 40
+        release_id = 12
+        version = "1.2.3"
+    return {
+        "mode": mode,
+        "source_commit": head_sha,
+        "head_sha": head_sha,
+        "version": version,
+        "tag": tag,
+        "tag_ref": tag_ref,
+        "tag_object_sha": tag_object_sha,
+        "release_id": release_id,
+        "controller_sha": controller_sha,
+        "repository": gate.REPOSITORY,
+        "run_id": "789.3",
+    }
+
+
+def handover_state(binding_value: dict[str, object]) -> dict[str, object]:
+    value: dict[str, object] = {
+        field: None for field in gate.kaggle_ci.CONTROLLER_STATE_FIELDS
+    }
+    run_tag = hashlib.sha256(
+        json.dumps(binding_value, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()[:16]
+    timestamp = "2026-11-04T10:00:00Z"
+    value.update(
+        binding=binding_value,
+        kernel_id=f"joeyteng/jaxr-{run_tag}-0123456789",
+        submitted_version=1,
+        status="queued",
+        phase="queue",
+        submitted_at=timestamp,
+        phase_started_at=timestamp,
+        execution_started_at=None,
+        updated_at=timestamp,
+        queue_elapsed_seconds=1.0,
+        execution_elapsed_seconds=0.0,
+        outcome="handover",
+        last_error=None,
     )
     return value
 
@@ -130,6 +189,9 @@ def source(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
         "jobs": {"total_count": len(jobs), "jobs": jobs},
         "artifacts": {"total_count": 2, "artifacts": artifacts},
         "controller_state": state(),
+        "binding_value": binding(),
+        "candidate_binding": None,
+        "marker_binding": None,
     }
 
     def api(route: str, body: object = None) -> Any:
@@ -145,17 +207,83 @@ def source(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
         raise AssertionError(route)
 
     def download(artifact_id: int, member: str, path: Path) -> None:
-        assert artifact_id in {1, 2}
-        value = (
-            binding()
-            if member == "tpu-release-binding.json"
-            else data["controller_state"]
-        )
+        if member == "tpu-release-binding.json":
+            value = data["binding_value"]
+        elif member == "kaggle-controller-state.json":
+            value = data["controller_state"]
+        elif member == "candidate-binding.json":
+            value = (
+                data["candidate_binding"]
+                if artifact_id == 3
+                else data["marker_binding"]
+            )
+        else:
+            raise AssertionError(member)
+        assert value is not None
         _ = path.write_text(json.dumps(value), encoding="utf-8")
 
     monkeypatch.setattr(gate.accelerator_gate, "gh_api", api)
     monkeypatch.setattr(gate, "download_member", download)
     return data
+
+
+def make_pending_source(
+    source: dict[str, Any],
+    *,
+    marker_name: str = "release-pending-3",
+    mode: str = "recovery",
+    head_sha: str = "c" * 40,
+) -> dict[str, object]:
+    source["run"]["conclusion"] = "success"
+    jobs = cast(list[dict[str, object]], source["jobs"]["jobs"])
+    jobs[:] = [job for job in jobs if job["name"] not in {"tpu / tpu", "publish"}]
+    jobs.append(
+        {
+            "name": "pending",
+            "run_id": SOURCE_RUN,
+            "status": "completed",
+            "conclusion": "success",
+        }
+    )
+    source["jobs"]["total_count"] = len(jobs)
+    candidate = candidate_binding(controller_sha=HEAD, head_sha=head_sha, mode=mode)
+    candidate_head = cast(str, candidate["head_sha"])
+    source["controller_state"] = handover_state(binding_for(candidate_head))
+    source["binding_value"] = binding_for(candidate_head)
+    source["candidate_binding"] = candidate
+    source["marker_binding"] = candidate
+    artifacts = [
+        {
+            "id": 1,
+            "name": "tpu-release-binding-3",
+            "expired": False,
+            "size_in_bytes": 1024,
+            "workflow_run": {"id": SOURCE_RUN, "head_sha": HEAD},
+        },
+        {
+            "id": 2,
+            "name": f"release-tpu-{candidate_head}-3",
+            "expired": False,
+            "size_in_bytes": 1024,
+            "workflow_run": {"id": SOURCE_RUN, "head_sha": HEAD},
+        },
+        {
+            "id": 3,
+            "name": "candidate-binding-3",
+            "expired": False,
+            "size_in_bytes": 1024,
+            "workflow_run": {"id": SOURCE_RUN, "head_sha": HEAD},
+        },
+        {
+            "id": 4,
+            "name": marker_name,
+            "expired": False,
+            "size_in_bytes": 1024,
+            "workflow_run": {"id": SOURCE_RUN, "head_sha": HEAD},
+        },
+    ]
+    source["artifacts"] = {"total_count": len(artifacts), "artifacts": artifacts}
+    return candidate
 
 
 def prepare(tmp_path: Path) -> Path:
@@ -259,6 +387,33 @@ def collected(tmp_path: Path) -> Path:
     return output
 
 
+def collected_for_binding(
+    tmp_path: Path,
+    binding_value: dict[str, object],
+    controller_state: dict[str, object],
+) -> Path:
+    output = tmp_path / "collected-candidate"
+    output.mkdir(parents=True)
+    result_value = {**result(), **binding_value}
+    _ = (output / "result.json").write_text(json.dumps(result_value), encoding="utf-8")
+    _ = (output / "kaggle-collection-report.json").write_text(
+        json.dumps(
+            {
+                "binding": binding_value,
+                "kernel_id": controller_state["kernel_id"],
+                "submitted_version": 1,
+                "requested_version": 1,
+                "success": True,
+                "outcome": "success",
+                "remote_status": "complete",
+                "version_verified": True,
+            }
+        ),
+        encoding="utf-8",
+    )
+    return output
+
+
 def test_prepare_retains_original_identity(
     source: dict[str, Any], tmp_path: Path
 ) -> None:
@@ -278,6 +433,250 @@ def test_prepare_retains_original_identity(
     ]
 
 
+@pytest.mark.parametrize("mode", ["recovery", "rehearsal"])
+def test_prepare_accepts_successful_async_handover_with_candidate_marker(
+    source: dict[str, Any], tmp_path: Path, mode: str
+) -> None:
+    candidate = make_pending_source(source, mode=mode)
+
+    prepared = gate.prepare(
+        "789", "3", HEAD, tmp_path / "source", tmp_path / "github-output"
+    )
+
+    expected_head = cast(str, candidate["head_sha"])
+    assert prepared["head_sha"] == HEAD
+    assert prepared["candidate_artifact_name"] == "candidate-binding-3"
+    assert prepared["marker_artifact_name"] == "release-pending-3"
+    assert json.loads(
+        (tmp_path / "source" / "binding.json").read_text()
+    ) == binding_for(expected_head)
+    assert (tmp_path / "source" / "candidate-binding.json").read_bytes() == (
+        tmp_path / "source" / "marker-binding.json"
+    ).read_bytes()
+    assert prepared["controller_artifact_id"] == 2
+
+
+def test_prepare_requires_pending_marker_for_successful_async_source(
+    source: dict[str, Any], tmp_path: Path
+) -> None:
+    make_pending_source(source)
+    source["artifacts"]["artifacts"].pop()
+    source["artifacts"]["total_count"] -= 1
+
+    with pytest.raises(gate.IneligibleSource, match="no pending TPU marker"):
+        _ = gate.prepare(
+            "789", "3", HEAD, tmp_path / "source", tmp_path / "github-output"
+        )
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "message"),
+    [
+        ("controller_sha", COLLECTOR_HEAD, "does not match its controller"),
+        ("run_id", "789.4", "does not match its controller"),
+        ("version", "9.9.9", "candidate binding is invalid"),
+    ],
+)
+def test_prepare_rejects_wrong_async_candidate_binding(
+    source: dict[str, Any],
+    tmp_path: Path,
+    field: str,
+    value: object,
+    message: str,
+) -> None:
+    candidate = make_pending_source(source)
+    candidate[field] = value
+    source["marker_binding"] = copy.deepcopy(candidate)
+
+    with pytest.raises(gate.CollectionGateError, match=message):
+        _ = gate.prepare(
+            "789", "3", HEAD, tmp_path / "source", tmp_path / "github-output"
+        )
+
+
+def test_prepare_rejects_pending_marker_with_different_candidate_bytes(
+    source: dict[str, Any], tmp_path: Path
+) -> None:
+    candidate = make_pending_source(source)
+    source["marker_binding"] = {**candidate, "version": "1.2.3 "}
+
+    with pytest.raises(gate.CollectionGateError, match="marker does not match"):
+        _ = gate.prepare(
+            "789", "3", HEAD, tmp_path / "source", tmp_path / "github-output"
+        )
+
+
+def test_prepare_rejects_pending_source_when_another_gate_failed(
+    source: dict[str, Any], tmp_path: Path
+) -> None:
+    make_pending_source(source)
+    next(job for job in source["jobs"]["jobs"] if job["name"] == "gpu / gpu")[
+        "conclusion"
+    ] = "failure"
+
+    with pytest.raises(gate.IneligibleSource, match="required job did not pass"):
+        _ = gate.prepare(
+            "789", "3", HEAD, tmp_path / "source", tmp_path / "github-output"
+        )
+
+
+def test_prepare_separates_legacy_recovery_controller_and_release_sha(
+    source: dict[str, Any], tmp_path: Path
+) -> None:
+    release_sha = "c" * 40
+    candidate = candidate_binding(controller_sha=HEAD, head_sha=release_sha)
+    source["candidate_binding"] = candidate
+    source["marker_binding"] = copy.deepcopy(candidate)
+    source["binding_value"] = binding_for(release_sha)
+    source["controller_state"] = {
+        **state(),
+        "binding": binding_for(release_sha),
+        "outcome": "execution_timeout",
+        "status": "running",
+    }
+    source["artifacts"]["artifacts"] = [
+        {
+            "id": 1,
+            "name": "tpu-release-binding-3",
+            "expired": False,
+            "size_in_bytes": 1024,
+            "workflow_run": {"id": SOURCE_RUN, "head_sha": HEAD},
+        },
+        {
+            "id": 2,
+            "name": f"release-tpu-{release_sha}-3",
+            "expired": False,
+            "size_in_bytes": 1024,
+            "workflow_run": {"id": SOURCE_RUN, "head_sha": HEAD},
+        },
+        {
+            "id": 3,
+            "name": "candidate-binding-3",
+            "expired": False,
+            "size_in_bytes": 1024,
+            "workflow_run": {"id": SOURCE_RUN, "head_sha": HEAD},
+        },
+        {
+            "id": 4,
+            "name": "recovery-source-binding-3",
+            "expired": False,
+            "size_in_bytes": 1024,
+            "workflow_run": {"id": SOURCE_RUN, "head_sha": HEAD},
+        },
+    ]
+    source["artifacts"]["total_count"] = 4
+
+    prepared = gate.prepare(
+        "789", "3", HEAD, tmp_path / "source", tmp_path / "github-output"
+    )
+
+    assert prepared["head_sha"] == HEAD
+    assert json.loads(
+        (tmp_path / "source" / "binding.json").read_text()
+    ) == binding_for(release_sha)
+    assert prepared["controller_artifact_id"] == 2
+
+
+def test_prepare_rejects_legacy_recovery_marker_with_nonrecovery_candidate(
+    source: dict[str, Any], tmp_path: Path
+) -> None:
+    candidate = candidate_binding(controller_sha=HEAD, head_sha=HEAD, mode="release")
+    source["candidate_binding"] = candidate
+    source["marker_binding"] = copy.deepcopy(candidate)
+    source["artifacts"]["artifacts"].extend(
+        [
+            {
+                "id": 3,
+                "name": "candidate-binding-3",
+                "expired": False,
+                "size_in_bytes": 1024,
+                "workflow_run": {"id": SOURCE_RUN, "head_sha": HEAD},
+            },
+            {
+                "id": 4,
+                "name": "recovery-source-binding-3",
+                "expired": False,
+                "size_in_bytes": 1024,
+                "workflow_run": {"id": SOURCE_RUN, "head_sha": HEAD},
+            },
+        ]
+    )
+    source["artifacts"]["total_count"] = 4
+
+    with pytest.raises(gate.CollectionGateError, match="not a recovery candidate"):
+        _ = gate.prepare(
+            "789", "3", HEAD, tmp_path / "source", tmp_path / "github-output"
+        )
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("submitted_version", 2),
+        ("status", "failed"),
+        ("phase", "unknown"),
+        ("last_error", "unknown error"),
+        ("queue_elapsed_seconds", float("nan")),
+    ],
+)
+def test_prepare_rejects_malformed_pending_handover_state(
+    source: dict[str, Any], tmp_path: Path, field: str, value: object
+) -> None:
+    make_pending_source(source)
+    source["controller_state"][field] = value
+
+    with pytest.raises(gate.CollectionGateError, match="handover"):
+        _ = gate.prepare(
+            "789", "3", HEAD, tmp_path / "source", tmp_path / "github-output"
+        )
+
+
+def test_finish_reports_native_success_for_async_pending_source(
+    source: dict[str, Any], tmp_path: Path
+) -> None:
+    candidate = make_pending_source(source)
+    original = tmp_path / "source"
+    _ = gate.prepare("789", "3", HEAD, original, tmp_path / "github-output")
+    actual_binding = binding_for(cast(str, candidate["head_sha"]))
+    output = collected_for_binding(
+        tmp_path, actual_binding, cast(dict[str, object], source["controller_state"])
+    )
+
+    receipt = gate.finish(original, output, True)
+
+    assert receipt["binding"] == actual_binding
+    assert receipt["source_conclusion"] == "success"
+    assert receipt["validation_only"] is True
+    assert receipt["release_gate_credit"] is False
+
+
+def test_revalidate_supports_explicit_frozen_collector_identity(
+    source: dict[str, Any], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    original = prepare(tmp_path)
+    monkeypatch.setenv("GITHUB_RUN_ID", "991")
+    monkeypatch.setenv("GITHUB_RUN_ATTEMPT", "1")
+
+    with pytest.raises(gate.CollectionGateError, match="another collector"):
+        _ = gate.revalidate(original)
+
+    saved_source, saved_binding, _ = gate.revalidate(
+        original,
+        expected_collector_run_id="990.1",
+        expected_collector_sha=COLLECTOR_HEAD,
+    )
+    assert saved_source["collector_run_id"] == "990.1"
+    assert saved_binding == binding()
+
+    monkeypatch.setenv("GITHUB_REF", "refs/heads/feature")
+    with pytest.raises(gate.accelerator_gate.GateError, match="master branch"):
+        _ = gate.revalidate(
+            original,
+            expected_collector_run_id="990.1",
+            expected_collector_sha=COLLECTOR_HEAD,
+        )
+
+
 @pytest.mark.parametrize(
     ("field", "value"),
     [
@@ -287,7 +686,6 @@ def test_prepare_retains_original_identity(
         ("path", ".github/workflows/release-tpu.yml"),
         ("event", "pull_request"),
         ("status", "in_progress"),
-        ("conclusion", "success"),
         ("repository", {"full_name": "someone/jaxrenderer"}),
         ("head_repository", {"full_name": "someone/jaxrenderer"}),
     ],
@@ -429,6 +827,15 @@ def test_prepare_rejects_unknown_controller_outcome(
     source: dict[str, Any], tmp_path: Path
 ) -> None:
     source["controller_state"]["outcome"] = "unrecognised_future_outcome"
+
+    with pytest.raises(gate.CollectionGateError, match="outcome is unknown"):
+        _ = prepare(tmp_path)
+
+
+def test_prepare_rejects_malformed_controller_outcome_as_gate_error(
+    source: dict[str, Any], tmp_path: Path
+) -> None:
+    source["controller_state"]["outcome"] = []
 
     with pytest.raises(gate.CollectionGateError, match="outcome is unknown"):
         _ = prepare(tmp_path)

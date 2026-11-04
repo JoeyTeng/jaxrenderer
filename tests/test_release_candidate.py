@@ -185,6 +185,140 @@ def test_recovery_binds_release_tag_commit_version_and_run(
     ]
 
 
+def test_verify_frozen_rechecks_original_binding_without_reseating_run(
+    tmp_path: Path, dispatch: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls = install_api(monkeypatch)
+    urls = install_pypi_absent(monkeypatch)
+    original = {
+        "mode": "recovery",
+        "source_commit": HEAD,
+        "head_sha": HEAD,
+        "version": VERSION,
+        "tag": TAG,
+        "tag_ref": f"refs/tags/{TAG}",
+        "tag_object_sha": TAG_OBJECT,
+        "release_id": 12,
+        "controller_sha": CONTROLLER,
+        "repository": gate.REPOSITORY,
+        "run_id": RUN_ID,
+    }
+    path = tmp_path / "candidate-binding.json"
+    _ = path.write_text(json.dumps(original), encoding="utf-8")
+    monkeypatch.setenv("GITHUB_RUN_ID", "999")
+    monkeypatch.setenv("GITHUB_RUN_ATTEMPT", "8")
+    monkeypatch.setenv("GITHUB_SHA", "d" * 40)
+
+    assert gate.verify_frozen(path) == original
+    assert urls == [f"https://pypi.org/pypi/jaxrenderer/{VERSION}/json"]
+    assert f"repos/{gate.REPOSITORY}/releases/tags/{TAG}" in calls
+    assert f"repos/{gate.REPOSITORY}/compare/{HEAD}...master" in calls
+
+
+def test_verify_frozen_rejects_changed_release_identity(
+    tmp_path: Path, dispatch: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _ = install_api(monkeypatch, release_id=13)
+    original = {
+        "mode": "recovery",
+        "source_commit": HEAD,
+        "head_sha": HEAD,
+        "version": VERSION,
+        "tag": TAG,
+        "tag_ref": f"refs/tags/{TAG}",
+        "tag_object_sha": TAG_OBJECT,
+        "release_id": 12,
+        "controller_sha": CONTROLLER,
+        "repository": gate.REPOSITORY,
+        "run_id": RUN_ID,
+    }
+    path = tmp_path / "candidate-binding.json"
+    _ = path.write_text(json.dumps(original), encoding="utf-8")
+
+    with pytest.raises(gate.CandidateError, match="identity changed"):
+        _ = gate.verify_frozen(path)
+
+
+@pytest.mark.parametrize(
+    ("override", "message"),
+    [
+        ({"tag_object_sha": "d" * 40}, "tag changed"),
+        (
+            {
+                "version_content": {
+                    "encoding": "base64",
+                    "size": len(
+                        b'[project]\nname = "jaxrenderer"\nversion = "0.6.0"\n'
+                    ),
+                    "content": base64.b64encode(
+                        b'[project]\nname = "jaxrenderer"\nversion = "0.6.0"\n'
+                    ).decode("ascii"),
+                }
+            },
+            "version changed",
+        ),
+    ],
+)
+def test_verify_frozen_rejects_changed_tag_or_version(
+    tmp_path: Path,
+    dispatch: None,
+    monkeypatch: pytest.MonkeyPatch,
+    override: dict[str, object],
+    message: str,
+) -> None:
+    _ = install_api(monkeypatch, **override)
+    _ = install_pypi_absent(monkeypatch)
+    original = {
+        "mode": "recovery",
+        "source_commit": HEAD,
+        "head_sha": HEAD,
+        "version": VERSION,
+        "tag": TAG,
+        "tag_ref": f"refs/tags/{TAG}",
+        "tag_object_sha": TAG_OBJECT,
+        "release_id": 12,
+        "controller_sha": CONTROLLER,
+        "repository": gate.REPOSITORY,
+        "run_id": RUN_ID,
+    }
+    path = tmp_path / "candidate-binding.json"
+    _ = path.write_text(json.dumps(original), encoding="utf-8")
+
+    with pytest.raises(gate.CandidateError, match=message):
+        _ = gate.verify_frozen(path)
+
+
+def test_verify_frozen_rejects_existing_pypi_version(
+    tmp_path: Path, dispatch: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _ = install_api(monkeypatch)
+    original = {
+        "mode": "recovery",
+        "source_commit": HEAD,
+        "head_sha": HEAD,
+        "version": VERSION,
+        "tag": TAG,
+        "tag_ref": f"refs/tags/{TAG}",
+        "tag_object_sha": TAG_OBJECT,
+        "release_id": 12,
+        "controller_sha": CONTROLLER,
+        "repository": gate.REPOSITORY,
+        "run_id": RUN_ID,
+    }
+    path = tmp_path / "candidate-binding.json"
+    _ = path.write_text(json.dumps(original), encoding="utf-8")
+
+    def existing(request: Request, *, timeout: float) -> FakeResponse:
+        assert timeout == 15
+        assert request.full_url == f"https://pypi.org/pypi/jaxrenderer/{VERSION}/json"
+        body = json.dumps({"info": {"version": VERSION}}).encode()
+        return FakeResponse(body)
+
+    monkeypatch.setattr(gate, "urlopen", existing)
+    with pytest.raises(gate.CandidateError, match="already exists"):
+        _ = gate.verify_frozen(path)
+
+
 def test_published_release_event_binds_current_event_release_and_publishes(
     tmp_path: Path, dispatch: None, monkeypatch: pytest.MonkeyPatch
 ) -> None:

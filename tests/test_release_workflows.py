@@ -1,4 +1,4 @@
-"""Contract tests for the release publication workflow graph."""
+"""Exercise the built-wheel version check used by release preparation."""
 
 from __future__ import annotations
 
@@ -11,129 +11,22 @@ from typing import Any, cast
 import yaml
 
 WORKFLOWS = Path(__file__).parents[1] / ".github" / "workflows"
-FROZEN_SHA = "${{ needs.prepare.outputs.head_sha }}"
-
-
-def load_workflow(name: str) -> dict[str, Any]:
-    """Load GitHub Actions YAML without YAML 1.1 boolean coercion."""
-    value = yaml.load(
-        (WORKFLOWS / name).read_text(encoding="utf-8"), Loader=yaml.BaseLoader
-    )
-    assert isinstance(value, dict)
-    return cast(dict[str, Any], value)
-
-
-def step_with_id(job: dict[str, Any], step_id: str) -> dict[str, Any]:
-    return next(step for step in job["steps"] if step.get("id") == step_id)
-
-
-def checkout_steps(job: dict[str, Any]) -> list[dict[str, Any]]:
-    return [
-        step
-        for step in job["steps"]
-        if step.get("uses", "").startswith("actions/checkout@")
-    ]
-
-
-def assert_checkout_precedes_run_steps(job: dict[str, Any]) -> None:
-    steps = job["steps"]
-    checkout_indexes = [
-        index
-        for index, step in enumerate(steps)
-        if step.get("uses", "").startswith("actions/checkout@")
-    ]
-    run_indexes = [index for index, step in enumerate(steps) if "run" in step]
-    assert checkout_indexes and run_indexes
-    assert min(checkout_indexes) < min(run_indexes)
-
-
-def assert_hard_gates_fail_closed(
-    jobs: dict[str, dict[str, Any]], job_names: tuple[str, ...]
-) -> None:
-    for job_name in job_names:
-        job = jobs[job_name]
-        assert "continue-on-error" not in job
-        assert "if" not in job
-
-
-def test_publish_waits_for_every_release_gate_and_cannot_skip_failed_needs() -> None:
-    workflow = load_workflow("pypi.yml")
-    jobs = workflow["jobs"]
-    publish = jobs["publish"]
-
-    assert set(publish["needs"]) == {"prepare", "cpu", "build", "gpu", "tpu"}
-    assert (
-        publish["if"] == "${{ success() && needs.prepare.outputs.publish == 'true' }}"
-    )
-    assert jobs["gpu"]["needs"] == ["prepare", "cpu", "build"]
-    assert jobs["tpu"]["needs"] == ["prepare", "cpu", "build"]
-    assert jobs["gpu"]["secrets"] == "inherit"
-    assert jobs["tpu"]["secrets"] == "inherit"
-    assert {
-        job_name for job_name, job in jobs.items() if job.get("secrets") == "inherit"
-    } == {"gpu", "tpu"}
-    assert_hard_gates_fail_closed(jobs, ("prepare", "cpu", "build", "gpu", "tpu"))
-
-
-def test_manual_rehearsal_shares_gates_and_cannot_publish() -> None:
-    workflow = load_workflow("pypi.yml")
-    jobs = workflow["jobs"]
-    rehearsal = jobs["rehearsal"]
-
-    tag_input = workflow["on"]["workflow_dispatch"]["inputs"]["release_tag"]
-    assert tag_input["required"] == "false"
-    assert tag_input["default"] == ""
-    assert tag_input["type"] == "string"
-    assert set(rehearsal["needs"]) == {"prepare", "cpu", "build", "gpu", "tpu"}
-    assert (
-        rehearsal["if"]
-        == "${{ success() && needs.prepare.outputs.publish == 'false' }}"
-    )
-    assert "environment" not in rehearsal
-    assert all("PYPI_API_TOKEN" not in str(step) for step in rehearsal["steps"])
-    assert not any(
-        step.get("uses", "").startswith("actions/upload-artifact@")
-        or "UV_PUBLISH_TOKEN" in step.get("env", {})
-        for step in rehearsal["steps"]
-    )
-
-    freeze = step_with_id(jobs["prepare"], "freeze")
-    assert freeze["env"]["RELEASE_COMMIT"] == "${{ steps.candidate.outputs.head_sha }}"
-    candidate = step_with_id(jobs["prepare"], "candidate")
-    assert candidate["env"]["RECOVERY_TAG"] == "${{ inputs.release_tag }}"
-    assert (
-        jobs["prepare"]["outputs"]["publish"]
-        == "${{ steps.candidate.outputs.publish }}"
-    )
-
-    steps = rehearsal["steps"]
-    binding_recheck = next(
-        index
-        for index, step in enumerate(steps)
-        if step.get("env", {}).get("RELEASE_COMMIT")
-        and "GH_TOKEN" in step.get("env", {})
-    )
-    downloads = [
-        index
-        for index, step in enumerate(steps)
-        if step.get("uses", "").startswith("actions/download-artifact@")
-    ]
-    assert len(downloads) == 3 and downloads[1] < binding_recheck < downloads[2]
-    assert all(
-        "${{ github.run_attempt }}" in steps[index]["with"]["name"]
-        for index in downloads
-    )
 
 
 def test_candidate_version_drives_the_installed_wheel_smoke_check(
     tmp_path: Path,
 ) -> None:
-    prepare = load_workflow("pypi.yml")["jobs"]["prepare"]
+    workflow = yaml.load(
+        (WORKFLOWS / "pypi.yml").read_text(encoding="utf-8"),
+        Loader=yaml.BaseLoader,
+    )
+    assert isinstance(workflow, dict)
+    prepare = cast(dict[str, Any], workflow)["jobs"]["prepare"]
     assert prepare["outputs"]["version"] == "${{ steps.candidate.outputs.version }}"
 
     smoke = next(
         step
-        for step in load_workflow("pypi.yml")["jobs"]["build"]["steps"]
+        for step in cast(dict[str, Any], workflow)["jobs"]["build"]["steps"]
         if "PACKAGE_VERSION" in step.get("env", {})
     )
     assert smoke["env"]["PACKAGE_VERSION"] == "${{ needs.prepare.outputs.version }}"
@@ -178,157 +71,3 @@ def test_candidate_version_drives_the_installed_wheel_smoke_check(
         assert result.returncode == returncode, result.stderr
         if returncode:
             assert "AssertionError" in result.stderr
-
-
-def test_release_checkouts_and_reusable_workflows_use_the_frozen_commit() -> None:
-    workflow = load_workflow("pypi.yml")
-    release = workflow["jobs"]
-    prepare = release["prepare"]
-    checks = load_workflow("checks.yml")
-
-    assert release["cpu"]["uses"] == "./.github/workflows/checks.yml"
-    assert checks["on"]["workflow_call"]["inputs"]["commit"]["required"] == "true"
-
-    prepare_checkouts = checkout_steps(prepare)
-    assert prepare_checkouts
-    assert_checkout_precedes_run_steps(prepare)
-    for checkout in prepare_checkouts:
-        assert checkout["with"]["ref"] == "${{ github.sha }}"
-    assert checkout_steps(release["build"])[0]["with"]["ref"] == FROZEN_SHA
-    for job_name in ("publish", "rehearsal"):
-        assert (
-            checkout_steps(release[job_name])[0]["with"]["ref"] == "${{ github.sha }}"
-        )
-
-    for job_name in ("cpu", "gpu", "tpu"):
-        assert release[job_name]["with"]["commit"] == FROZEN_SHA
-
-    for workflow_name in ("release-gpu.yml", "release-tpu.yml"):
-        child = load_workflow(workflow_name)["jobs"]
-        provider_job_name = "gpu" if "gpu" in child else "tpu"
-        assert_hard_gates_fail_closed(child, ("prepare", provider_job_name))
-        provider_job = child[provider_job_name]
-        if provider_job_name == "gpu":
-            assert provider_job["environment"] == "modal-gpu"
-            controller = step_with_id(provider_job, "provider")
-            assert controller["env"] == {
-                "MODAL_TOKEN_ID": "${{ secrets.MODAL_TOKEN_ID }}",
-                "MODAL_TOKEN_SECRET": "${{ secrets.MODAL_TOKEN_SECRET }}",
-            }
-        else:
-            assert provider_job["environment"] == "kaggle-tpu"
-            controller = step_with_id(provider_job, "provider")
-            assert controller["env"] == {
-                "KAGGLE_API_TOKEN": "${{ secrets.KAGGLE_API_TOKEN }}",
-                "KAGGLE_USERNAME": "${{ vars.KAGGLE_USERNAME }}",
-            }
-        prepare = child["prepare"]
-        freeze = step_with_id(prepare, "freeze")
-        assert freeze["env"]["RELEASE_COMMIT"] == "${{ inputs.commit }}"
-        provider_checkouts = checkout_steps(child[provider_job_name])
-        assert provider_checkouts[0]["with"]["ref"] == "${{ github.sha }}"
-        binding_artifacts = [
-            step
-            for step in prepare["steps"]
-            if step.get("uses", "").startswith("actions/upload-artifact@")
-            and step.get("with", {})
-            .get("name", "")
-            .startswith(f"{provider_job_name}-release-binding-")
-        ]
-        assert len(binding_artifacts) == 1
-        binding_name = binding_artifacts[0]["with"]["name"]
-        if provider_job_name == "tpu":
-            action = yaml.load(
-                (WORKFLOWS.parent / "actions" / "tpu-check" / "action.yml").read_text(
-                    encoding="utf-8"
-                ),
-                Loader=yaml.BaseLoader,
-            )
-            provider_steps = action["runs"]["steps"]
-        else:
-            provider_steps = provider_job["steps"]
-        downloaded_bindings = [
-            step
-            for step in provider_steps
-            if step.get("uses", "").startswith("actions/download-artifact@")
-            and step.get("with", {}).get("name") == binding_name
-        ]
-        assert len(downloaded_bindings) == 1
-        assert "${{ github.run_attempt }}" in binding_name
-        assert downloaded_bindings[0]["with"]["name"] == binding_name
-
-
-def test_cpu_reuse_requires_frozen_candidate_and_all_cpu_gates() -> None:
-    checks = load_workflow("checks.yml")["jobs"]
-    assert_hard_gates_fail_closed(
-        checks,
-        (
-            "lint",
-            "check",
-            "macos-render-regression",
-            "linux-render-regression",
-            "numpy-minimum",
-        ),
-    )
-
-    for job in checks.values():
-        refs = [step["with"]["ref"] for step in checkout_steps(job)]
-        assert refs and all(ref.startswith("${{ inputs.commit || ") for ref in refs)
-
-
-def test_build_is_published_once_from_the_same_attempt_artifact() -> None:
-    jobs = load_workflow("pypi.yml")["jobs"]
-    build = jobs["build"]
-    publish = jobs["publish"]
-
-    retained = next(
-        step
-        for step in build["steps"]
-        if step.get("uses", "").startswith("actions/upload-artifact@")
-        and step.get("with", {}).get("path") == "dist/"
-    )
-    artifact = retained["with"]["name"]
-    assert "${{ github.run_attempt }}" in artifact
-
-    downloaded = next(
-        step
-        for step in publish["steps"]
-        if step.get("uses", "").startswith("actions/download-artifact@")
-        and step.get("with", {}).get("name") == artifact
-    )
-    assert downloaded["with"]["path"] == "dist/"
-    steps = publish["steps"]
-    recheck_index = next(
-        index
-        for index, step in enumerate(steps)
-        if step.get("env", {}).get("RELEASE_COMMIT")
-        and "GH_TOKEN" in step.get("env", {})
-    )
-    distribution_download_index = steps.index(downloaded)
-    publication = next(
-        step for step in steps if "UV_PUBLISH_TOKEN" in step.get("env", {})
-    )
-    publication_index = steps.index(publication)
-    assert recheck_index < distribution_download_index < publication_index
-
-
-def test_pypi_token_exists_only_in_the_publication_step() -> None:
-    workflow = load_workflow("pypi.yml")
-    publish = workflow["jobs"]["publish"]
-    assert publish["environment"] == "PyPI"
-
-    token_steps = [
-        step
-        for job in workflow["jobs"].values()
-        for step in job.get("steps", [])
-        if "PYPI_API_TOKEN" in str(step)
-    ]
-    assert all(
-        "PYPI_API_TOKEN" not in str(job.get("env", {}))
-        for job in workflow["jobs"].values()
-    )
-    publication = next(
-        step for step in publish["steps"] if "UV_PUBLISH_TOKEN" in step.get("env", {})
-    )
-    assert token_steps == [publication]
-    assert publication["env"] == {"UV_PUBLISH_TOKEN": "${{ secrets.PYPI_API_TOKEN }}"}

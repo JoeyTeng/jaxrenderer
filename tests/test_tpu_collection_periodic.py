@@ -323,12 +323,14 @@ def test_periodic_context_is_exact_and_manual_event_is_supported(
             _ = _require_periodic_context()
 
 
+@pytest.mark.parametrize("conclusion", ["failure", "success"])
 def test_discover_returns_exact_candidates_and_matrix(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, conclusion: str
 ) -> None:
     _set_periodic_context(monkeypatch)
     _patch_prepare(monkeypatch)
     run = _run()
+    run["conclusion"] = conclusion
 
     def api(route: str, body: object = None) -> Any:
         assert body is None
@@ -580,13 +582,14 @@ def test_discover_skips_known_non_timeout_sources_and_keeps_timeout_candidate(
     }
 
 
-def test_discover_skips_recovery_marker_and_keeps_ordinary_candidate(
+def test_discover_includes_validated_recovery_marker_and_ordinary_candidate(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     _set_periodic_context(monkeypatch)
     ordinary_run = _run(run_id=788, attempt=1)
     recovery_run = _run(run_id=790, attempt=2)
     recovery_sha = "c" * 40
+    release_sha = "d" * 40
     recovery_run["head_sha"] = recovery_sha
     runs = {788: ordinary_run, 790: recovery_run}
     prepared: list[str] = []
@@ -598,21 +601,6 @@ def test_discover_skips_recovery_marker_and_keeps_ordinary_candidate(
         for run_id, run in runs.items():
             if route.endswith(f"/actions/runs/{run_id}"):
                 return run
-            if route.endswith(f"/actions/runs/{run_id}/artifacts?per_page=100&page=1"):
-                if run_id == 790:
-                    return {
-                        "total_count": 1,
-                        "artifacts": [
-                            {
-                                "id": 505,
-                                "name": "recovery-source-binding-2",
-                                "expired": False,
-                                "size_in_bytes": 512,
-                                "workflow_run": {"id": 790, "head_sha": recovery_sha},
-                            }
-                        ],
-                    }
-                return {"total_count": 0, "artifacts": []}
         if route.startswith(f"repos/{periodic.REPOSITORY}/actions/artifacts?"):
             return {"total_count": 0, "artifacts": []}
         raise AssertionError(route)
@@ -636,11 +624,41 @@ def test_discover_skips_recovery_marker_and_keeps_ordinary_candidate(
             "binding_artifact_id": 101,
             "controller_artifact_id": 102,
         }
+        if source_run == "790":
+            source.update(
+                candidate_artifact_id=103,
+                candidate_artifact_name="candidate-binding-2",
+                marker_artifact_id=505,
+                marker_artifact_name="recovery-source-binding-2",
+            )
+            binding = {
+                "kind": "release",
+                "head_sha": release_sha,
+                "head_repository": periodic.REPOSITORY,
+                "run_id": "790.2",
+            }
         _ = (output / "binding.json").write_text(json.dumps(binding), encoding="utf-8")
         state = _controller_state()
         _ = (output / "kaggle-controller-state.json").write_text(
             json.dumps({**state, "binding": binding}), encoding="utf-8"
         )
+        if source_run == "790":
+            candidate = {
+                "mode": "recovery",
+                "source_commit": release_sha,
+                "head_sha": release_sha,
+                "version": "1.2.3",
+                "tag": "v1.2.3",
+                "tag_ref": "refs/tags/v1.2.3",
+                "tag_object_sha": "e" * 40,
+                "release_id": 123,
+                "controller_sha": recovery_sha,
+                "repository": periodic.REPOSITORY,
+                "run_id": "790.2",
+            }
+            candidate_bytes = json.dumps(candidate).encode()
+            _ = (output / "candidate-binding.json").write_bytes(candidate_bytes)
+            _ = (output / "marker-binding.json").write_bytes(candidate_bytes)
         _ = (output / "collection-source.json").write_text(
             json.dumps(source), encoding="utf-8"
         )
@@ -653,10 +671,11 @@ def test_discover_skips_recovery_marker_and_keeps_ordinary_candidate(
 
     report = periodic.discover(tmp_path / "discovery", tmp_path / "github-output")
 
-    assert prepared == ["788"]
+    assert prepared == ["788", "790"]
     assert report["matrix"] == {
         "include": [
-            {"source_run_id": "788", "source_attempt": "1", "commit": SOURCE_SHA}
+            {"source_run_id": "788", "source_attempt": "1", "commit": SOURCE_SHA},
+            {"source_run_id": "790", "source_attempt": "2", "commit": recovery_sha},
         ]
     }
 
@@ -945,6 +964,68 @@ def test_collect_source_terminal_outcomes(
     assert finish_calls == ([True] if outcome == "success" else [])
 
 
+def test_collect_source_can_move_from_pending_to_verified_success(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _set_periodic_context(monkeypatch)
+    _patch_prepare(monkeypatch)
+
+    def no_terminal(
+        source_run: str,
+        attempt: str,
+        commit: str,
+        source: Path,
+        budget: _BudgetLike,
+    ) -> dict[str, object] | None:
+        del source_run, attempt, commit, source, budget
+        return None
+
+    monkeypatch.setattr(periodic, "_has_terminal", no_terminal)
+    outcomes = iter(("pending", "success"))
+    finish_calls: list[bool] = []
+
+    def collect_result(
+        binding: dict[str, object], resume_state_path: Path, output_dir: Path
+    ) -> dict[str, object]:
+        del binding, resume_state_path, output_dir
+        outcome = next(outcomes)
+        return _report(outcome, status="queued" if outcome == "pending" else "complete")
+
+    def finish(source: dict[str, object], output: Path, provider_success: bool) -> None:
+        del source, output
+        finish_calls.append(provider_success)
+
+    monkeypatch.setattr(kaggle_collect, "collect", collect_result)
+    monkeypatch.setattr(collection_gate, "finish", finish)
+
+    pending, pending_exit = periodic.collect_source(
+        SOURCE_RUN,
+        SOURCE_ATTEMPT,
+        SOURCE_SHA,
+        tmp_path / "pending",
+        tmp_path / "pending-output",
+    )
+    success, success_exit = periodic.collect_source(
+        SOURCE_RUN,
+        SOURCE_ATTEMPT,
+        SOURCE_SHA,
+        tmp_path / "success",
+        tmp_path / "success-output",
+    )
+
+    assert pending == {"terminal": False, "outcome": "pending"}
+    assert pending_exit == 0
+    assert success == {"terminal": True, "outcome": "success"}
+    assert success_exit == 0
+    assert (
+        json.loads((tmp_path / "success" / "periodic-terminal.json").read_text())[
+            "remote_status"
+        ]
+        == "complete"
+    )
+    assert finish_calls == [True]
+
+
 def test_collect_source_expires_before_provider_query(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -970,10 +1051,12 @@ def test_collect_source_expires_before_provider_query(
     assert not (tmp_path / "expired" / "periodic-terminal.json").exists()
 
 
+@pytest.mark.parametrize("conclusion", ["failure", "success"])
 def test_source_expiry_uses_exact_attempt_metadata(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, conclusion: str
 ) -> None:
     old = _run(created_at=datetime.now(timezone.utc) - timedelta(days=8))
+    old["conclusion"] = conclusion
     routes: list[str] = []
 
     def api(route: str, body: object = None) -> Any:

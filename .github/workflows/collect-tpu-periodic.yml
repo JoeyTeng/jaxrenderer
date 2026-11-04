@@ -2,16 +2,12 @@ name: Collect delayed TPU results periodically
 
 on:
   schedule:
-    - cron: '17,47 * * * *'
+    - cron: '17 * * * *'
   workflow_dispatch:
 
 permissions:
   contents: read
   actions: read
-
-concurrency:
-  group: tpu-periodic-collection
-  cancel-in-progress: false
 
 jobs:
   discover:
@@ -46,6 +42,7 @@ jobs:
           retention-days: 30
 
   collect:
+    name: collect-${{ matrix.source_run_id }}-${{ matrix.source_attempt }}
     needs: discover
     if: needs.discover.outputs.has_sources == 'true'
     runs-on: ubuntu-latest
@@ -56,7 +53,6 @@ jobs:
       cancel-in-progress: false
     strategy:
       fail-fast: false
-      max-parallel: 1
       matrix: ${{ fromJSON(needs.discover.outputs.matrix) }}
     steps:
       - uses: actions/checkout@v7
@@ -103,3 +99,16 @@ jobs:
           path: periodic-artifacts/periodic-terminal.json
           if-no-files-found: error
           retention-days: 30
+
+  complete-release:
+    needs: [discover, collect]
+    if: always() && needs.discover.outputs.has_sources == 'true'
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.discover.outputs.matrix) }}
+    uses: ./.github/workflows/complete-release.yml
+    with:
+      source_run_id: ${{ matrix.source_run_id }}
+      source_attempt: ${{ matrix.source_attempt }}
+      commit: ${{ matrix.commit }}
+    secrets: inherit
