@@ -412,6 +412,10 @@ def test_prepare_rejects_duplicate_artifacts(
         "cli_error",
         "remote_terminal_failure",
         "result_validation_error",
+        "version_verification_error",
+        "handover",
+        "segment_timeout",
+        "pending",
     ],
 )
 def test_prepare_classifies_known_non_timeout_controller_results_as_ineligible(
@@ -419,6 +423,15 @@ def test_prepare_classifies_known_non_timeout_controller_results_as_ineligible(
 ) -> None:
     source["controller_state"]["outcome"] = outcome
     with pytest.raises(gate.IneligibleSource, match="not a timeout"):
+        _ = prepare(tmp_path)
+
+
+def test_prepare_rejects_unknown_controller_outcome(
+    source: dict[str, Any], tmp_path: Path
+) -> None:
+    source["controller_state"]["outcome"] = "unrecognised_future_outcome"
+
+    with pytest.raises(gate.CollectionGateError, match="outcome is unknown"):
         _ = prepare(tmp_path)
 
 
