@@ -941,7 +941,7 @@ def prepare(
         collection_dir, source, tpu_binding, state, collector_identity, collector_sha
     )
     try:
-        _ = collection_gate.finish(
+        collection_receipt = collection_gate.finish(
             source_dir,
             collection_dir / "collected",
             True,
@@ -950,8 +950,16 @@ def prepare(
         )
     except collection_gate.CollectionGateError as error:
         raise CompletionError("original TPU result failed full validation") from error
-    candidate, candidate_raw = _source_candidate(source_dir, source, tpu_binding)
-    candidate_artifact, marker_artifact = _source_artifact_identity(source, candidate)
+    source_fields = set(source)
+    source_fields.discard("_source_conclusion")
+    source_fields = frozenset(source_fields)
+    if source_fields not in {
+        frozenset(collection_gate.SOURCE_BASE_FIELDS),
+        frozenset(
+            collection_gate.SOURCE_BASE_FIELDS | collection_gate.SOURCE_CANDIDATE_FIELDS
+        ),
+    }:
+        raise CompletionError("original source manifest has an unsupported schema")
     collection_artifact_name = (
         f"tpu-periodic-{commit}-{source_id}-{attempt}-{collector_id}-{collector_try}"
     )
@@ -963,6 +971,27 @@ def prepare(
     )
     if collection_artifact.get("name") != collection_artifact_name:
         raise CompletionError("periodic collection artefact name changed")
+    if source_fields == frozenset(collection_gate.SOURCE_BASE_FIELDS):
+        if (
+            source.get("_source_conclusion") != "failure"
+            or collection_receipt.get("binding") != tpu_binding
+            or collection_receipt.get("collector_run_id") != collector_identity
+            or collection_receipt.get("collector_sha") != collector_sha
+            or collection_receipt.get("kernel_id") != state.get("kernel_id")
+            or type(collection_receipt.get("submitted_version")) is not int
+            or collection_receipt.get("submitted_version") != 1
+            or collection_receipt.get("success") is not True
+            or collection_receipt.get("validation_only") is not True
+            or collection_receipt.get("release_gate_credit") is not False
+            or collection_receipt.get("source_conclusion")
+            != source.get("_source_conclusion")
+        ):
+            raise CompletionError(
+                "legacy collection receipt does not prove validation-only success"
+            )
+        return _not_ready(github_output, "validation_only")
+    candidate, candidate_raw = _source_candidate(source_dir, source, tpu_binding)
+    candidate_artifact, marker_artifact = _source_artifact_identity(source, candidate)
     dist_artifact_name = f"release-dist-{attempt}"
     dist_artifact = _artifact_metadata(
         source_id,

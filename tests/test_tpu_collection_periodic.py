@@ -253,6 +253,7 @@ def _set_periodic_context(monkeypatch: pytest.MonkeyPatch) -> None:
         "GITHUB_SHA": COLLECTOR_SHA,
         "GITHUB_RUN_ID": COLLECTOR_RUN,
         "GITHUB_RUN_ATTEMPT": "1",
+        "GITHUB_RUN_NUMBER": "42",
     }.items():
         monkeypatch.setenv(name, value)
 
@@ -403,6 +404,75 @@ def _complete_collect_job(
     }
 
 
+def test_equivalent_verified_terminal_proofs_choose_stable_collector_identity() -> None:
+    first = _terminal_record_for(
+        SOURCE_RUN,
+        SOURCE_ATTEMPT,
+        SOURCE_SHA,
+        _binding(),
+        str(_controller_state()["kernel_id"]),
+        collector_id=991,
+        collector_attempt=1,
+        collector_sha="c" * 40,
+    )
+    second = _terminal_record_for(
+        SOURCE_RUN,
+        SOURCE_ATTEMPT,
+        SOURCE_SHA,
+        _binding(),
+        str(_controller_state()["kernel_id"]),
+        collector_id=990,
+        collector_attempt=2,
+        collector_sha=COLLECTOR_SHA,
+    )
+
+    coalesce = cast(
+        Callable[[list[dict[str, object]]], dict[str, object] | None],
+        getattr(periodic, "_coalesce_verified_terminals"),
+    )
+    selected = coalesce([first, second])
+    reversed_selected = coalesce([second, first])
+
+    assert selected is not None
+    assert reversed_selected == selected
+    assert selected["collector_run_id"] == f"{COLLECTOR_RUN}.2"
+
+
+def test_full_collection_artifact_uses_100_mib_limit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    name = (
+        f"tpu-periodic-{SOURCE_SHA}-{SOURCE_RUN}-{SOURCE_ATTEMPT}-"
+        f"{COLLECTOR_RUN}-{COLLECTOR_ATTEMPT}"
+    )
+    artifact = _artifact_metadata(601, name, COLLECTOR_RUN_ID, COLLECTOR_SHA)
+    artifact["size_in_bytes"] = 3 * 1024 * 1024
+
+    def api(route: str, body: object = None) -> Any:
+        del body
+        assert f"actions/artifacts?name={name}" in route
+        return {"total_count": 1, "artifacts": [artifact]}
+
+    monkeypatch.setattr(accelerator_gate, "gh_api", api)
+
+    collection_artifact = cast(
+        Callable[..., dict[str, object] | None],
+        getattr(periodic, "_collection_artifact"),
+    )
+    loaded = collection_artifact(
+        source_run_id=SOURCE_RUN,
+        source_attempt=SOURCE_ATTEMPT,
+        commit=SOURCE_SHA,
+        collector_id=COLLECTOR_RUN_ID,
+        collector_attempt=COLLECTOR_ATTEMPT,
+        collector_sha=COLLECTOR_SHA,
+        budget=_new_budget(),
+    )
+
+    assert loaded is not None
+    assert loaded["size_in_bytes"] == 3 * 1024 * 1024
+
+
 def test_periodic_context_is_exact_and_manual_event_is_supported(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -464,6 +534,62 @@ def test_discover_returns_exact_candidates_and_matrix(
     lines = github_output.read_text(encoding="utf-8").splitlines()
     assert lines[0] == "has_sources=true"
     assert json.loads(lines[1].removeprefix("matrix=")) == result["matrix"]
+
+
+def test_discover_caps_batch_and_rotates_over_all_eligible_sources(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _set_periodic_context(monkeypatch)
+    source_ids = list(range(100, 110))
+    runs = {source_id: _run(run_id=source_id, attempt=1) for source_id in source_ids}
+
+    def api(route: str, body: object = None) -> Any:
+        del body
+        if "actions/workflows/pypi.yml/runs?" in route:
+            return {"total_count": len(runs), "workflow_runs": list(runs.values())}
+        for source_id, run in runs.items():
+            if route.endswith(f"/actions/runs/{source_id}"):
+                return run
+        if route.startswith(f"repos/{periodic.REPOSITORY}/actions/artifacts?"):
+            return {"total_count": 0, "artifacts": []}
+        raise AssertionError(f"unexpected API route: {route}")
+
+    def prepare(
+        source_run_id: str,
+        source_attempt: str,
+        commit: str,
+        output: Path,
+        github_output: Path,
+    ) -> dict[str, object]:
+        source = _prepare_named_source(output, source_run_id, source_attempt, commit)
+        _ = github_output.write_text("", encoding="utf-8")
+        return source
+
+    monkeypatch.setattr(accelerator_gate, "gh_api", api)
+    monkeypatch.setattr(collection_gate, "prepare", prepare)
+    selected: set[int] = set()
+    for index, (run_number, run_id) in enumerate(
+        ((7, "5123"), (8, "912000"), (9, "7000000"))
+    ):
+        monkeypatch.setenv("GITHUB_RUN_NUMBER", str(run_number))
+        monkeypatch.setenv("GITHUB_RUN_ID", run_id)
+        report = periodic.discover(
+            tmp_path / f"discovery-{index}", tmp_path / f"github-output-{index}"
+        )
+        include = cast(dict[str, object], report["matrix"])["include"]
+        assert isinstance(include, list)
+        included = cast(list[object], include)
+        assert len(included) == periodic.MAX_CANDIDATES
+        assert report["inventory_count"] == len(source_ids)
+        assert report["verified_source_count"] == len(source_ids)
+        for value in included:
+            assert isinstance(value, dict)
+            candidate = cast(dict[str, object], value)
+            source_id = candidate.get("source_run_id")
+            assert isinstance(source_id, str)
+            selected.add(int(source_id))
+
+    assert selected == set(source_ids)
 
 
 def test_discover_fails_on_incomplete_run_inventory(
@@ -885,11 +1011,15 @@ def test_discover_skips_completed_collect_job_while_owner_waits_for_approval(
     }
 
 
-@pytest.mark.parametrize("old_marker_becomes_valid", [False, True])
+@pytest.mark.parametrize(
+    ("old_marker_becomes_valid", "old_outcome"),
+    [(False, "success"), (True, "success"), (True, "remote_failure")],
+)
 def test_discover_retries_orphan_marker_then_uses_unique_verified_recollection(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     old_marker_becomes_valid: bool,
+    old_outcome: str,
 ) -> None:
     _set_periodic_context(monkeypatch)
     source = _run()
@@ -917,6 +1047,8 @@ def test_discover_retries_orphan_marker_then_uses_unique_verified_recollection(
         collector_id=old_id,
         collector_attempt=old_attempt,
         collector_sha=old_sha,
+        outcome=old_outcome,
+        remote_status="failed" if old_outcome == "remote_failure" else "complete",
     )
     new_record = _terminal_record_for(
         source_run_id,
@@ -999,8 +1131,10 @@ def test_discover_retries_orphan_marker_then_uses_unique_verified_recollection(
         ]
     }
 
-    if old_marker_becomes_valid:
-        with pytest.raises(periodic.PeriodicError, match="multiple verified terminal"):
+    if old_marker_becomes_valid and old_outcome == "remote_failure":
+        with pytest.raises(
+            periodic.PeriodicError, match="conflicting verified terminal"
+        ):
             _ = periodic.discover(
                 tmp_path / "second-discovery", tmp_path / "second-github-output"
             )

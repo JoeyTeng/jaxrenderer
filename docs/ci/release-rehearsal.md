@@ -63,7 +63,9 @@ completion. The completion workflow verifies the original candidate and tag,
 source distribution artefact identity and file hashes before it can publish.
 The original PyPI tag must still be absent from PyPI. A release requires fresh
 approval in the `PyPI` environment; a rehearsal only records the verified
-completion. Existing-tag recovery runs are excluded from periodic discovery.
+completion. Existing-tag recovery runs require validated recovery markers and
+retain the distinction between controller and candidate commits. Legacy sources
+without publication markers remain validation-only.
 
 Pending remote work is non-terminal and can be checked again by a later scan. A
 verified success or explicit remote failure creates a terminal marker. API,

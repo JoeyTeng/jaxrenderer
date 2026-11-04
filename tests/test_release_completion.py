@@ -120,6 +120,7 @@ def completion_case(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str
         "candidate_artifact_name": f"candidate-binding-{SOURCE_ATTEMPT}",
         "marker_artifact_id": 104,
         "marker_artifact_name": f"release-pending-{SOURCE_ATTEMPT}",
+        "_source_conclusion": "success",
     }
     tpu_binding: dict[str, object] = {
         "head_sha": SOURCE_SHA,
@@ -201,7 +202,17 @@ def completion_case(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str
         return source, tpu_binding, state
 
     def finish_collection(*_args: object, **_kwargs: object) -> dict[str, object]:
-        return {"success": True}
+        return {
+            "binding": tpu_binding,
+            "collector_run_id": COLLECTOR_IDENTITY,
+            "collector_sha": COLLECTOR_SHA,
+            "kernel_id": state["kernel_id"],
+            "submitted_version": 1,
+            "success": True,
+            "validation_only": True,
+            "release_gate_credit": False,
+            "source_conclusion": source["_source_conclusion"],
+        }
 
     def artifact_metadata(
         _run_id: int, name: str, _commit: str, **_kwargs: object
@@ -310,6 +321,75 @@ def test_pending_or_remote_failure_is_not_ready_and_never_downloads_distribution
 
     assert result == {"ready": False, "publish": False, "outcome": outcome}
     assert case["github_output"].read_text().splitlines()[0] == "ready=false"
+    assert not case["output"].exists()
+
+
+def test_legacy_validation_only_success_is_not_ready_or_publishable(
+    completion_case: dict[str, Any],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    case = completion_case
+    source = case["source"]
+    for field in collection_gate.SOURCE_CANDIDATE_FIELDS:
+        source.pop(field)
+    source["_source_conclusion"] = "failure"
+    (case["collection"] / "source" / "candidate-binding.json").unlink()
+
+    artifact_lookups: list[str] = []
+
+    def collection_artifact_lookup(
+        run_id: int,
+        name: str,
+        commit: str,
+        **kwargs: object,
+    ) -> dict[str, object]:
+        if name != case["collection_name"]:
+            pytest.fail(
+                "legacy validation-only source must not look up release artefacts"
+            )
+        assert run_id == int(COLLECTOR_RUN)
+        assert commit == COLLECTOR_SHA
+        assert kwargs == {"expected_attempt": int(COLLECTOR_ATTEMPT)}
+        artifact_lookups.append(name)
+        return cast(dict[str, object], case["metadata"][name])
+
+    def unexpected_distribution_download(*_args: object, **_kwargs: object) -> None:
+        pytest.fail("legacy validation-only source must not retrieve distributions")
+
+    monkeypatch.setattr(completion, "_artifact_metadata", collection_artifact_lookup)
+    monkeypatch.setattr(
+        completion, "_download_archive", unexpected_distribution_download
+    )
+
+    result = _prepare(case)
+
+    assert result == {
+        "ready": False,
+        "publish": False,
+        "outcome": "validation_only",
+    }
+    assert case["github_output"].read_text().splitlines() == [
+        "ready=false",
+        "publish=false",
+        "outcome=validation_only",
+        "version=",
+        "head_sha=",
+        "mode=",
+    ]
+    assert artifact_lookups == [case["collection_name"]]
+    assert not case["output"].exists()
+
+
+def test_marker_bound_source_rejects_missing_candidate_evidence(
+    completion_case: dict[str, Any],
+) -> None:
+    case = completion_case
+    (case["collection"] / "source" / "candidate-binding.json").unlink()
+
+    with pytest.raises(completion.CompletionError, match="not a bounded regular file"):
+        _ = _prepare(case)
+
+    assert not case["github_output"].exists()
     assert not case["output"].exists()
 
 

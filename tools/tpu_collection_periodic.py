@@ -45,6 +45,19 @@ TERMINAL_FIELDS = {
     "version_verified",
     "remote_status",
 }
+TERMINAL_PROOF_FIELDS = {
+    "terminal",
+    "outcome",
+    "source_run_id",
+    "source_attempt",
+    "head_sha",
+    "binding",
+    "kernel_id",
+    "submitted_version",
+    "requested_version",
+    "version_verified",
+    "remote_status",
+}
 
 
 class PeriodicError(RuntimeError):
@@ -340,7 +353,7 @@ def _collection_artifact(
         type(artifact_id) is not int
         or artifact_id <= 0
         or type(size) is not int
-        or not 0 < size <= collection_gate.MAX_ARCHIVE_BYTES
+        or not 0 < size <= collection_gate.MAX_SOURCE_ARTIFACT_BYTES
         or item.get("expired") is not False
         or not isinstance(owner, dict)
         or type(owner_id) is not int
@@ -353,6 +366,36 @@ def _collection_artifact(
             "collection artefact identity, size or availability is invalid"
         )
     return item
+
+
+def _coalesce_verified_terminals(
+    records: list[dict[str, object]],
+) -> dict[str, object] | None:
+    """Select a stable representative only when all verified proofs agree."""
+    if not records:
+        return None
+    proof = {field: records[0][field] for field in TERMINAL_PROOF_FIELDS}
+    if any(
+        {field: record[field] for field in TERMINAL_PROOF_FIELDS} != proof
+        for record in records[1:]
+    ):
+        raise PeriodicError(
+            "conflicting verified terminal artefacts for the same source"
+        )
+
+    def collector_key(record: dict[str, object]) -> tuple[int, int, str]:
+        collector_run = record.get("collector_run_id")
+        collector_sha = record.get("collector_sha")
+        match = (
+            re.fullmatch(r"([1-9][0-9]*)\.([1-9][0-9]*)", collector_run)
+            if isinstance(collector_run, str)
+            else None
+        )
+        if match is None or not isinstance(collector_sha, str):
+            raise PeriodicError("verified terminal collector identity is malformed")
+        return (int(match.group(1)), int(match.group(2)), collector_sha)
+
+    return min(records, key=collector_key)
 
 
 _COLLECT_JOB_EVIDENCE_STEPS = {
@@ -620,9 +663,29 @@ def _has_terminal(
         )
         if collection_artifact is not None:
             verified.append(record)
-    if len(verified) > 1:
-        raise PeriodicError("multiple verified terminal artefacts have the same source")
-    return verified[0] if verified else None
+    return _coalesce_verified_terminals(verified)
+
+
+def _candidate_batch(
+    candidates: list[dict[str, str]], collector_run_number: int
+) -> list[dict[str, str]]:
+    """Choose a deterministic rotating slice so capped backlogs still drain."""
+    if len(candidates) <= MAX_CANDIDATES:
+        return candidates
+    if type(collector_run_number) is not int or collector_run_number <= 0:
+        raise PeriodicError("collector run number is malformed")
+    ordered = sorted(
+        candidates,
+        key=lambda candidate: (
+            int(candidate["source_run_id"]),
+            int(candidate["source_attempt"]),
+            candidate["commit"],
+        ),
+    )
+    rotation = (collector_run_number - 1) % len(ordered)
+    return [
+        ordered[(rotation + index) % len(ordered)] for index in range(MAX_CANDIDATES)
+    ]
 
 
 def _write_json(path: Path, value: dict[str, object]) -> None:
@@ -652,6 +715,9 @@ def _write_summary(outcome: str, detail: str) -> None:
 
 def discover(output_dir: Path, github_output: Path) -> dict[str, object]:
     _ = _require_context()
+    run_number = os.environ.get("GITHUB_RUN_NUMBER", "")
+    if re.fullmatch(r"[1-9][0-9]*", run_number) is None:
+        raise PeriodicError("GITHUB_RUN_NUMBER must be a positive integer")
     output_dir.mkdir(parents=True, exist_ok=False)
     budget = _Budget()
     candidates: list[dict[str, str]] = []
@@ -697,12 +763,10 @@ def discover(output_dir: Path, github_output: Path) -> dict[str, object]:
                                 "commit": commit,
                             }
                         )
-                        if len(candidates) > MAX_CANDIDATES:
-                            raise PeriodicError(
-                                "eligible TPU collection inventory exceeds its candidate limit"
-                            )
             except collection_gate.IneligibleSource:
                 continue
+    eligible_count = len(candidates)
+    candidates = _candidate_batch(candidates, int(run_number))
     matrix: dict[str, object] = {"include": candidates}
     report: dict[str, object] = {
         "checked_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
@@ -724,7 +788,8 @@ def discover(output_dir: Path, github_output: Path) -> dict[str, object]:
     )
     _write_summary(
         "ready" if candidates else "no pending sources",
-        f"Verified {scanned} source run(s); {len(candidates)} need collection.",
+        f"Verified {scanned} source run(s); {len(candidates)} of {eligible_count} "
+        f"need collection in this batch (maximum {MAX_CANDIDATES}).",
     )
     return report
 
