@@ -36,7 +36,9 @@ for the same notebook, with a 22-hour queue budget and a separate 45-minute
 execution budget. State and any validated result pass between jobs in the same
 workflow attempt. Intermediate handovers do not pass the TPU gate.
 
-If the final TPU wait times out while queued or running, the remote state is unknown.
+If the workflow stops before observing a terminal TPU status, the remote state
+is unknown. A failed intermediate segment also uploads its
+saved state under the standard confirmation artefact name when available.
 The workflow records controller state and does not automatically resubmit. To
 inspect the original notebook, download `tpu-release-binding-<attempt>` and
 `release-tpu-<sha>-<attempt>` from the same workflow run. With Kaggle credentials

@@ -164,6 +164,32 @@ def prepare(tmp_path: Path) -> Path:
     return path
 
 
+def set_source_job(
+    source: dict[str, Any], name: str, conclusion: str, status: str = "completed"
+) -> None:
+    jobs = cast(list[dict[str, Any]], source["jobs"]["jobs"])
+    job = next((item for item in jobs if item["name"] == name), None)
+    if job is None:
+        job = {"name": name, "run_id": SOURCE_RUN}
+        jobs.append(job)
+        source["jobs"]["total_count"] = len(jobs)
+    job.update(status=status, conclusion=conclusion)
+
+
+def set_single_segment_failure(source: dict[str, Any], failed_index: int) -> None:
+    for index, name in enumerate(gate.TPU_SEGMENT_JOBS):
+        conclusion = (
+            "success"
+            if index < failed_index
+            else "failure"
+            if index == failed_index
+            else "skipped"
+        )
+        set_source_job(source, name, conclusion)
+    set_source_job(source, "tpu / tpu", "skipped")
+    source["controller_state"].update(outcome="execution_timeout", status="running")
+
+
 def test_schedule_context_requires_the_exact_canonical_master_workflow(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -284,6 +310,54 @@ def test_prepare_rejects_other_gate_failure(
         "failure"
     )
     with pytest.raises(gate.CollectionGateError, match="required job"):
+        _ = prepare(tmp_path)
+
+
+@pytest.mark.parametrize("failed_index", [0, 1, 2])
+def test_prepare_accepts_one_timed_out_segment_with_canonical_tpu_skipped(
+    source: dict[str, Any], tmp_path: Path, failed_index: int
+) -> None:
+    set_single_segment_failure(source, failed_index)
+
+    prepared = gate.prepare(
+        "789", "3", HEAD, tmp_path / "source", tmp_path / "github-output"
+    )
+
+    assert prepared["head_sha"] == HEAD
+
+
+@pytest.mark.parametrize(
+    "invalid_case",
+    [
+        "non_timeout",
+        "multiple_failures",
+        "cancelled",
+        "unrelated_failure",
+        "incomplete",
+        "out_of_order",
+        "canonical_failed",
+    ],
+)
+def test_prepare_rejects_invalid_segment_failure_sequences(
+    source: dict[str, Any], tmp_path: Path, invalid_case: str
+) -> None:
+    set_single_segment_failure(source, 1)
+    if invalid_case == "non_timeout":
+        source["controller_state"]["outcome"] = "remote_terminal_failure"
+    elif invalid_case == "multiple_failures":
+        set_source_job(source, gate.TPU_SEGMENT_JOBS[0], "failure")
+    elif invalid_case == "cancelled":
+        set_source_job(source, gate.TPU_SEGMENT_JOBS[1], "cancelled")
+    elif invalid_case == "unrelated_failure":
+        set_source_job(source, "publish", "failure")
+    elif invalid_case == "incomplete":
+        set_source_job(source, gate.TPU_SEGMENT_JOBS[1], "failure", "in_progress")
+    elif invalid_case == "out_of_order":
+        set_source_job(source, gate.TPU_SEGMENT_JOBS[0], "skipped")
+    else:
+        set_source_job(source, "tpu / tpu", "failure")
+
+    with pytest.raises(gate.CollectionGateError):
         _ = prepare(tmp_path)
 
 

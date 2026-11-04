@@ -331,11 +331,33 @@ def test_release_tpu_relay_fits_the_hosted_jobs_and_keeps_final_failure_reports(
             for step in job["steps"]
             if step.get("uses", "").startswith("actions/upload-artifact@")
         ]
-        assert len(uploads) == 1
-        assert uploads[0]["if"] == "always()"
-        assert "release-artifacts/tpu/" in uploads[0]["with"]["path"]
-        assert "${{ github.run_attempt }}" in uploads[0]["with"]["name"]
-        previous_state_artifact = uploads[0]["with"]["name"]
+        always_uploads = [step for step in uploads if step.get("if") == "always()"]
+        assert len(always_uploads) == 1
+        relay_upload = always_uploads[0]
+        assert "release-artifacts/tpu/" in relay_upload["with"]["path"]
+        assert "${{ github.run_attempt }}" in relay_upload["with"]["name"]
+        if index < len(stage_names):
+            assert len(uploads) == 2
+            failure_uploads = [
+                step for step in uploads if step.get("if") == "failure() || cancelled()"
+            ]
+            assert len(failure_uploads) == 1
+            failure_upload = failure_uploads[0]
+            assert failure_upload["with"]["name"] == (
+                "release-tpu-${{ needs.prepare.outputs.head_sha }}-"
+                "${{ github.run_attempt }}"
+            )
+            assert failure_upload["with"]["path"] == relay_upload["with"]["path"]
+            assert failure_upload["with"]["path"] == "release-artifacts/tpu/"
+            # The canonical artifact step is failure-only; successful handover uploads relay state alone.
+            assert failure_upload["if"] != "always()"
+        else:
+            assert len(uploads) == 1
+            assert relay_upload["with"]["name"] == (
+                "release-tpu-${{ needs.prepare.outputs.head_sha }}-"
+                "${{ github.run_attempt }}"
+            )
+        previous_state_artifact = relay_upload["with"]["name"]
 
     relay_queue_seconds = kaggle_ci.RELAY_QUEUE_TIMEOUT_SECONDS
     execution_seconds = kaggle_ci.EXECUTION_TIMEOUT_SECONDS

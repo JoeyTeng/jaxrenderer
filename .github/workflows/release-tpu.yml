@@ -93,6 +93,14 @@ jobs:
           path: release-artifacts/tpu/
           if-no-files-found: warn
           retention-days: 30
+      - name: Preserve the canonical TPU failure report
+        if: failure() || cancelled()
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-tpu-${{ needs.prepare.outputs.head_sha }}-${{ github.run_attempt }}
+          path: release-artifacts/tpu/
+          if-no-files-found: warn
+          retention-days: 30
 
   tpu-segment-2:
     needs: [prepare, tpu-segment-1]
@@ -138,6 +146,14 @@ jobs:
           path: release-artifacts/tpu/
           if-no-files-found: warn
           retention-days: 30
+      - name: Preserve the canonical TPU failure report
+        if: failure() || cancelled()
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-tpu-${{ needs.prepare.outputs.head_sha }}-${{ github.run_attempt }}
+          path: release-artifacts/tpu/
+          if-no-files-found: warn
+          retention-days: 30
 
   tpu-segment-3:
     needs: [prepare, tpu-segment-2]
@@ -180,6 +196,14 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: release-tpu-segment-3-${{ needs.prepare.outputs.head_sha }}-${{ github.run_attempt }}
+          path: release-artifacts/tpu/
+          if-no-files-found: warn
+          retention-days: 30
+      - name: Preserve the canonical TPU failure report
+        if: failure() || cancelled()
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-tpu-${{ needs.prepare.outputs.head_sha }}-${{ github.run_attempt }}
           path: release-artifacts/tpu/
           if-no-files-found: warn
           retention-days: 30
