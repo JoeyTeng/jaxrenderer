@@ -236,9 +236,9 @@ def _list_recent_runs(budget: _Budget) -> list[dict[str, object]]:
     return runs
 
 
-def _terminal_artifact(
+def _terminal_artifacts(
     source_run: int, artifact_name: str, budget: _Budget
-) -> dict[str, object] | None:
+) -> list[dict[str, object]]:
     query = urlencode({"name": artifact_name, "per_page": str(MAX_RUNS), "page": "1"})
     budget.check()
     page = accelerator_gate.gh_api(f"repos/{REPOSITORY}/actions/artifacts?{query}")
@@ -261,14 +261,78 @@ def _terminal_artifact(
         if isinstance(item, dict)
         and cast(dict[str, object], item).get("name") == artifact_name
     ]
+    for item in matches:
+        owner = item.get("workflow_run")
+        artifact_id = item.get("id")
+        size = item.get("size_in_bytes")
+        owner_map = cast(dict[str, object], owner) if isinstance(owner, dict) else None
+        owner_id = owner_map.get("id") if owner_map is not None else None
+        owner_sha = owner_map.get("head_sha") if owner_map is not None else None
+        if (
+            type(artifact_id) is not int
+            or artifact_id <= 0
+            or type(size) is not int
+            or not 0 < size <= collection_gate.MAX_ARCHIVE_BYTES
+            or item.get("expired") is not False
+            or not isinstance(owner, dict)
+            or type(owner_id) is not int
+            or owner_id <= 0
+            or not isinstance(owner_sha, str)
+            or not accelerator_gate.SHA_RE.fullmatch(owner_sha)
+        ):
+            raise PeriodicError(
+                "terminal artefact identity, size or availability is invalid"
+            )
+    return matches
+
+
+def _collection_artifact(
+    *,
+    source_run_id: str,
+    source_attempt: str,
+    commit: str,
+    collector_id: int,
+    collector_attempt: str,
+    collector_sha: str,
+    budget: _Budget,
+) -> dict[str, object] | None:
+    """Find the full collection artefact paired with a terminal marker."""
+    artifact_name = (
+        f"tpu-periodic-{commit}-{source_run_id}-{source_attempt}-"
+        f"{collector_id}-{collector_attempt}"
+    )
+    query = urlencode({"name": artifact_name, "per_page": str(MAX_RUNS), "page": "1"})
+    budget.check()
+    page = accelerator_gate.gh_api(f"repos/{REPOSITORY}/actions/artifacts?{query}")
+    if not isinstance(page, dict):
+        raise PeriodicError("collection artefact inventory is incomplete or too large")
+    page = cast(dict[str, object], page)
+    total = page.get("total_count")
+    items = page.get("artifacts")
+    if (
+        type(total) is not int
+        or total < 0
+        or total > MAX_RUNS
+        or not isinstance(items, list)
+        or total != len(cast(list[object], items))
+    ):
+        raise PeriodicError("collection artefact inventory is incomplete or too large")
+    matches = [
+        cast(dict[str, object], item)
+        for item in cast(list[object], items)
+        if isinstance(item, dict)
+        and cast(dict[str, object], item).get("name") == artifact_name
+    ]
     if len(matches) > 1:
-        raise PeriodicError("multiple terminal artefacts have the same source identity")
+        raise PeriodicError("multiple collection artefacts have the same identity")
     if not matches:
+        # Uploads can briefly be absent from the API after the marker appears.
+        # An orphan marker is retryable evidence, not proof of completion.
         return None
     item = matches[0]
-    owner = item.get("workflow_run")
     artifact_id = item.get("id")
     size = item.get("size_in_bytes")
+    owner = item.get("workflow_run")
     owner_map = cast(dict[str, object], owner) if isinstance(owner, dict) else None
     owner_id = owner_map.get("id") if owner_map is not None else None
     owner_sha = owner_map.get("head_sha") if owner_map is not None else None
@@ -280,14 +344,110 @@ def _terminal_artifact(
         or item.get("expired") is not False
         or not isinstance(owner, dict)
         or type(owner_id) is not int
-        or owner_id <= 0
+        or owner_id != collector_id
         or not isinstance(owner_sha, str)
         or not accelerator_gate.SHA_RE.fullmatch(owner_sha)
+        or owner_sha != collector_sha
     ):
         raise PeriodicError(
-            "terminal artefact identity, size or availability is invalid"
+            "collection artefact identity, size or availability is invalid"
         )
     return item
+
+
+_COLLECT_JOB_EVIDENCE_STEPS = {
+    "Collect and validate the delayed TPU result",
+    "Upload periodic collection evidence",
+    "Record terminal collection marker",
+}
+_ACTIVE_RUN_STATUSES = {"queued", "requested", "waiting", "pending", "in_progress"}
+
+
+def _collector_job_completed(
+    collector_id: int,
+    collector_sha: str,
+    collector_attempt: str,
+    source_run_id: str,
+    source_attempt: str,
+    outcome: str,
+    budget: _Budget,
+) -> bool:
+    """Prove the exact collection job finished before an active run is skipped."""
+    route = (
+        f"repos/{REPOSITORY}/actions/runs/{collector_id}/attempts/"
+        f"{collector_attempt}/jobs?per_page=100"
+    )
+    budget.check()
+    page = accelerator_gate.gh_api(route)
+    if not isinstance(page, dict):
+        return False
+    page = cast(dict[str, object], page)
+    total = page.get("total_count")
+    jobs = page.get("jobs")
+    if (
+        type(total) is not int
+        or total < 0
+        or total > MAX_RUNS
+        or not isinstance(jobs, list)
+        or total != len(cast(list[object], jobs))
+    ):
+        return False
+    expected_name = f"collect-{source_run_id}-{source_attempt}"
+    matches = [
+        cast(dict[str, object], job)
+        for job in cast(list[object], jobs)
+        if isinstance(job, dict)
+        and cast(dict[str, object], job).get("name") == expected_name
+    ]
+    if len(matches) != 1:
+        return False
+    job = matches[0]
+    job_id = job.get("id")
+    job_run_id = job.get("run_id")
+    if outcome not in {"success", "remote_failure"}:
+        return False
+    expected_job_conclusion = "success" if outcome == "success" else "failure"
+    if (
+        type(job_id) is not int
+        or job_id <= 0
+        or type(job_run_id) is not int
+        or job_run_id != collector_id
+        or job.get("head_sha") != collector_sha
+        or job.get("status") != "completed"
+        or job.get("conclusion") != expected_job_conclusion
+    ):
+        return False
+    try:
+        completed_at = _parse_timestamp(job.get("completed_at"))
+        started_at = _parse_timestamp(job.get("started_at"))
+    except PeriodicError:
+        return False
+    if completed_at < started_at:
+        return False
+    steps = job.get("steps")
+    if not isinstance(steps, list):
+        return False
+    found: set[str] = set()
+    for value in cast(list[object], steps):
+        if not isinstance(value, dict):
+            return False
+        step = cast(dict[str, object], value)
+        name = step.get("name")
+        if not isinstance(name, str) or step.get("status") != "completed":
+            return False
+        if name in _COLLECT_JOB_EVIDENCE_STEPS:
+            expected_step_conclusion = (
+                "failure"
+                if outcome == "remote_failure"
+                and name == "Collect and validate the delayed TPU result"
+                else "success"
+            )
+            if step.get("conclusion") != expected_step_conclusion or name in found:
+                return False
+            found.add(name)
+        elif step.get("conclusion") not in {"success", "skipped"}:
+            return False
+    return found == _COLLECT_JOB_EVIDENCE_STEPS
 
 
 def _read_terminal(
@@ -299,7 +459,7 @@ def _read_terminal(
     binding: Mapping[str, object],
     kernel_id: str,
     budget: _Budget,
-) -> dict[str, object]:
+) -> dict[str, object] | None:
     owner = artifact["workflow_run"]
     assert isinstance(owner, dict)
     owner = cast(dict[str, object], owner)
@@ -333,10 +493,24 @@ def _read_terminal(
         run["id"] != collector_id
         or run["head_sha"] != collector_sha
         or run.get("run_attempt") != int(collector_attempt)
-        or run.get("status") != "completed"
-        or run.get("conclusion") not in {"success", "failure", "cancelled", "timed_out"}
     ):
-        raise PeriodicError("terminal artefact owner attempt is not complete and exact")
+        raise PeriodicError("terminal artefact owner attempt is not exact")
+    run_status = run.get("status")
+    if run_status == "completed":
+        if run.get("conclusion") not in {
+            "success",
+            "failure",
+            "cancelled",
+            "timed_out",
+        }:
+            raise PeriodicError(
+                "terminal artefact owner attempt has no final conclusion"
+            )
+    elif run_status in _ACTIVE_RUN_STATUSES:
+        if run.get("conclusion") is not None:
+            raise PeriodicError("active terminal artefact owner has a conclusion")
+    else:
+        raise PeriodicError("terminal artefact owner attempt is not active or complete")
     release_tpu_gate.verify_master_history(str(collector_sha))
     if (
         record.get("terminal") is not True
@@ -368,6 +542,19 @@ def _read_terminal(
             raise PeriodicError("failure terminal record has no failed remote status")
     else:
         raise PeriodicError("terminal artefact outcome is not terminal")
+    if run_status in _ACTIVE_RUN_STATUSES and not _collector_job_completed(
+        collector_id,
+        collector_sha,
+        collector_attempt,
+        source_run_id,
+        source_attempt,
+        cast(str, outcome),
+        budget,
+    ):
+        # A marker can become visible before its upload step and job finish.
+        # Let the source remain eligible; the per-source job concurrency gate
+        # serialises any overlapping collection attempt.
+        return None
     return record
 
 
@@ -384,23 +571,58 @@ def _has_terminal(
     )
     state = collection_gate.read_json(source_dir / "kaggle-controller-state.json")
     name = f"tpu-periodic-terminal-{source_run_id}-{source_attempt}-{commit}"
-    artifact = _terminal_artifact(int(source_run_id), name, budget)
-    if artifact is None:
+    artifacts = _terminal_artifacts(int(source_run_id), name, budget)
+    if not artifacts:
         return None
     if source.get("head_sha") != commit:
         raise PeriodicError("prepared source SHA does not match the terminal lookup")
     kernel_id = state.get("kernel_id")
     if not isinstance(kernel_id, str):
         raise PeriodicError("original controller kernel identity is malformed")
-    return _read_terminal(
-        artifact,
-        source_run_id=source_run_id,
-        source_attempt=source_attempt,
-        commit=commit,
-        binding=binding,
-        kernel_id=kernel_id,
-        budget=budget,
-    )
+    verified: list[dict[str, object]] = []
+    for artifact in artifacts:
+        record = _read_terminal(
+            artifact,
+            source_run_id=source_run_id,
+            source_attempt=source_attempt,
+            commit=commit,
+            binding=binding,
+            kernel_id=kernel_id,
+            budget=budget,
+        )
+        if record is None:
+            continue
+        collector_run = record.get("collector_run_id")
+        collector_attempt = record.get("collector_attempt")
+        collector_sha = record.get("collector_sha")
+        match = (
+            re.fullmatch(r"([1-9][0-9]*)\.([1-9][0-9]*)", collector_run)
+            if isinstance(collector_run, str)
+            else None
+        )
+        if (
+            match is None
+            or not isinstance(collector_attempt, str)
+            or not isinstance(collector_sha, str)
+        ):
+            raise PeriodicError("terminal artefact collector identity is malformed")
+        collector_id = int(match.group(1))
+        if match.group(2) != collector_attempt:
+            raise PeriodicError("terminal artefact collector attempt is inconsistent")
+        collection_artifact = _collection_artifact(
+            source_run_id=source_run_id,
+            source_attempt=source_attempt,
+            commit=commit,
+            collector_id=collector_id,
+            collector_attempt=collector_attempt,
+            collector_sha=collector_sha,
+            budget=budget,
+        )
+        if collection_artifact is not None:
+            verified.append(record)
+    if len(verified) > 1:
+        raise PeriodicError("multiple verified terminal artefacts have the same source")
+    return verified[0] if verified else None
 
 
 def _write_json(path: Path, value: dict[str, object]) -> None:

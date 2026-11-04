@@ -54,8 +54,10 @@ def _read_periodic_terminal(
     binding: dict[str, object],
     kernel_id: str,
     budget: _BudgetLike,
-) -> dict[str, object]:
-    helper = cast(Callable[..., dict[str, object]], getattr(periodic, "_read_terminal"))
+) -> dict[str, object] | None:
+    helper = cast(
+        Callable[..., dict[str, object] | None], getattr(periodic, "_read_terminal")
+    )
     return helper(
         artifact,
         source_run_id=source_run_id,
@@ -180,6 +182,28 @@ def _prepare_source(output: Path) -> None:
     )
 
 
+def _prepare_named_source(
+    output: Path, source_run_id: str, source_attempt: str, commit: str
+) -> dict[str, object]:
+    output.mkdir(parents=True)
+    binding = _binding(source_run_id, source_attempt)
+    state = {**_controller_state(), "binding": binding}
+    source = {
+        **_source_record(),
+        "source_run_id": int(source_run_id),
+        "source_attempt": int(source_attempt),
+        "head_sha": commit,
+    }
+    _ = (output / "binding.json").write_text(json.dumps(binding), encoding="utf-8")
+    _ = (output / "kaggle-controller-state.json").write_text(
+        json.dumps(state), encoding="utf-8"
+    )
+    _ = (output / "collection-source.json").write_text(
+        json.dumps(source), encoding="utf-8"
+    )
+    return source
+
+
 def _run(
     run_id: int = SOURCE_RUN_ID,
     attempt: int = SOURCE_ATTEMPT_ID,
@@ -293,11 +317,89 @@ def _terminal_record(**changes: object) -> dict[str, object]:
     return value
 
 
+def _terminal_record_for(
+    source_run_id: str,
+    source_attempt: str,
+    commit: str,
+    binding: dict[str, object],
+    kernel_id: str,
+    *,
+    collector_id: int = COLLECTOR_RUN_ID,
+    collector_attempt: int = COLLECTOR_ATTEMPT_ID,
+    collector_sha: str = COLLECTOR_SHA,
+    outcome: str = "success",
+    remote_status: str = "complete",
+) -> dict[str, object]:
+    return _terminal_record(
+        source_run_id=source_run_id,
+        source_attempt=source_attempt,
+        head_sha=commit,
+        collector_run_id=f"{collector_id}.{collector_attempt}",
+        collector_attempt=str(collector_attempt),
+        collector_sha=collector_sha,
+        binding=binding,
+        kernel_id=kernel_id,
+        outcome=outcome,
+        remote_status=remote_status,
+    )
+
+
 def _terminal_artifact() -> dict[str, object]:
     return {
         "id": 500,
         "name": f"tpu-periodic-terminal-{SOURCE_RUN}-{SOURCE_ATTEMPT}-{SOURCE_SHA}",
         "workflow_run": {"id": int(COLLECTOR_RUN), "head_sha": COLLECTOR_SHA},
+    }
+
+
+def _artifact_metadata(
+    artifact_id: int,
+    name: str,
+    collector_id: int,
+    collector_sha: str,
+) -> dict[str, object]:
+    return {
+        "id": artifact_id,
+        "name": name,
+        "size_in_bytes": 128,
+        "expired": False,
+        "workflow_run": {"id": collector_id, "head_sha": collector_sha},
+    }
+
+
+def _complete_collect_job(
+    collector_id: int,
+    collector_sha: str,
+    source_run_id: str,
+    source_attempt: str,
+    outcome: str = "success",
+) -> dict[str, object]:
+    collect_conclusion = "failure" if outcome == "remote_failure" else "success"
+    return {
+        "id": 701,
+        "run_id": collector_id,
+        "head_sha": collector_sha,
+        "name": f"collect-{source_run_id}-{source_attempt}",
+        "status": "completed",
+        "conclusion": collect_conclusion,
+        "started_at": "2026-11-04T11:00:00Z",
+        "completed_at": "2026-11-04T11:01:00Z",
+        "steps": [
+            {
+                "name": name,
+                "status": "completed",
+                "conclusion": (
+                    collect_conclusion
+                    if name == "Collect and validate the delayed TPU result"
+                    else "success"
+                ),
+            }
+            for name in (
+                "Collect and validate the delayed TPU result",
+                "Upload periodic collection evidence",
+                "Record terminal collection marker",
+            )
+        ],
     }
 
 
@@ -681,6 +783,235 @@ def test_discover_includes_validated_recovery_marker_and_ordinary_candidate(
 
 
 @pytest.mark.parametrize(
+    ("owner_status", "outcome"),
+    [
+        ("waiting", "success"),
+        ("in_progress", "success"),
+        ("waiting", "remote_failure"),
+    ],
+)
+def test_discover_skips_completed_collect_job_while_owner_waits_for_approval(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    owner_status: str,
+    outcome: str,
+) -> None:
+    _set_periodic_context(monkeypatch)
+    waiting_source = _run(run_id=788, attempt=1)
+    other_source = _run(run_id=787, attempt=2)
+    source_runs = {788: waiting_source, 787: other_source}
+    marker_name = f"tpu-periodic-terminal-788-1-{SOURCE_SHA}"
+    full_name = f"tpu-periodic-{SOURCE_SHA}-788-1-{COLLECTOR_RUN}-2"
+    marker_record = _terminal_record_for(
+        "788",
+        "1",
+        SOURCE_SHA,
+        _binding("788", "1"),
+        str(_controller_state()["kernel_id"]),
+        outcome=outcome,
+        remote_status="failed" if outcome == "remote_failure" else "complete",
+    )
+    owner_attempt = _collector_run()
+    owner_attempt.update(status=owner_status, conclusion=None)
+
+    def api(route: str, body: object = None) -> Any:
+        del body
+        if "actions/workflows/pypi.yml/runs?" in route:
+            return {"total_count": 2, "workflow_runs": list(source_runs.values())}
+        for run_id, run in source_runs.items():
+            if route.endswith(f"/actions/runs/{run_id}"):
+                return run
+        if route.endswith(
+            f"/actions/runs/{COLLECTOR_RUN}/attempts/{COLLECTOR_ATTEMPT}"
+        ):
+            return owner_attempt
+        if route.endswith(
+            f"/actions/runs/{COLLECTOR_RUN}/attempts/{COLLECTOR_ATTEMPT}/jobs?per_page=100"
+        ):
+            job = _complete_collect_job(
+                int(COLLECTOR_RUN), COLLECTOR_SHA, "788", "1", outcome
+            )
+            return {"total_count": 1, "jobs": [job]}
+        if f"actions/artifacts?name={marker_name}" in route:
+            return {
+                "total_count": 1,
+                "artifacts": [
+                    _artifact_metadata(
+                        500, marker_name, int(COLLECTOR_RUN), COLLECTOR_SHA
+                    )
+                ],
+            }
+        if f"actions/artifacts?name={full_name}" in route:
+            return {
+                "total_count": 1,
+                "artifacts": [
+                    _artifact_metadata(
+                        600, full_name, int(COLLECTOR_RUN), COLLECTOR_SHA
+                    )
+                ],
+            }
+        if route.startswith(f"repos/{periodic.REPOSITORY}/actions/artifacts?"):
+            return {"total_count": 0, "artifacts": []}
+        raise AssertionError(f"unexpected API route: {route}")
+
+    def prepare(
+        source_run_id: str,
+        source_attempt: str,
+        commit: str,
+        output: Path,
+        github_output: Path,
+    ) -> dict[str, object]:
+        source = _prepare_named_source(output, source_run_id, source_attempt, commit)
+        _ = github_output.write_text("", encoding="utf-8")
+        return source
+
+    def download(artifact_id: int, member: str, destination: Path) -> None:
+        assert artifact_id == 500
+        assert member == "periodic-terminal.json"
+        _ = destination.write_text(json.dumps(marker_record), encoding="utf-8")
+
+    monkeypatch.setattr(accelerator_gate, "gh_api", api)
+    monkeypatch.setattr(collection_gate, "prepare", prepare)
+    monkeypatch.setattr(periodic, "_source_expired", _not_expired)
+    monkeypatch.setattr(collection_gate, "download_member", download)
+    monkeypatch.setattr(release_tpu_gate, "verify_master_history", _no_master_history)
+
+    report = periodic.discover(tmp_path / "discovery", tmp_path / "github-output")
+
+    assert report["matrix"] == {
+        "include": [
+            {"source_run_id": "787", "source_attempt": "2", "commit": SOURCE_SHA}
+        ]
+    }
+
+
+@pytest.mark.parametrize("old_marker_becomes_valid", [False, True])
+def test_discover_retries_orphan_marker_then_uses_unique_verified_recollection(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    old_marker_becomes_valid: bool,
+) -> None:
+    _set_periodic_context(monkeypatch)
+    source = _run()
+    source_run_id = SOURCE_RUN
+    source_attempt = SOURCE_ATTEMPT
+    source_binding = _binding(source_run_id, source_attempt)
+    kernel_id = str(_controller_state()["kernel_id"])
+    old_id, old_attempt, old_sha = 990, 2, COLLECTOR_SHA
+    new_id, new_attempt, new_sha = 991, 1, "c" * 40
+    marker_name = f"tpu-periodic-terminal-{source_run_id}-{source_attempt}-{SOURCE_SHA}"
+    old_collection_name = (
+        f"tpu-periodic-{SOURCE_SHA}-{source_run_id}-{source_attempt}-"
+        f"{old_id}-{old_attempt}"
+    )
+    new_collection_name = (
+        f"tpu-periodic-{SOURCE_SHA}-{source_run_id}-{source_attempt}-"
+        f"{new_id}-{new_attempt}"
+    )
+    old_record = _terminal_record_for(
+        source_run_id,
+        source_attempt,
+        SOURCE_SHA,
+        source_binding,
+        kernel_id,
+        collector_id=old_id,
+        collector_attempt=old_attempt,
+        collector_sha=old_sha,
+    )
+    new_record = _terminal_record_for(
+        source_run_id,
+        source_attempt,
+        SOURCE_SHA,
+        source_binding,
+        kernel_id,
+        collector_id=new_id,
+        collector_attempt=new_attempt,
+        collector_sha=new_sha,
+    )
+    records = {500: old_record, 501: new_record}
+    old_owner = _collector_run(attempt=old_attempt)
+    old_owner["conclusion"] = "cancelled"
+    new_owner = {
+        **_collector_run(attempt=new_attempt),
+        "id": new_id,
+        "head_sha": new_sha,
+        "conclusion": "success",
+    }
+    round_number = 0
+
+    def api(route: str, body: object = None) -> Any:
+        nonlocal round_number
+        del body
+        if "actions/workflows/pypi.yml/runs?" in route:
+            round_number += 1
+            return {"total_count": 1, "workflow_runs": [source]}
+        if route.endswith(f"/actions/runs/{SOURCE_RUN}"):
+            return source
+        if route.endswith(f"/actions/runs/{old_id}/attempts/{old_attempt}"):
+            return old_owner
+        if route.endswith(f"/actions/runs/{new_id}/attempts/{new_attempt}"):
+            return new_owner
+        if f"actions/artifacts?name={marker_name}" in route:
+            markers = [_artifact_metadata(500, marker_name, old_id, old_sha)]
+            if round_number >= 2:
+                markers.append(_artifact_metadata(501, marker_name, new_id, new_sha))
+            return {"total_count": len(markers), "artifacts": markers}
+        if f"actions/artifacts?name={old_collection_name}" in route:
+            if old_marker_becomes_valid and round_number >= 2:
+                old_item = _artifact_metadata(600, old_collection_name, old_id, old_sha)
+                return {"total_count": 1, "artifacts": [old_item]}
+            return {"total_count": 0, "artifacts": []}
+        if f"actions/artifacts?name={new_collection_name}" in route:
+            if round_number >= 2:
+                new_item = _artifact_metadata(601, new_collection_name, new_id, new_sha)
+                return {"total_count": 1, "artifacts": [new_item]}
+            return {"total_count": 0, "artifacts": []}
+        if route.endswith(f"/compare/{old_sha}...master"):
+            return {"status": "ahead", "base_commit": {"sha": old_sha}}
+        if route.endswith(f"/compare/{new_sha}...master"):
+            return {"status": "ahead", "base_commit": {"sha": new_sha}}
+        raise AssertionError(f"unexpected API route: {route}")
+
+    monkeypatch.setattr(accelerator_gate, "gh_api", api)
+    _patch_prepare(monkeypatch)
+    monkeypatch.setattr(release_tpu_gate, "verify_master_history", _no_master_history)
+
+    def download(artifact_id: int, member: str, destination: Path) -> None:
+        del member
+        _ = destination.write_text(json.dumps(records[artifact_id]), encoding="utf-8")
+
+    monkeypatch.setattr(
+        collection_gate,
+        "download_member",
+        download,
+    )
+
+    first = periodic.discover(
+        tmp_path / "first-discovery", tmp_path / "first-github-output"
+    )
+    assert first["matrix"] == {
+        "include": [
+            {
+                "source_run_id": source_run_id,
+                "source_attempt": source_attempt,
+                "commit": SOURCE_SHA,
+            }
+        ]
+    }
+
+    if old_marker_becomes_valid:
+        with pytest.raises(periodic.PeriodicError, match="multiple verified terminal"):
+            _ = periodic.discover(
+                tmp_path / "second-discovery", tmp_path / "second-github-output"
+            )
+    else:
+        second = periodic.discover(
+            tmp_path / "second-discovery", tmp_path / "second-github-output"
+        )
+        assert second["has_sources"] is False
+
+
+@pytest.mark.parametrize(
     ("field", "value"),
     [
         ("repository", {"full_name": "someone/jaxrenderer"}),
@@ -754,13 +1085,13 @@ def test_terminal_marker_accepts_post_upload_owner_cancellation_and_timeout(
         kernel_id=str(_controller_state()["kernel_id"]),
         budget=_new_budget(),
     )
+    assert loaded is not None
     assert loaded["outcome"] == outcome
 
 
 @pytest.mark.parametrize(
     "run_changes",
     [
-        {"status": "in_progress", "conclusion": None},
         {"repository": {"full_name": "someone/else"}},
         {"run_attempt": int(COLLECTOR_ATTEMPT) + 1},
         {"head_sha": "c" * 40},
@@ -797,6 +1128,59 @@ def test_terminal_marker_rejects_running_or_mismatched_owner_attempt(
             kernel_id=str(_controller_state()["kernel_id"]),
             budget=_new_budget(),
         )
+
+
+def test_terminal_marker_waits_for_active_collection_job_to_finish(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    active_attempt = _collector_run()
+    active_attempt.update(status="in_progress", conclusion=None)
+    job: dict[str, object] = {
+        "id": 701,
+        "run_id": int(COLLECTOR_RUN),
+        "head_sha": COLLECTOR_SHA,
+        "name": f"collect-{SOURCE_RUN}-{SOURCE_ATTEMPT}",
+        "status": "in_progress",
+        "conclusion": None,
+        "started_at": "2026-11-04T11:00:00Z",
+        "completed_at": None,
+        "steps": [],
+    }
+
+    def api(route: str, body: object = None) -> Any:
+        del body
+        if route.endswith(
+            f"/actions/runs/{COLLECTOR_RUN}/attempts/{COLLECTOR_ATTEMPT}"
+        ):
+            return active_attempt
+        if route.endswith(
+            f"/actions/runs/{COLLECTOR_RUN}/attempts/{COLLECTOR_ATTEMPT}/jobs?per_page=100"
+        ):
+            return {"total_count": 1, "jobs": [job]}
+        if route.endswith(f"/compare/{COLLECTOR_SHA}...master"):
+            return {"status": "ahead", "base_commit": {"sha": COLLECTOR_SHA}}
+        raise AssertionError(f"unexpected API route: {route}")
+
+    monkeypatch.setattr(accelerator_gate, "gh_api", api)
+    monkeypatch.setattr(
+        collection_gate,
+        "download_member",
+        _write_record(_terminal_record()),
+    )
+    monkeypatch.setattr(release_tpu_gate, "verify_master_history", _no_master_history)
+
+    assert (
+        _read_periodic_terminal(
+            _terminal_artifact(),
+            source_run_id=SOURCE_RUN,
+            source_attempt=SOURCE_ATTEMPT,
+            commit=SOURCE_SHA,
+            binding=_binding(),
+            kernel_id=str(_controller_state()["kernel_id"]),
+            budget=_new_budget(),
+        )
+        is None
+    )
 
 
 def test_terminal_marker_uses_recorded_attempt_after_owner_was_rerun(
@@ -1197,16 +1581,26 @@ def test_collect_source_skips_provider_when_terminal_marker_exists(
 
     monkeypatch.setattr(accelerator_gate, "gh_api", api)
 
-    def terminal_artifact(
+    def terminal_artifacts(
         source_run: int, name: str, budget: _BudgetLike
-    ) -> dict[str, object] | None:
+    ) -> list[dict[str, object]]:
         del source_run, name, budget
-        return _terminal_artifact()
+        return [_terminal_artifact()]
 
     monkeypatch.setattr(
         periodic,
-        "_terminal_artifact",
-        terminal_artifact,
+        "_terminal_artifacts",
+        terminal_artifacts,
+    )
+
+    def collection_artifact(**kwargs: object) -> dict[str, object]:
+        del kwargs
+        return {"id": 600, "name": "verified-collection"}
+
+    monkeypatch.setattr(
+        periodic,
+        "_collection_artifact",
+        collection_artifact,
     )
     monkeypatch.setattr(
         collection_gate,

@@ -28,12 +28,13 @@ candidate commit and the same run and attempt.
 
 Each recovery builds once and reruns CPU, installed-wheel and Modal GPU gates,
 then submits a Kaggle TPU run. A successful submission is recorded as pending
-validation. Delayed collection supports ordinary release and rehearsal runs;
-existing-tag recovery runs are excluded because their controller and candidate
-commits differ. Publication still requires the `PyPI` environment's fresh
-approval and credential. There is no paid fallback or automatic retry. A
-successful GitHub Release alone does not establish that the version has
-reached PyPI.
+validation. Delayed collection supports recovery runs with distinct controller
+and candidate commits: the recovery marker binds the original tag candidate to
+the repaired controller workflow. Completion rechecks the published release,
+tag, candidate, collection and original distributions before requesting fresh
+approval in the `PyPI` environment. There is no paid fallback or automatic
+retry. A successful GitHub Release alone does not establish that the version
+has reached PyPI.
 
 ## A delayed TPU run
 
@@ -47,11 +48,12 @@ Within a new recovery attempt, TPU confirmation submits once and saves its
 controller state. It does not wait for the regression or claim a validation
 pass. Recovery does not resume the original failed Actions run.
 
-The delayed-result collectors require matching controller and candidate
-commits. Recovery runs record a `recovery-source-binding-<attempt>` marker and
-are excluded from periodic discovery. Neither manual nor periodic collection
-supports recovery runs. A collected receipt cannot complete a later
-publication attempt's TPU validation.
+Recovery runs record a `recovery-source-binding-<attempt>` marker. Manual and
+periodic collectors use that marker to validate the original candidate when
+the controller SHA differs from the candidate SHA. A verified delayed result
+can complete that recovery attempt; it does not change the original failed
+publishing run, and the `PyPI` upload still requires fresh environment
+approval.
 
 ## Kaggle quota output
 

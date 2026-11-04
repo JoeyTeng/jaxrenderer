@@ -84,15 +84,16 @@ jobs:
           --commit "$SOURCE_COMMIT"
           --output-dir periodic-artifacts --github-output "$GITHUB_OUTPUT"
       - name: Upload periodic collection evidence
+        id: evidence
         if: always()
         uses: actions/upload-artifact@v7
         with:
           name: tpu-periodic-${{ matrix.commit }}-${{ matrix.source_run_id }}-${{ matrix.source_attempt }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: periodic-artifacts/
-          if-no-files-found: warn
+          if-no-files-found: error
           retention-days: 30
       - name: Record terminal collection marker
-        if: always() && steps.collect.outputs.terminal == 'true'
+        if: always() && steps.collect.outputs.terminal == 'true' && steps.evidence.outcome == 'success'
         uses: actions/upload-artifact@v7
         with:
           name: tpu-periodic-terminal-${{ matrix.source_run_id }}-${{ matrix.source_attempt }}-${{ matrix.commit }}
