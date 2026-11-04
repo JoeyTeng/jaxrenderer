@@ -8,7 +8,6 @@ import subprocess
 import sys
 from typing import Any, cast
 
-from tools import kaggle_ci
 import yaml
 
 WORKFLOWS = Path(__file__).parents[1] / ".github" / "workflows"
@@ -228,53 +227,35 @@ def test_release_checkouts_and_reusable_workflows_use_the_frozen_commit() -> Non
         assert freeze["env"]["RELEASE_COMMIT"] == "${{ inputs.commit }}"
         provider_checkouts = checkout_steps(child[provider_job_name])
         assert provider_checkouts[0]["with"]["ref"] == "${{ github.sha }}"
-        uploaded_bindings = [
+        binding_artifacts = [
             step
             for step in prepare["steps"]
             if step.get("uses", "").startswith("actions/upload-artifact@")
+            and step.get("with", {})
+            .get("name", "")
+            .startswith(f"{provider_job_name}-release-binding-")
         ]
+        assert len(binding_artifacts) == 1
+        binding_name = binding_artifacts[0]["with"]["name"]
+        if provider_job_name == "tpu":
+            action = yaml.load(
+                (WORKFLOWS.parent / "actions" / "tpu-check" / "action.yml").read_text(
+                    encoding="utf-8"
+                ),
+                Loader=yaml.BaseLoader,
+            )
+            provider_steps = action["runs"]["steps"]
+        else:
+            provider_steps = provider_job["steps"]
         downloaded_bindings = [
             step
-            for step in provider_job["steps"]
+            for step in provider_steps
             if step.get("uses", "").startswith("actions/download-artifact@")
+            and step.get("with", {}).get("name") == binding_name
         ]
-        assert len(uploaded_bindings) == len(downloaded_bindings) == 1
-        binding_name = uploaded_bindings[0]["with"]["name"]
+        assert len(downloaded_bindings) == 1
         assert "${{ github.run_attempt }}" in binding_name
         assert downloaded_bindings[0]["with"]["name"] == binding_name
-
-
-def test_release_tpu_wait_budgets_fit_the_hosted_job_and_keep_failure_reports() -> None:
-    workflow = load_workflow("release-tpu.yml")
-    jobs = workflow["jobs"]
-    tpu = jobs["tpu"]
-    provider = step_with_id(tpu, "provider")
-
-    provider_seconds = int(provider["timeout-minutes"]) * 60
-    job_seconds = int(tpu["timeout-minutes"]) * 60
-    phase_seconds = (
-        kaggle_ci.QUEUE_TIMEOUT_SECONDS + kaggle_ci.EXECUTION_TIMEOUT_SECONDS
-    )
-    # Keep 15 minutes in the provider step for bounded CLI calls and output collection.
-    assert provider_seconds - phase_seconds >= 15 * 60
-    # Keep 15 minutes outside the provider step for setup, finish and artefact upload.
-    assert job_seconds - provider_seconds >= 15 * 60
-    assert int(tpu["timeout-minutes"]) <= 360  # GitHub-hosted job maximum.
-    finish = next(
-        step
-        for step in tpu["steps"]
-        if step.get("if") == "always()" and "PROVIDER_SUCCESS" in step.get("env", {})
-    )
-    upload = next(
-        step
-        for step in tpu["steps"]
-        if step.get("uses", "").startswith("actions/upload-artifact@")
-        and "release-artifacts/tpu/" in step.get("with", {}).get("path", "")
-    )
-    assert finish["if"] == "always()"
-    assert "continue-on-error" not in finish
-    assert upload["if"] == "always()"
-    assert upload["uses"].startswith("actions/upload-artifact@")
 
 
 def test_cpu_reuse_requires_frozen_candidate_and_all_cpu_gates() -> None:

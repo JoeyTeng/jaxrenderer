@@ -33,6 +33,11 @@ REQUIRED_JOBS = {
     "gpu / gpu",
     "tpu / prepare",
 }
+TPU_SEGMENT_JOBS = (
+    "tpu / tpu-segment-1",
+    "tpu / tpu-segment-2",
+    "tpu / tpu-segment-3",
+)
 SOURCE_FIELDS = {
     "source_run_id",
     "source_attempt",
@@ -183,12 +188,44 @@ def _source_snapshot(run_id: int, attempt: int, commit: str) -> dict[str, object
         raise CollectionGateError("source TPU job metadata is missing")
     if tpu.get("status") != "completed":
         raise CollectionGateError("source TPU job metadata is incomplete")
-    if tpu.get("conclusion") != "failure":
-        if tpu.get("conclusion") in {"success", "skipped", "cancelled"}:
-            raise IneligibleSource("source TPU job did not fail")
+    tpu_conclusion = tpu.get("conclusion")
+    if tpu_conclusion not in {"failure", "success", "skipped", "cancelled"}:
         raise CollectionGateError("source TPU job conclusion is unrecognised")
+
+    segments: list[dict[str, object] | None] = []
+    failed_segments: list[int] = []
+    for index, name in enumerate(TPU_SEGMENT_JOBS):
+        job = jobs.get(name)
+        segments.append(job)
+        if job is None:
+            continue
+        if job.get("status") != "completed":
+            raise CollectionGateError("source TPU segment job metadata is incomplete")
+        conclusion = job.get("conclusion")
+        if conclusion == "failure":
+            failed_segments.append(index)
+        elif conclusion == "cancelled":
+            raise IneligibleSource("source TPU segment was cancelled")
+        elif conclusion not in {"success", "skipped"}:
+            raise CollectionGateError("source TPU segment conclusion is unrecognised")
+
+    if failed_segments:
+        if len(failed_segments) != 1 or tpu_conclusion != "skipped":
+            raise IneligibleSource("source TPU stages have an invalid failure sequence")
+        failed_index = failed_segments[0]
+        for index, job in enumerate(segments):
+            if job is None or index == failed_index:
+                continue
+            expected = "success" if index < failed_index else "skipped"
+            if job.get("conclusion") != expected:
+                raise IneligibleSource(
+                    "source TPU stages have an invalid failure sequence"
+                )
+    elif tpu_conclusion != "failure":
+        raise IneligibleSource("source TPU job did not fail")
+
     for name, job in jobs.items():
-        if name == "tpu / tpu":
+        if name == "tpu / tpu" or name in TPU_SEGMENT_JOBS:
             continue
         if job.get("status") != "completed":
             raise CollectionGateError("source contains incomplete job metadata")
@@ -402,6 +439,9 @@ def _validate_source_files(
         "remote_terminal_failure",
         "output_retrieval_error",
         "result_validation_error",
+        "version_verification_error",
+        "handover",
+        "pending",
         "success",
         "status_query_error",
     }:

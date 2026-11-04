@@ -479,22 +479,28 @@ def test_discover_skips_only_explicitly_ineligible_sources(
         )
 
 
-def test_discover_skips_valid_legacy_source_and_keeps_timeout_candidate(
+def test_discover_skips_known_non_timeout_sources_and_keeps_timeout_candidate(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     _set_periodic_context(monkeypatch)
     legacy_run = _run(run_id=788, attempt=1)
+    version_error_run = _run(run_id=787, attempt=2)
     timeout_run = _run(run_id=int(SOURCE_RUN), attempt=int(SOURCE_ATTEMPT))
-    runs = {788: legacy_run, int(SOURCE_RUN): timeout_run}
+    runs = {788: legacy_run, 787: version_error_run, int(SOURCE_RUN): timeout_run}
 
     def api(route: str, body: object = None) -> Any:
         assert body is None
         if "actions/workflows/pypi.yml/runs?" in route:
-            return {"total_count": 2, "workflow_runs": [legacy_run, timeout_run]}
-        if route.endswith(
-            "/actions/runs/788/artifacts?per_page=100&page=1"
-        ) or route.endswith(
-            f"/actions/runs/{SOURCE_RUN}/artifacts?per_page=100&page=1"
+            return {
+                "total_count": 3,
+                "workflow_runs": [legacy_run, version_error_run, timeout_run],
+            }
+        if (
+            route.endswith("/actions/runs/788/artifacts?per_page=100&page=1")
+            or route.endswith("/actions/runs/787/artifacts?per_page=100&page=1")
+            or route.endswith(
+                f"/actions/runs/{SOURCE_RUN}/artifacts?per_page=100&page=1"
+            )
         ):
             return {"total_count": 0, "artifacts": []}
         for run_id, run in runs.items():
@@ -521,7 +527,14 @@ def test_discover_skips_valid_legacy_source_and_keeps_timeout_candidate(
             }
             if run_id == 788
             else {
-                **_controller_state(),
+                **_controller_state(
+                    outcome=(
+                        "version_verification_error"
+                        if run_id == 787
+                        else "queue_timeout"
+                    ),
+                    status="running",
+                ),
                 "binding": binding,
             }
         )

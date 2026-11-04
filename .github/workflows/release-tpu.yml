@@ -26,11 +26,13 @@ concurrency:
 jobs:
   prepare:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 30
+    environment: kaggle-tpu
     outputs:
       head_sha: ${{ steps.freeze.outputs.head_sha }}
     steps:
-      - uses: actions/checkout@v7
+      - &release-checkout
+        uses: actions/checkout@v7
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
@@ -52,52 +54,161 @@ jobs:
           path: tpu-release-binding.json
           if-no-files-found: error
           retention-days: 30
-
-  tpu:
-    needs: prepare
-    runs-on: ubuntu-latest
-    timeout-minutes: 360
-    environment: kaggle-tpu
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          ref: ${{ github.sha }}
-          persist-credentials: false
-      - uses: actions/download-artifact@v7
-        with:
-          name: tpu-release-binding-${{ github.run_attempt }}
-      - uses: actions/setup-python@v7
-        with:
-          python-version: "3.14"
       - uses: astral-sh/setup-uv@v10.2.0
         with:
           version: "0.12.20"
           enable-cache: true
       - name: Install the locked Kaggle controller
         run: uv sync --locked --only-group ci-kaggle --python 3.14
-      - name: Confirm the release candidate on a Kaggle TPU
-        id: provider
-        timeout-minutes: 345
-        env:
+      - name: Submit the release candidate to a Kaggle TPU
+        timeout-minutes: 10
+        env: &kaggle-provider-env
           KAGGLE_API_TOKEN: ${{ secrets.KAGGLE_API_TOKEN }}
           KAGGLE_USERNAME: ${{ vars.KAGGLE_USERNAME }}
         run: >-
           .venv/bin/python -u -m tools.kaggle_ci --binding tpu-release-binding.json
-          --output-dir release-artifacts/tpu
+          --relay --submit-only --output-dir release-artifacts/tpu
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: release-tpu-submission-${{ steps.freeze.outputs.head_sha }}-${{ github.run_attempt }}
+          path: release-artifacts/tpu/
+          if-no-files-found: warn
+          retention-days: 30
+      - name: Preserve the canonical TPU failure report
+        if: failure() || cancelled()
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-tpu-${{ steps.freeze.outputs.head_sha }}-${{ github.run_attempt }}
+          path: release-artifacts/tpu/
+          if-no-files-found: warn
+          retention-days: 30
+
+  tpu-segment-1:
+    needs: prepare
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    environment: kaggle-tpu
+    steps:
+      - name: Restore TPU relay state before checkout
+        uses: actions/download-artifact@v7
+        with:
+          name: release-tpu-submission-${{ needs.prepare.outputs.head_sha }}-${{ github.run_attempt }}
+          path: &tpu-relay-state-directory ${{ runner.temp }}/tpu-relay-state
+      - *release-checkout
+      - name: Continue the Kaggle TPU confirmation
+        id: provider
+        timeout-minutes: 355
+        uses: ./.github/actions/tpu-check
+        env: *kaggle-provider-env
+        with:
+          state-directory: *tpu-relay-state-directory
+      - name: Upload TPU relay state
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-tpu-segment-1-${{ needs.prepare.outputs.head_sha }}-${{ github.run_attempt }}
+          path: *tpu-relay-state-directory
+          if-no-files-found: warn
+          retention-days: 30
+      - &canonical-tpu-failure-upload
+        name: Preserve the canonical TPU failure report
+        if: failure() || cancelled()
+        uses: actions/upload-artifact@v7
+        with: &canonical-tpu-report
+          name: release-tpu-${{ needs.prepare.outputs.head_sha }}-${{ github.run_attempt }}
+          path: *tpu-relay-state-directory
+          if-no-files-found: warn
+          retention-days: 30
+
+  tpu-segment-2:
+    needs: [prepare, tpu-segment-1]
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    environment: kaggle-tpu
+    steps:
+      - name: Restore TPU relay state before checkout
+        uses: actions/download-artifact@v7
+        with:
+          name: release-tpu-segment-1-${{ needs.prepare.outputs.head_sha }}-${{ github.run_attempt }}
+          path: *tpu-relay-state-directory
+      - *release-checkout
+      - name: Continue the Kaggle TPU confirmation
+        id: provider
+        timeout-minutes: 355
+        uses: ./.github/actions/tpu-check
+        env: *kaggle-provider-env
+        with:
+          state-directory: *tpu-relay-state-directory
+      - name: Upload TPU relay state
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-tpu-segment-2-${{ needs.prepare.outputs.head_sha }}-${{ github.run_attempt }}
+          path: *tpu-relay-state-directory
+          if-no-files-found: warn
+          retention-days: 30
+      - *canonical-tpu-failure-upload
+
+  tpu-segment-3:
+    needs: [prepare, tpu-segment-2]
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    environment: kaggle-tpu
+    steps:
+      - name: Restore TPU relay state before checkout
+        uses: actions/download-artifact@v7
+        with:
+          name: release-tpu-segment-2-${{ needs.prepare.outputs.head_sha }}-${{ github.run_attempt }}
+          path: *tpu-relay-state-directory
+      - *release-checkout
+      - name: Continue the Kaggle TPU confirmation
+        id: provider
+        timeout-minutes: 355
+        uses: ./.github/actions/tpu-check
+        env: *kaggle-provider-env
+        with:
+          state-directory: *tpu-relay-state-directory
+      - name: Upload TPU relay state
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-tpu-segment-3-${{ needs.prepare.outputs.head_sha }}-${{ github.run_attempt }}
+          path: *tpu-relay-state-directory
+          if-no-files-found: warn
+          retention-days: 30
+      - *canonical-tpu-failure-upload
+
+  tpu:
+    needs: [prepare, tpu-segment-3]
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    environment: kaggle-tpu
+    steps:
+      - name: Restore TPU relay state before checkout
+        uses: actions/download-artifact@v7
+        with:
+          name: release-tpu-segment-3-${{ needs.prepare.outputs.head_sha }}-${{ github.run_attempt }}
+          path: *tpu-relay-state-directory
+      - *release-checkout
+      - name: Continue the Kaggle TPU confirmation
+        id: provider
+        timeout-minutes: 355
+        uses: ./.github/actions/tpu-check
+        env: *kaggle-provider-env
+        with:
+          state-directory: *tpu-relay-state-directory
       - name: Validate the bound TPU result
         if: always()
         env:
           GH_TOKEN: ${{ github.token }}
           PROVIDER_SUCCESS: ${{ steps.provider.outcome == 'success' }}
+          TPU_OUTPUT_DIR: ${{ runner.temp }}/tpu-relay-state
         run: >-
           python -m tools.release_tpu_gate finish
-          --binding tpu-release-binding.json --output-dir release-artifacts/tpu
+          --binding tpu-release-binding.json --output-dir "$TPU_OUTPUT_DIR"
           --provider-success "$PROVIDER_SUCCESS"
       - name: Upload TPU release confirmation artefacts
         if: always()
         uses: actions/upload-artifact@v7
-        with:
-          name: release-tpu-${{ needs.prepare.outputs.head_sha }}-${{ github.run_attempt }}
-          path: release-artifacts/tpu/
-          if-no-files-found: warn
-          retention-days: 30
+        with: *canonical-tpu-report

@@ -1,4 +1,5 @@
 from collections.abc import Callable
+from datetime import datetime, timedelta, timezone
 import hashlib
 import json
 from pathlib import Path
@@ -47,9 +48,60 @@ def completed(
     return subprocess.CompletedProcess(args, returncode, stdout, "")
 
 
+def _no_provider_access(*args: object, **kwargs: object) -> None:
+    del args, kwargs
+    pytest.fail("unexpected provider access")
+
+
+def _record_version_verification(
+    binding: dict[str, object], path: Path, calls: list[Path]
+) -> None:
+    del binding
+    calls.append(path)
+
+
 def authenticated(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("KAGGLE_API_TOKEN", SYNTHETIC_API_KEY)
     monkeypatch.setenv("KAGGLE_USERNAME", "test-user")
+
+
+def _relay_state(
+    path: Path,
+    *,
+    outcome: str = "handover",
+    status: str = "queued",
+    queue_elapsed: float = 0.0,
+    execution_elapsed: float = 0.0,
+    execution_started_at: datetime | None = None,
+    updated_at: datetime | None = None,
+    binding: dict[str, object] = BINDING,
+) -> dict[str, object]:
+    now = datetime(2026, 10, 8, 10, 0, tzinfo=timezone.utc)
+    run_tag = hashlib.sha256(
+        json.dumps(binding, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()[:16]
+    last_update = updated_at or now
+    submitted_at = last_update
+    execution_started = execution_started_at
+    state: dict[str, object] = {
+        "binding": binding,
+        "kernel_id": f"test-user/jaxr-{run_tag}-0123456789",
+        "submitted_version": 1,
+        "status": status,
+        "phase": "execution" if execution_started is not None else "queue",
+        "phase_started_at": submitted_at.isoformat(),
+        "submitted_at": submitted_at.isoformat(),
+        "execution_started_at": (
+            execution_started.isoformat() if execution_started is not None else None
+        ),
+        "updated_at": last_update.isoformat(),
+        "queue_elapsed_seconds": queue_elapsed,
+        "execution_elapsed_seconds": execution_elapsed,
+        "outcome": outcome,
+        "last_error": None,
+    }
+    _ = path.write_text(json.dumps(state), encoding="utf-8")
+    return state
 
 
 def test_quota_requires_unambiguous_tpu_headroom() -> None:
@@ -202,8 +254,21 @@ def test_private_kernel_embeds_only_the_trusted_runner(
     assert json.dumps(BINDING, sort_keys=True) in bootstrap
 
 
-def test_success_uses_a_fresh_private_slug_polls_and_downloads_bound_result(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize(
+    ("relay", "submit_only", "push_version"),
+    [
+        (False, False, 1),
+        (True, False, 1),
+        (True, True, 1),
+        (True, True, 2),
+    ],
+)
+def test_fresh_private_submit_and_relay_controller_paths(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    relay: bool,
+    submit_only: bool,
+    push_version: int,
 ) -> None:
     authenticated(monkeypatch)
     runner = tmp_path / "accelerator_runner.py"
@@ -213,6 +278,8 @@ def test_success_uses_a_fresh_private_slug_polls_and_downloads_bound_result(
     monkeypatch.setattr(kaggle_ci, "__file__", str(tmp_path / "kaggle_ci.py"))
     fake_time = [0.0]
     monkeypatch.setattr(kaggle_ci.time, "monotonic", lambda: fake_time[0])
+    wall_now = [datetime(2026, 10, 8, 10, 0, tzinfo=timezone.utc)]
+    monkeypatch.setattr(kaggle_ci, "_utc_now", lambda: wall_now[0])
 
     def advance_time(duration: float) -> None:
         fake_time[0] += duration
@@ -224,6 +291,14 @@ def test_success_uses_a_fresh_private_slug_polls_and_downloads_bound_result(
     )
     monkeypatch.setattr(kaggle_ci, "POLL_INTERVAL_SECONDS", 1900)
     commands: list[list[str]] = []
+    verify_calls: list[Path] = []
+    if relay:
+
+        def record_verification(binding: dict[str, object], path: Path) -> None:
+            assert binding == BINDING
+            verify_calls.append(path)
+
+        monkeypatch.setattr(kaggle_ci, "_verify_version_one", record_verification)
     status_responses = iter(
         (
             'has status "KernelWorkerStatus.QUEUED"',
@@ -253,6 +328,7 @@ def test_success_uses_a_fresh_private_slug_polls_and_downloads_bound_result(
                 )
             )
             assert metadata["is_private"] is True
+            assert metadata["id"] == controller_state["kernel_id"]
             assert controller_state["binding"] == BINDING
             assert controller_state["kernel_id"].startswith("test-user/jaxr-")
             assert controller_state["submitted_version"] is None
@@ -260,7 +336,9 @@ def test_success_uses_a_fresh_private_slug_polls_and_downloads_bound_result(
             assert args[args.index("--timeout") + 1] == str(
                 kaggle_ci.EXECUTION_TIMEOUT_SECONDS
             )
-            return completed(args, "Kernel version 1 successfully pushed.\n")
+            return completed(
+                args, f"Kernel version {push_version} successfully pushed.\n"
+            )
         if args[1:3] == ["kernels", "status"]:
             return completed(args, next(status_responses))
         if args[1:3] == ["kernels", "output"]:
@@ -277,7 +355,54 @@ def test_success_uses_a_fresh_private_slug_polls_and_downloads_bound_result(
         pytest.fail(f"unexpected Kaggle command: {args}")
 
     monkeypatch.setattr(kaggle_ci, "_command_ok", fake_command)
-    result = kaggle_ci.run(BINDING, "tpu", tmp_path / "output")
+    output_dir = tmp_path / "output"
+    submitted_at: object | None = None
+    if submit_only:
+        if push_version != 1:
+            with pytest.raises(kaggle_ci.KaggleError, match="did not report version 1"):
+                _ = kaggle_ci.run(
+                    BINDING, "tpu", output_dir, relay=True, submit_only=True
+                )
+            assert [command[1:3] for command in commands] == [
+                ["quota", "--format"],
+                ["kernels", "push"],
+            ]
+            assert verify_calls == []
+            state = json.loads(
+                (output_dir / "kaggle-controller-state.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+            assert state["outcome"] == "submission_version_unknown"
+            assert state["submitted_version"] is None
+            return
+        acknowledgement = kaggle_ci.run(
+            BINDING, "tpu", output_dir, relay=True, submit_only=True
+        )
+        assert acknowledgement["pending"] is True
+        assert acknowledgement["outcome"] == "handover"
+        assert [command[1:3] for command in commands] == [
+            ["quota", "--format"],
+            ["kernels", "push"],
+        ]
+        assert verify_calls == []
+        submitted_state = json.loads(
+            (output_dir / "kaggle-controller-state.json").read_text(encoding="utf-8")
+        )
+        assert submitted_state["status"] == "submitted"
+        assert submitted_state["outcome"] == "handover"
+        assert submitted_state["submitted_version"] == 1
+        submitted_at = submitted_state["submitted_at"]
+        wall_now[0] += timedelta(seconds=37)
+        result = kaggle_ci.run(
+            BINDING,
+            "tpu",
+            output_dir,
+            relay=True,
+            continue_state_path=output_dir / "kaggle-controller-state.json",
+        )
+    else:
+        result = kaggle_ci.run(BINDING, "tpu", output_dir, relay=relay)
 
     assert result == success_result()
     assert fake_time[0] == 3800
@@ -289,7 +414,11 @@ def test_success_uses_a_fresh_private_slug_polls_and_downloads_bound_result(
     assert controller_state["submitted_version"] == 1
     assert controller_state["binding"] == BINDING
     assert controller_state["outcome"] == "success"
-    assert controller_state["queue_elapsed_seconds"] == 1900
+    assert controller_state["queue_elapsed_seconds"] == 1900 + (
+        37 if submit_only else 0
+    )
+    if submit_only:
+        assert controller_state["submitted_at"] == submitted_at
     pushes = [command for command in commands if command[1:3] == ["kernels", "push"]]
     assert len(pushes) == 1
     # The private slug includes a random suffix so output from an older run cannot match.
@@ -712,6 +841,304 @@ def test_resume_unknown_status_fails_closed_without_gate_credit(
     assert report["outcome"] == "unknown_api_status"
     assert report["version_verified"] is False
     assert report["success"] is False
+
+
+def _install_relay_clock(monkeypatch: pytest.MonkeyPatch) -> list[float]:
+    clock = [0.0]
+    fixed_now = datetime(2026, 10, 8, 10, 0, tzinfo=timezone.utc)
+
+    def advance(delay: float) -> None:
+        clock[0] += delay
+
+    monkeypatch.setattr(kaggle_ci.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(kaggle_ci.time, "sleep", advance)
+    monkeypatch.setattr(kaggle_ci, "_utc_now", lambda: fixed_now)
+    return clock
+
+
+def _relay_case(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    status: str = "queued",
+    outcome: str = "handover",
+    queue_elapsed: float = 0,
+    execution_elapsed: float = 0,
+    execution_started_at: datetime | None = None,
+    updated_at: datetime | None = None,
+    segment_limit: int = 10,
+    queue_timeout: int = 100,
+) -> tuple[Path, list[float], list[list[str]], list[Path]]:
+    authenticated(monkeypatch)
+    clock = _install_relay_clock(monkeypatch)
+    monkeypatch.setattr(kaggle_ci, "RELAY_QUEUE_TIMEOUT_SECONDS", queue_timeout)
+    monkeypatch.setattr(kaggle_ci, "RELAY_SEGMENT_TIMEOUT_SECONDS", segment_limit)
+    monkeypatch.setattr(kaggle_ci, "EXECUTION_TIMEOUT_SECONDS", 100)
+    monkeypatch.setattr(kaggle_ci, "POLL_INTERVAL_SECONDS", 1)
+    path = tmp_path / "output" / "kaggle-controller-state.json"
+    path.parent.mkdir(exist_ok=True)
+    _ = _relay_state(
+        path,
+        status=status,
+        outcome=outcome,
+        queue_elapsed=queue_elapsed,
+        execution_elapsed=execution_elapsed,
+        execution_started_at=execution_started_at,
+        updated_at=updated_at,
+    )
+    calls: list[list[str]] = []
+    verify_calls: list[Path] = []
+
+    def record_verification(binding: dict[str, object], file: Path) -> None:
+        _record_version_verification(binding, file, verify_calls)
+
+    monkeypatch.setattr(kaggle_ci, "_verify_version_one", record_verification)
+    return path, clock, calls, verify_calls
+
+
+def _continue(path: Path) -> dict[str, object]:
+    return kaggle_ci.run(
+        BINDING,
+        "tpu",
+        path.parent,
+        relay=True,
+        continue_state_path=path,
+    )
+
+
+@pytest.mark.parametrize(
+    ("options", "message"),
+    [
+        (("--submit-only",), "requires --relay"),
+        (
+            ("--relay", "--submit-only", "--continue-state", "state.json"),
+            "cannot be combined",
+        ),
+        (
+            ("--submit-only", "--resume-state", "state.json"),
+            "status-only query",
+        ),
+    ],
+)
+def test_submit_only_cli_requires_relay_and_excludes_other_modes(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    options: tuple[str, ...],
+    message: str,
+) -> None:
+    binding_path = tmp_path / "binding.json"
+    _ = binding_path.write_text(json.dumps(BINDING), encoding="utf-8")
+
+    exit_code = kaggle_ci.main(
+        [
+            "--binding",
+            str(binding_path),
+            "--output-dir",
+            str(tmp_path / "output"),
+            *options,
+        ]
+    )
+
+    assert exit_code == 1
+    assert message in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
+    ("prior", "statuses", "queue", "execution", "start", "expected"),
+    [
+        ("queued", ("RUNNING", "COMPLETE"), 20, 0, None, (23, 1)),
+        (
+            "running",
+            ("QUEUED", "COMPLETE"),
+            12,
+            10,
+            datetime(2026, 10, 8, 9, 59, 50, tzinfo=timezone.utc),
+            (12, 14),
+        ),
+    ],
+)
+def test_relay_continuation_reuses_kernel_and_cumulative_budgets(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    prior: str,
+    statuses: tuple[str, str],
+    queue: float,
+    execution: float,
+    start: datetime | None,
+    expected: tuple[float, float],
+) -> None:
+    path, clock, calls, _ = _relay_case(
+        tmp_path,
+        monkeypatch,
+        status=prior,
+        queue_elapsed=queue,
+        execution_elapsed=execution,
+        execution_started_at=start,
+        updated_at=datetime(2026, 10, 8, 9, 59, 57, tzinfo=timezone.utc),
+        segment_limit=50,
+    )
+    status_iter = iter(statuses)
+
+    def command(args: list[str], **kwargs: object):
+        del kwargs
+        calls.append(args)
+        if args[1:3] == ["kernels", "status"]:
+            return completed(args, f'has status "{next(status_iter)}"')
+        if args[1:3] == ["kernels", "output"]:
+            output = Path(args[args.index("--path") + 1]) / "result.json"
+            _ = output.write_text(json.dumps(success_result()), encoding="utf-8")
+            return completed(args)
+        pytest.fail("continuation must not quota or submit another kernel")
+
+    monkeypatch.setattr(kaggle_ci, "_command_ok", command)
+    old = json.loads(path.read_text())
+    assert _continue(path) == success_result()
+    state = json.loads(path.read_text())
+    assert (state["kernel_id"], state["submitted_at"]) == (
+        old["kernel_id"],
+        old["submitted_at"],
+    )
+    assert (
+        state["queue_elapsed_seconds"],
+        state["execution_elapsed_seconds"],
+    ) == expected
+    assert state["outcome"] == "success" and clock[0] == 1
+    assert not any(
+        c[1:3] in (["quota", "--format"], ["kernels", "push"]) for c in calls
+    )
+
+
+def test_relay_job_gap_and_cutoff_statuses_keep_queue_and_execution_history(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path, _, calls, _ = _relay_case(
+        tmp_path,
+        monkeypatch,
+        queue_elapsed=8,
+        updated_at=datetime(2026, 10, 8, 9, 59, 57, tzinfo=timezone.utc),
+        queue_timeout=10,
+    )
+    monkeypatch.setattr(kaggle_ci, "_command_ok", _no_provider_access)
+    with pytest.raises(kaggle_ci.KaggleError, match="queue polling timed out"):
+        _ = _continue(path)
+    state = json.loads(path.read_text())
+    assert not calls and state["queue_elapsed_seconds"] == 11
+    assert state["outcome"] == "queue_timeout"
+
+    for status, outcome, phase in (
+        ("RUNNING", "handover", "execution"),
+        ("WAITING", "unknown_api_status", "queue"),
+    ):
+        path, clock, _, _ = _relay_case(tmp_path, monkeypatch, segment_limit=3)
+
+        def at_cutoff(args: list[str], **kwargs: object):
+            del kwargs
+            clock[0] = 3
+            return completed(args, f'has status "{status}"')
+
+        monkeypatch.setattr(kaggle_ci, "_command_ok", at_cutoff)
+        if status == "WAITING":
+            with pytest.raises(kaggle_ci.KaggleError, match="unknown status"):
+                _ = _continue(path)
+        else:
+            assert _continue(path)["pending"] is True
+        state = json.loads(path.read_text())
+        assert (state["outcome"], state["phase"]) == (outcome, phase)
+        if status == "RUNNING":
+            assert state["execution_started_at"] is not None
+
+
+def test_relay_terminal_status_can_finish_output_collection_after_soft_limit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path, clock, _, verified = _relay_case(tmp_path, monkeypatch)
+
+    def late_output(args: list[str], **kwargs: object):
+        del kwargs
+        if args[1:3] == ["kernels", "status"]:
+            clock[0] = 9
+            return completed(args, 'has status "COMPLETE"')
+        if args[1:3] == ["kernels", "output"]:
+            clock[0] = 12
+            output = Path(args[args.index("--path") + 1]) / "result.json"
+            _ = output.write_text(json.dumps(success_result()), encoding="utf-8")
+            return completed(args)
+        pytest.fail("continuation must not submit again")
+
+    def record_verification(binding: dict[str, object], file: Path) -> None:
+        _record_version_verification(binding, file, verified)
+
+    monkeypatch.setattr(kaggle_ci, "_verify_version_one", record_verification)
+    monkeypatch.setattr(kaggle_ci, "_command_ok", late_output)
+    assert _continue(path) == success_result()
+    assert clock[0] == 12 and len(verified) == 3
+    assert json.loads(path.read_text())["outcome"] == "success"
+
+
+@pytest.mark.parametrize(
+    ("provider_error", "expected"),
+    [(True, "provider error"), (False, "pending")],
+)
+def test_relay_soft_cutoff_handover_requires_successful_status_query(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    provider_error: bool,
+    expected: str,
+) -> None:
+    path, clock, calls, _ = _relay_case(tmp_path, monkeypatch, segment_limit=3)
+
+    def command(args: list[str], **kwargs: object):
+        del kwargs
+        calls.append(args)
+        clock[0] = 3
+        if args[1:3] == ["kernels", "status"] and not provider_error:
+            return completed(args, 'has status "QUEUED"')
+        raise kaggle_ci.KaggleError("Kaggle CLI command failed: provider error")
+
+    monkeypatch.setattr(kaggle_ci, "_command_ok", command)
+    if provider_error:
+        with pytest.raises(kaggle_ci.KaggleError, match=expected):
+            _ = _continue(path)
+    else:
+        assert _continue(path)["pending"] is True
+    state = json.loads(path.read_text())
+    assert state["outcome"] == ("cli_error" if provider_error else "handover")
+    assert len(calls) == 1
+    assert not (path.parent / "result.json").exists()
+
+
+@pytest.mark.parametrize(
+    "case", ["success", "cross-binding", "schema", "error-outcome"]
+)
+def test_relay_success_passthrough_and_invalid_state_fail_before_provider_access(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, case: str
+) -> None:
+    path, _, _, _ = _relay_case(
+        tmp_path, monkeypatch, outcome="success", status="complete"
+    )
+    state = json.loads(path.read_text())
+    state.update(phase="execution", execution_started_at=state["submitted_at"])
+    if case == "cross-binding":
+        state["binding"] = {**BINDING, "run_id": "371234567.2"}
+    elif case == "schema":
+        del state["updated_at"]
+    elif case == "error-outcome":
+        state["outcome"] = "cli_error"
+    _ = path.write_text(json.dumps(state), encoding="utf-8")
+    if case in {"success", "error-outcome"}:
+        _ = (path.parent / "result.json").write_text(json.dumps(success_result()))
+    monkeypatch.setattr(kaggle_ci, "_command_ok", _no_provider_access)
+    monkeypatch.setattr(kaggle_ci, "_verify_version_one", _no_provider_access)
+    if case == "success":
+        assert _continue(path) == success_result()
+        return
+    expected = {
+        "cross-binding": "binding",
+        "schema": "state",
+        "error-outcome": "not eligible for handover",
+    }[case]
+    with pytest.raises(kaggle_ci.KaggleError, match=expected):
+        _ = _continue(path)
 
 
 def test_stale_result_with_a_different_frozen_identity_is_rejected(

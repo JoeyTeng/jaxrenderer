@@ -102,13 +102,16 @@ def _new_request_list() -> list[_Request]:
 class _Api:
     files: list[str]
     status: Any = "COMPLETE"
+    version: int = 1
     metadata_requests: list[_Request] = field(default_factory=_new_request_list)
     status_requests: list[_Request] = field(default_factory=_new_request_list)
     output_requests: list[_Request] = field(default_factory=_new_request_list)
 
     def get_kernel(self, request: _Request) -> Any:
         self.metadata_requests.append(request)
-        return SimpleNamespace(metadata=SimpleNamespace(current_version_number=1))
+        return SimpleNamespace(
+            metadata=SimpleNamespace(current_version_number=self.version)
+        )
 
     def get_kernel_session_status(self, request: _Request) -> Any:
         self.status_requests.append(request)
@@ -144,8 +147,9 @@ def _install_fake_api(
     monkeypatch: pytest.MonkeyPatch,
     files: list[str] | None = None,
     status: Any = "COMPLETE",
+    version: int = 1,
 ) -> _Api:
-    api = _Api(FILES if files is None else files, status)
+    api = _Api(FILES if files is None else files, status, version)
     client = SimpleNamespace(kernels=SimpleNamespace(kernels_api_client=api))
 
     def load_sdk(
@@ -159,6 +163,55 @@ def _install_fake_api(
     monkeypatch.setattr(collector, "_load_sdk", load_sdk)
     monkeypatch.setattr(collector, "_bounded_client", bounded_client)
     return api
+
+
+def test_verify_version_one_reuses_versioned_metadata_and_closes_client(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("KAGGLE_API_TOKEN", TOKEN)
+    monkeypatch.setenv("KAGGLE_USERNAME", "joey")
+    state = tmp_path / "resume.json"
+    _resume_state(state)
+    api = _Api(FILES)
+    session_closed = [False]
+
+    def close_session() -> None:
+        session_closed[0] = True
+
+    session = SimpleNamespace(closed=False, close=close_session)
+    client = SimpleNamespace(
+        kernels=SimpleNamespace(kernels_api_client=api),
+        http_client=lambda: SimpleNamespace(_session=session),
+    )
+
+    def load_sdk(
+        token: str,
+    ) -> tuple[Any, type[_Request], type[_Request], type[_Request]]:
+        del token
+        return client, _Request, _Request, _Request
+
+    def bounded_client(value: Any) -> Any:
+        return value
+
+    monkeypatch.setattr(collector, "_load_sdk", load_sdk)
+    monkeypatch.setattr(collector, "_bounded_client", bounded_client)
+
+    assert collector.verify_version_one(BINDING, state) == 1
+    assert api.metadata_requests[0].version_label == "v1"
+    assert session_closed[0] is True
+
+
+def test_verify_version_one_rejects_a_newer_kernel_version(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("KAGGLE_API_TOKEN", TOKEN)
+    monkeypatch.setenv("KAGGLE_USERNAME", "joey")
+    state = tmp_path / "resume.json"
+    _resume_state(state)
+    _ = _install_fake_api(monkeypatch, version=2)
+
+    with pytest.raises(collector.CollectionError, match="latest version"):
+        _ = collector.verify_version_one(BINDING, state)
 
 
 def _install_files(monkeypatch: pytest.MonkeyPatch) -> None:

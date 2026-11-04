@@ -31,7 +31,17 @@ step's environment. Those jobs retain their `modal-gpu` and `kaggle-tpu`
 environments. Only the release-only upload step assigns the PyPI token to its
 execution environment.
 
-If the TPU wait times out while queued or running, the remote state is unknown.
+TPU confirmation first submits one notebook in `prepare`, then
+[continues across four jobs](README.md#account-and-environment-setup) with a
+22-hour queue budget and a separate 45-minute execution budget. The submission
+state and later handovers remain separate artefacts within the same workflow
+attempt. Every relay check may hand over; only the separate final finish gate
+accepts a complete validated result. A pending or incomplete result fails that
+gate and cannot publish a package.
+
+If the workflow stops before observing a terminal TPU status, the remote state
+is unknown. A failed intermediate segment also uploads its
+saved state under the standard confirmation artefact name when available.
 The workflow records controller state and does not automatically resubmit. To
 inspect the original notebook, download `tpu-release-binding-<attempt>` and
 `release-tpu-<sha>-<attempt>` from the same workflow run. With Kaggle credentials

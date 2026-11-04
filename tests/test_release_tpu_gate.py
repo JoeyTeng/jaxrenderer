@@ -258,12 +258,13 @@ def test_prepare_does_not_echo_github_api_diagnostics(
     assert "private diagnostic" not in str(error.value)
 
 
-def _write_inputs(tmp_path: Path, data: dict[str, object]) -> tuple[Path, Path]:
+def _write_inputs(tmp_path: Path, data: dict[str, object] | None) -> tuple[Path, Path]:
     binding_path = tmp_path / "binding.json"
     _ = binding_path.write_text(json.dumps(binding()), encoding="utf-8")
     output_dir = tmp_path / "output"
     output_dir.mkdir()
-    _ = (output_dir / "result.json").write_text(json.dumps(data), encoding="utf-8")
+    if data is not None:
+        _ = (output_dir / "result.json").write_text(json.dumps(data), encoding="utf-8")
     return binding_path, output_dir
 
 
@@ -361,6 +362,7 @@ def test_finish_rejects_unsupported_event_context(
             "does not prove a TPU",
         ),
         (result(device_count=0), True, "device_count does not match"),
+        (None, True, "could not read result.json"),
         (
             result(devices=[{"platform": "gpu", "device_kind": "GPU", "id": "0"}]),
             True,
@@ -373,7 +375,7 @@ def test_finish_rejects_unsupported_event_context(
 def test_finish_fails_closed_for_wrong_identity_provider_or_device(
     tmp_path: Path,
     workflow: None,
-    manifest: dict[str, object],
+    manifest: dict[str, object] | None,
     provider_success: bool,
     message: str,
 ) -> None:
