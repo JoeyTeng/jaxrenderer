@@ -30,11 +30,13 @@ jobs:
     outputs:
       head_sha: ${{ steps.freeze.outputs.head_sha }}
     steps:
-      - uses: actions/checkout@v7
+      - &release-checkout
+        uses: actions/checkout@v7
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
-      - uses: actions/setup-python@v7
+      - &release-python
+        uses: actions/setup-python@v7
         with:
           python-version: "3.14"
       - name: Freeze the release candidate and workflow attempt
@@ -59,26 +61,24 @@ jobs:
     timeout-minutes: 360
     environment: kaggle-tpu
     steps:
-      - uses: actions/checkout@v7
-        with:
-          ref: ${{ github.sha }}
-          persist-credentials: false
-      - uses: actions/download-artifact@v7
+      - *release-checkout
+      - &release-binding-download
+        uses: actions/download-artifact@v7
         with:
           name: tpu-release-binding-${{ github.run_attempt }}
-      - uses: actions/setup-python@v7
-        with:
-          python-version: "3.14"
-      - uses: astral-sh/setup-uv@v10.2.0
+      - *release-python
+      - &kaggle-uv-setup
+        uses: astral-sh/setup-uv@v10.2.0
         with:
           version: "0.12.20"
           enable-cache: true
-      - name: Install the locked Kaggle controller
+      - &kaggle-controller-install
+        name: Install the locked Kaggle controller
         run: uv sync --locked --only-group ci-kaggle --python 3.14
       - name: Submit the release candidate to a Kaggle TPU
         id: provider
         timeout-minutes: 350
-        env:
+        env: &kaggle-provider-env
           KAGGLE_API_TOKEN: ${{ secrets.KAGGLE_API_TOKEN }}
           KAGGLE_USERNAME: ${{ vars.KAGGLE_USERNAME }}
         run: >-
@@ -93,10 +93,11 @@ jobs:
           path: release-artifacts/tpu/
           if-no-files-found: warn
           retention-days: 30
-      - name: Preserve the canonical TPU failure report
+      - &canonical-tpu-failure-upload
+        name: Preserve the canonical TPU failure report
         if: failure() || cancelled()
         uses: actions/upload-artifact@v7
-        with:
+        with: &canonical-tpu-report
           name: release-tpu-${{ needs.prepare.outputs.head_sha }}-${{ github.run_attempt }}
           path: release-artifacts/tpu/
           if-no-files-found: warn
@@ -108,32 +109,20 @@ jobs:
     timeout-minutes: 360
     environment: kaggle-tpu
     steps:
-      - uses: actions/checkout@v7
-        with:
-          ref: ${{ github.sha }}
-          persist-credentials: false
-      - uses: actions/download-artifact@v7
-        with:
-          name: tpu-release-binding-${{ github.run_attempt }}
+      - *release-checkout
+      - *release-binding-download
       - uses: actions/download-artifact@v7
         with:
           name: release-tpu-segment-1-${{ needs.prepare.outputs.head_sha }}-${{ github.run_attempt }}
           path: release-artifacts/tpu/
-      - uses: actions/setup-python@v7
-        with:
-          python-version: "3.14"
-      - uses: astral-sh/setup-uv@v10.2.0
-        with:
-          version: "0.12.20"
-          enable-cache: true
-      - name: Install the locked Kaggle controller
-        run: uv sync --locked --only-group ci-kaggle --python 3.14
-      - name: Continue the Kaggle TPU confirmation
+      - *release-python
+      - *kaggle-uv-setup
+      - *kaggle-controller-install
+      - &continue-tpu-provider
+        name: Continue the Kaggle TPU confirmation
         id: provider
         timeout-minutes: 350
-        env:
-          KAGGLE_API_TOKEN: ${{ secrets.KAGGLE_API_TOKEN }}
-          KAGGLE_USERNAME: ${{ vars.KAGGLE_USERNAME }}
+        env: *kaggle-provider-env
         run: >-
           .venv/bin/python -u -m tools.kaggle_ci --binding tpu-release-binding.json
           --relay --continue-state release-artifacts/tpu/kaggle-controller-state.json
@@ -146,14 +135,7 @@ jobs:
           path: release-artifacts/tpu/
           if-no-files-found: warn
           retention-days: 30
-      - name: Preserve the canonical TPU failure report
-        if: failure() || cancelled()
-        uses: actions/upload-artifact@v7
-        with:
-          name: release-tpu-${{ needs.prepare.outputs.head_sha }}-${{ github.run_attempt }}
-          path: release-artifacts/tpu/
-          if-no-files-found: warn
-          retention-days: 30
+      - *canonical-tpu-failure-upload
 
   tpu-segment-3:
     needs: [prepare, tpu-segment-2]
@@ -161,36 +143,16 @@ jobs:
     timeout-minutes: 360
     environment: kaggle-tpu
     steps:
-      - uses: actions/checkout@v7
-        with:
-          ref: ${{ github.sha }}
-          persist-credentials: false
-      - uses: actions/download-artifact@v7
-        with:
-          name: tpu-release-binding-${{ github.run_attempt }}
+      - *release-checkout
+      - *release-binding-download
       - uses: actions/download-artifact@v7
         with:
           name: release-tpu-segment-2-${{ needs.prepare.outputs.head_sha }}-${{ github.run_attempt }}
           path: release-artifacts/tpu/
-      - uses: actions/setup-python@v7
-        with:
-          python-version: "3.14"
-      - uses: astral-sh/setup-uv@v10.2.0
-        with:
-          version: "0.12.20"
-          enable-cache: true
-      - name: Install the locked Kaggle controller
-        run: uv sync --locked --only-group ci-kaggle --python 3.14
-      - name: Continue the Kaggle TPU confirmation
-        id: provider
-        timeout-minutes: 350
-        env:
-          KAGGLE_API_TOKEN: ${{ secrets.KAGGLE_API_TOKEN }}
-          KAGGLE_USERNAME: ${{ vars.KAGGLE_USERNAME }}
-        run: >-
-          .venv/bin/python -u -m tools.kaggle_ci --binding tpu-release-binding.json
-          --relay --continue-state release-artifacts/tpu/kaggle-controller-state.json
-          --output-dir release-artifacts/tpu
+      - *release-python
+      - *kaggle-uv-setup
+      - *kaggle-controller-install
+      - *continue-tpu-provider
       - name: Upload TPU relay state
         if: always()
         uses: actions/upload-artifact@v7
@@ -199,14 +161,7 @@ jobs:
           path: release-artifacts/tpu/
           if-no-files-found: warn
           retention-days: 30
-      - name: Preserve the canonical TPU failure report
-        if: failure() || cancelled()
-        uses: actions/upload-artifact@v7
-        with:
-          name: release-tpu-${{ needs.prepare.outputs.head_sha }}-${{ github.run_attempt }}
-          path: release-artifacts/tpu/
-          if-no-files-found: warn
-          retention-days: 30
+      - *canonical-tpu-failure-upload
 
   tpu:
     needs: [prepare, tpu-segment-3]
@@ -214,32 +169,19 @@ jobs:
     timeout-minutes: 360
     environment: kaggle-tpu
     steps:
-      - uses: actions/checkout@v7
-        with:
-          ref: ${{ github.sha }}
-          persist-credentials: false
-      - uses: actions/download-artifact@v7
-        with:
-          name: tpu-release-binding-${{ github.run_attempt }}
+      - *release-checkout
+      - *release-binding-download
       - uses: actions/download-artifact@v7
         with:
           name: release-tpu-segment-3-${{ needs.prepare.outputs.head_sha }}-${{ github.run_attempt }}
           path: release-artifacts/tpu/
-      - uses: actions/setup-python@v7
-        with:
-          python-version: "3.14"
-      - uses: astral-sh/setup-uv@v10.2.0
-        with:
-          version: "0.12.20"
-          enable-cache: true
-      - name: Install the locked Kaggle controller
-        run: uv sync --locked --only-group ci-kaggle --python 3.14
+      - *release-python
+      - *kaggle-uv-setup
+      - *kaggle-controller-install
       - name: Finish the Kaggle TPU confirmation
         id: provider
         timeout-minutes: 350
-        env:
-          KAGGLE_API_TOKEN: ${{ secrets.KAGGLE_API_TOKEN }}
-          KAGGLE_USERNAME: ${{ vars.KAGGLE_USERNAME }}
+        env: *kaggle-provider-env
         run: >-
           .venv/bin/python -u -m tools.kaggle_ci --binding tpu-release-binding.json
           --relay --continue-state release-artifacts/tpu/kaggle-controller-state.json
@@ -256,8 +198,4 @@ jobs:
       - name: Upload TPU release confirmation artefacts
         if: always()
         uses: actions/upload-artifact@v7
-        with:
-          name: release-tpu-${{ needs.prepare.outputs.head_sha }}-${{ github.run_attempt }}
-          path: release-artifacts/tpu/
-          if-no-files-found: warn
-          retention-days: 30
+        with: *canonical-tpu-report

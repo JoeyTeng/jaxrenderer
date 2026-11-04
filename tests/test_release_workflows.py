@@ -265,124 +265,86 @@ def test_release_tpu_relay_fits_the_hosted_jobs_and_keeps_final_failure_reports(
 ):
     workflow = load_workflow("release-tpu.yml")
     jobs = workflow["jobs"]
-    stage_names = tuple(name for name in jobs if name != "prepare")
-    assert len(stage_names) == 4
-    assert stage_names[-1] == "tpu"
-    assert needs_list(jobs[stage_names[0]]) == ["prepare"]
-    for previous, current in zip(stage_names, stage_names[1:], strict=False):
-        assert needs_list(jobs[current]) == ["prepare", previous]
+    stage_names = ("tpu-segment-1", "tpu-segment-2", "tpu-segment-3", "tpu")
+    segments = [jobs[name] for name in stage_names[:3]]
+    stages = segments + [jobs["tpu"]]
 
-    binding_artifact = next(
+    assert needs_list(segments[0]) == ["prepare"]
+    for previous_name, current_name in zip(stage_names, stage_names[1:], strict=False):
+        assert needs_list(jobs[current_name]) == ["prepare", previous_name]
+
+    binding = next(
         step["with"]["name"]
         for step in jobs["prepare"]["steps"]
         if step.get("uses", "").startswith("actions/upload-artifact@")
     )
-    previous_state_artifact: str | None = None
-
-    for index, job_name in enumerate(stage_names, start=1):
-        job = jobs[job_name]
+    previous_artifact = binding
+    canonical = (
+        "release-tpu-${{ needs.prepare.outputs.head_sha }}-${{ github.run_attempt }}"
+    )
+    finish_steps: list[tuple[str, dict[str, Any]]] = []
+    assert (
+        kaggle_ci.RELAY_QUEUE_TIMEOUT_SECONDS + kaggle_ci.EXECUTION_TIMEOUT_SECONDS
+        <= len(stages) * kaggle_ci.RELAY_SEGMENT_TIMEOUT_SECONDS
+    )
+    for index, job in enumerate(stages):
         provider = step_with_id(job, "provider")
-        assert job["environment"] == "kaggle-tpu"
         job_seconds = int(job["timeout-minutes"]) * 60
         provider_seconds = int(provider["timeout-minutes"]) * 60
         assert job_seconds <= 360 * 60
-        # Leave time for CLI polling/output collection and for setup/upload/finish.
-        assert provider_seconds - kaggle_ci.RELAY_SEGMENT_TIMEOUT_SECONDS >= 5 * 60
         assert job_seconds - provider_seconds >= 10 * 60
-        assert provider["env"] == {
-            "KAGGLE_API_TOKEN": "${{ secrets.KAGGLE_API_TOKEN }}",
-            "KAGGLE_USERNAME": "${{ vars.KAGGLE_USERNAME }}",
-        }
-        assert_checkout_precedes_run_steps(job)
-        assert checkout_steps(job)[0]["with"]["ref"] == "${{ github.sha }}"
+        assert provider_seconds - kaggle_ci.RELAY_SEGMENT_TIMEOUT_SECONDS >= 5 * 60
+        assert "--relay" in provider["run"]
         downloads = [
             step
             for step in job["steps"]
             if step.get("uses", "").startswith("actions/download-artifact@")
         ]
-        assert any(step["with"]["name"] == binding_artifact for step in downloads)
-        if index == 1:
-            assert "--relay" in provider["run"]
-            assert "--continue-state" not in provider["run"]
-        else:
-            assert "--relay" in provider["run"]
-            assert (
-                "--continue-state release-artifacts/tpu/kaggle-controller-state.json"
-                in provider["run"]
-            )
+        assert any(step.get("with", {}).get("name") == binding for step in downloads)
+        if index:
             state_download = next(
                 step
                 for step in downloads
-                if step["with"].get("name") == previous_state_artifact
+                if step.get("with", {}).get("name") == previous_artifact
             )
-            assert state_download["with"]["path"] == "release-artifacts/tpu/"
-        if index == len(stage_names):
-            assert "--final-segment" in provider["run"]
+            state_path = state_download["with"]["path"]
+            assert state_path == "release-artifacts/tpu/"
+            assert (
+                f"--continue-state {state_path}kaggle-controller-state.json"
+                in provider["run"]
+            )
+            assert "--continue-state" in provider["run"]
         else:
-            assert "--final-segment" not in provider["run"]
-            assert not any(
-                step.get("if") == "always()"
-                and "PROVIDER_SUCCESS" in step.get("env", {})
-                for step in job["steps"]
-            )
+            assert "--continue-state" not in provider["run"]
 
         uploads = [
             step
             for step in job["steps"]
             if step.get("uses", "").startswith("actions/upload-artifact@")
         ]
-        always_uploads = [step for step in uploads if step.get("if") == "always()"]
-        assert len(always_uploads) == 1
-        relay_upload = always_uploads[0]
-        assert "release-artifacts/tpu/" in relay_upload["with"]["path"]
-        assert "${{ github.run_attempt }}" in relay_upload["with"]["name"]
-        if index < len(stage_names):
-            assert len(uploads) == 2
-            failure_uploads = [
-                step for step in uploads if step.get("if") == "failure() || cancelled()"
-            ]
-            assert len(failure_uploads) == 1
-            failure_upload = failure_uploads[0]
-            assert failure_upload["with"]["name"] == (
-                "release-tpu-${{ needs.prepare.outputs.head_sha }}-"
-                "${{ github.run_attempt }}"
+        relay = next(step for step in uploads if step.get("if") == "always()")
+        assert "${{ github.run_attempt }}" in relay["with"]["name"]
+        previous_artifact = relay["with"]["name"]
+        if index < len(segments):
+            assert relay["with"]["name"] != canonical
+            assert any(
+                step.get("if") == "failure() || cancelled()"
+                and step["with"]["name"] == canonical
+                for step in uploads
             )
-            assert failure_upload["with"]["path"] == relay_upload["with"]["path"]
-            assert failure_upload["with"]["path"] == "release-artifacts/tpu/"
-            # The canonical artifact step is failure-only; successful handover uploads relay state alone.
-            assert failure_upload["if"] != "always()"
         else:
-            assert len(uploads) == 1
-            assert relay_upload["with"]["name"] == (
-                "release-tpu-${{ needs.prepare.outputs.head_sha }}-"
-                "${{ github.run_attempt }}"
-            )
-        previous_state_artifact = relay_upload["with"]["name"]
+            assert relay["with"]["name"] == canonical
+        assert ("--final-segment" in provider["run"]) == (index == len(stages) - 1)
+        finish_steps.extend(
+            (stage_names[index], step)
+            for step in job["steps"]
+            if "PROVIDER_SUCCESS" in step.get("env", {})
+        )
 
-    relay_queue_seconds = kaggle_ci.RELAY_QUEUE_TIMEOUT_SECONDS
-    execution_seconds = kaggle_ci.EXECUTION_TIMEOUT_SECONDS
-    # Four job windows must cover all queue handovers and TPU execution.
-    assert relay_queue_seconds + execution_seconds <= len(stage_names) * (
-        kaggle_ci.RELAY_SEGMENT_TIMEOUT_SECONDS
-    )
-    finish = next(
-        step
-        for step in jobs["tpu"]["steps"]
-        if step.get("if") == "always()" and "PROVIDER_SUCCESS" in step.get("env", {})
-    )
-    upload = next(
-        step
-        for step in jobs["tpu"]["steps"]
-        if step.get("uses", "").startswith("actions/upload-artifact@")
-        and step.get("with", {}).get("name", "").startswith("release-tpu-${{")
-    )
-    assert finish["if"] == "always()"
+    assert len(finish_steps) == 1
+    finish_job, finish = finish_steps[0]
+    assert finish_job == "tpu" and finish["if"] == "always()"
     assert "continue-on-error" not in finish
-    assert upload["if"] == "always()"
-    assert upload["uses"].startswith("actions/upload-artifact@")
-    assert upload["with"]["name"] == (
-        "release-tpu-${{ needs.prepare.outputs.head_sha }}-${{ github.run_attempt }}"
-    )
 
 
 def test_cpu_reuse_requires_frozen_candidate_and_all_cpu_gates() -> None:

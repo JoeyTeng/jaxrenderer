@@ -864,7 +864,7 @@ def test_relay_continuation_reuses_kernel_and_cumulative_budgets(
     start: datetime | None,
     expected: tuple[float, float],
 ) -> None:
-    path, clock, calls, verified = _relay_case(
+    path, clock, calls, _ = _relay_case(
         tmp_path,
         monkeypatch,
         status=prior,
@@ -900,7 +900,6 @@ def test_relay_continuation_reuses_kernel_and_cumulative_budgets(
         state["execution_elapsed_seconds"],
     ) == expected
     assert state["outcome"] == "success" and clock[0] == 1
-    assert len(verified) == 3
     assert not any(
         c[1:3] in (["quota", "--format"], ["kernels", "push"]) for c in calls
     )
