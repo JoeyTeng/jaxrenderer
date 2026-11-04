@@ -866,13 +866,13 @@ def _relay_case(
     execution_elapsed: float = 0,
     execution_started_at: datetime | None = None,
     updated_at: datetime | None = None,
-    segment_timeout: int = 10,
+    segment_limit: int = 10,
     queue_timeout: int = 100,
 ) -> tuple[Path, list[float], list[list[str]], list[Path]]:
     authenticated(monkeypatch)
     clock = _install_relay_clock(monkeypatch)
     monkeypatch.setattr(kaggle_ci, "RELAY_QUEUE_TIMEOUT_SECONDS", queue_timeout)
-    monkeypatch.setattr(kaggle_ci, "RELAY_SEGMENT_TIMEOUT_SECONDS", segment_timeout)
+    monkeypatch.setattr(kaggle_ci, "RELAY_SEGMENT_TIMEOUT_SECONDS", segment_limit)
     monkeypatch.setattr(kaggle_ci, "EXECUTION_TIMEOUT_SECONDS", 100)
     monkeypatch.setattr(kaggle_ci, "POLL_INTERVAL_SECONDS", 1)
     path = tmp_path / "output" / "kaggle-controller-state.json"
@@ -896,14 +896,13 @@ def _relay_case(
     return path, clock, calls, verify_calls
 
 
-def _continue(path: Path, *, final_segment: bool = False) -> dict[str, object]:
+def _continue(path: Path) -> dict[str, object]:
     return kaggle_ci.run(
         BINDING,
         "tpu",
         path.parent,
         relay=True,
         continue_state_path=path,
-        final_segment=final_segment,
     )
 
 
@@ -913,10 +912,6 @@ def _continue(path: Path, *, final_segment: bool = False) -> dict[str, object]:
         (("--submit-only",), "requires --relay"),
         (
             ("--relay", "--submit-only", "--continue-state", "state.json"),
-            "cannot be combined",
-        ),
-        (
-            ("--relay", "--submit-only", "--final-segment"),
             "cannot be combined",
         ),
         (
@@ -980,7 +975,7 @@ def test_relay_continuation_reuses_kernel_and_cumulative_budgets(
         execution_elapsed=execution,
         execution_started_at=start,
         updated_at=datetime(2026, 10, 8, 9, 59, 57, tzinfo=timezone.utc),
-        segment_timeout=50,
+        segment_limit=50,
     )
     status_iter = iter(statuses)
 
@@ -1034,7 +1029,7 @@ def test_relay_job_gap_and_cutoff_statuses_keep_queue_and_execution_history(
         ("RUNNING", "handover", "execution"),
         ("WAITING", "unknown_api_status", "queue"),
     ):
-        path, clock, _, _ = _relay_case(tmp_path, monkeypatch, segment_timeout=3)
+        path, clock, _, _ = _relay_case(tmp_path, monkeypatch, segment_limit=3)
 
         def at_cutoff(args: list[str], **kwargs: object):
             del kwargs
@@ -1081,21 +1076,16 @@ def test_relay_terminal_status_can_finish_output_collection_after_soft_limit(
 
 
 @pytest.mark.parametrize(
-    ("provider_error", "final", "expected"),
-    [
-        (True, False, "provider error"),
-        (False, False, "pending"),
-        (False, True, "final segment cannot continue"),
-    ],
+    ("provider_error", "expected"),
+    [(True, "provider error"), (False, "pending")],
 )
-def test_relay_handover_only_accepts_pending_ack_from_nonfinal_provider_success(
+def test_relay_soft_cutoff_handover_requires_successful_status_query(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     provider_error: bool,
-    final: bool,
     expected: str,
 ) -> None:
-    path, clock, calls, _ = _relay_case(tmp_path, monkeypatch, segment_timeout=3)
+    path, clock, calls, _ = _relay_case(tmp_path, monkeypatch, segment_limit=3)
 
     def command(args: list[str], **kwargs: object):
         del kwargs
@@ -1106,16 +1096,13 @@ def test_relay_handover_only_accepts_pending_ack_from_nonfinal_provider_success(
         raise kaggle_ci.KaggleError("Kaggle CLI command failed: provider error")
 
     monkeypatch.setattr(kaggle_ci, "_command_ok", command)
-    if provider_error or final:
-        message = expected
-        with pytest.raises(kaggle_ci.KaggleError, match=message):
-            _ = _continue(path, final_segment=final)
+    if provider_error:
+        with pytest.raises(kaggle_ci.KaggleError, match=expected):
+            _ = _continue(path)
     else:
         assert _continue(path)["pending"] is True
     state = json.loads(path.read_text())
-    assert state["outcome"] == (
-        "cli_error" if provider_error else "segment_timeout" if final else "handover"
-    )
+    assert state["outcome"] == ("cli_error" if provider_error else "handover")
     assert len(calls) == 1
     assert not (path.parent / "result.json").exists()
 

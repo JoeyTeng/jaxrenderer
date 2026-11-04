@@ -35,7 +35,9 @@ TPU confirmation first submits one notebook in `prepare`, then
 [continues across four jobs](README.md#account-and-environment-setup) with a
 22-hour queue budget and a separate 45-minute execution budget. The submission
 state and later handovers remain separate artefacts within the same workflow
-attempt. Intermediate handovers do not pass the TPU gate.
+attempt. Every relay check may hand over; only the separate final finish gate
+accepts a complete validated result. A pending or incomplete result fails that
+gate and cannot publish a package.
 
 If the workflow stops before observing a terminal TPU status, the remote state
 is unknown. A failed intermediate segment also uploads its

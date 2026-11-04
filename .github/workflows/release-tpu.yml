@@ -98,7 +98,6 @@ jobs:
         env: *kaggle-provider-env
         with:
           previous-artifact: release-tpu-submission-${{ needs.prepare.outputs.head_sha }}-${{ github.run_attempt }}
-          final-segment: "false"
       - name: Upload TPU relay state
         if: always()
         uses: actions/upload-artifact@v7
@@ -131,7 +130,6 @@ jobs:
         env: *kaggle-provider-env
         with:
           previous-artifact: release-tpu-segment-1-${{ needs.prepare.outputs.head_sha }}-${{ github.run_attempt }}
-          final-segment: "false"
       - name: Upload TPU relay state
         if: always()
         uses: actions/upload-artifact@v7
@@ -156,7 +154,6 @@ jobs:
         env: *kaggle-provider-env
         with:
           previous-artifact: release-tpu-segment-2-${{ needs.prepare.outputs.head_sha }}-${{ github.run_attempt }}
-          final-segment: "false"
       - name: Upload TPU relay state
         if: always()
         uses: actions/upload-artifact@v7
@@ -174,14 +171,13 @@ jobs:
     environment: kaggle-tpu
     steps:
       - *release-checkout
-      - name: Finish the Kaggle TPU confirmation
+      - name: Continue the Kaggle TPU confirmation
         id: provider
         timeout-minutes: 355
         uses: ./.github/actions/tpu-check
         env: *kaggle-provider-env
         with:
           previous-artifact: release-tpu-segment-3-${{ needs.prepare.outputs.head_sha }}-${{ github.run_attempt }}
-          final-segment: "true"
       - name: Validate the bound TPU result
         if: always()
         env:

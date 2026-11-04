@@ -441,7 +441,6 @@ def _validate_source_files(
         "result_validation_error",
         "version_verification_error",
         "handover",
-        "segment_timeout",
         "pending",
         "success",
         "status_query_error",

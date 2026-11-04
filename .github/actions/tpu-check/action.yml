@@ -4,12 +4,19 @@ inputs:
   previous-artifact:
     description: Same-attempt artefact containing the previous controller state.
     required: true
-  final-segment:
-    description: Whether this is the final relay segment (true or false).
-    required: true
 runs:
   using: composite
   steps:
+    - uses: actions/download-artifact@v7
+      with:
+        name: ${{ inputs.previous-artifact }}
+        path: release-artifacts/tpu/
+    - uses: actions/download-artifact@v7
+      with:
+        name: tpu-release-binding-${{ github.run_attempt }}
+    - name: Verify the restored controller state
+      shell: bash
+      run: test -s release-artifacts/tpu/kaggle-controller-state.json
     - uses: actions/setup-python@v7
       with:
         python-version: "3.14"
@@ -20,32 +27,11 @@ runs:
     - name: Install the locked Kaggle controller
       shell: bash
       run: uv sync --locked --only-group ci-kaggle --python 3.14
-    - uses: actions/download-artifact@v7
-      with:
-        name: tpu-release-binding-${{ github.run_attempt }}
-    - uses: actions/download-artifact@v7
-      with:
-        name: ${{ inputs.previous-artifact }}
-        path: release-artifacts/tpu/
-    - name: Verify the restored controller state
-      shell: bash
-      run: test -s release-artifacts/tpu/kaggle-controller-state.json
     - name: Continue the Kaggle TPU confirmation
       shell: bash
-      env:
-        FINAL_SEGMENT: ${{ inputs.final-segment }}
-      run: |
-        if [[ "$FINAL_SEGMENT" == "true" ]]; then
-          segment_flag=(--final-segment)
-        elif [[ "$FINAL_SEGMENT" == "false" ]]; then
-          segment_flag=()
-        else
-          echo "final-segment must be true or false" >&2
-          exit 2
-        fi
-        exec .venv/bin/python -u -m tools.kaggle_ci \
-          --binding tpu-release-binding.json \
-          --relay \
-          --continue-state release-artifacts/tpu/kaggle-controller-state.json \
-          "${segment_flag[@]}" \
-          --output-dir release-artifacts/tpu
+      run: >-
+        .venv/bin/python -u -m tools.kaggle_ci
+        --binding tpu-release-binding.json
+        --relay
+        --continue-state release-artifacts/tpu/kaggle-controller-state.json
+        --output-dir release-artifacts/tpu

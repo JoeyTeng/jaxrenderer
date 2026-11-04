@@ -563,7 +563,6 @@ def _run(
     relay: bool = False,
     submit_only: bool = False,
     continue_state_path: Path | None = None,
-    final_segment: bool = False,
 ) -> dict[str, Any]:
     """Submit or continue one private TPU kernel and validate its bound result."""
     binding = validate_binding(binding)
@@ -571,12 +570,10 @@ def _run(
         raise KaggleError("Kaggle adapter only supports the TPU backend")
     if submit_only and not relay:
         raise KaggleError("--submit-only requires --relay")
-    if submit_only and (continue_state_path is not None or final_segment):
+    if submit_only and continue_state_path is not None:
         raise KaggleError("--submit-only cannot be combined with continuation options")
-    if not relay and (continue_state_path is not None or final_segment):
+    if not relay and continue_state_path is not None:
         raise KaggleError("continuation options require --relay")
-    if final_segment and continue_state_path is None:
-        raise KaggleError("--final-segment requires --continue-state")
     env = os.environ.copy()
     username = _require_credentials(env)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -707,18 +704,7 @@ def _run(
         status: str | None = None,
         submitted_at: str | None = None,
     ) -> dict[str, Any]:
-        error = "Kaggle relay controller segment reached its soft limit"
         handover_status = str(state["status"]) if status is None else status
-        if final_segment:
-            persist(
-                status=handover_status,
-                phase=phase,
-                outcome="segment_timeout",
-                now=now,
-                last_error=error,
-                submitted_at=submitted_at,
-            )
-            raise KaggleError(f"{error}; final segment cannot continue")
         persist(
             status=handover_status,
             phase=phase,
@@ -1131,7 +1117,6 @@ def run(
     relay: bool = False,
     submit_only: bool = False,
     continue_state_path: Path | None = None,
-    final_segment: bool = False,
 ) -> dict[str, Any]:
     """Run Kaggle and preserve a short failure diagnostic with its artefacts."""
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -1143,7 +1128,6 @@ def run(
             relay=relay,
             submit_only=submit_only,
             continue_state_path=continue_state_path,
-            final_segment=final_segment,
         )
     except KaggleError as error:
         message = _redact(str(error), os.environ)
@@ -1271,7 +1255,6 @@ def parser() -> argparse.ArgumentParser:
     _ = root.add_argument("--relay", action="store_true")
     _ = root.add_argument("--submit-only", action="store_true")
     _ = root.add_argument("--continue-state", type=Path)
-    _ = root.add_argument("--final-segment", action="store_true")
     return root
 
 
@@ -1280,12 +1263,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         binding = _load_binding_file(args.binding)
         if args.resume_state is not None:
-            if (
-                args.relay
-                or args.submit_only
-                or args.continue_state is not None
-                or args.final_segment
-            ):
+            if args.relay or args.submit_only or args.continue_state is not None:
                 raise KaggleError("--resume-state remains a status-only query")
             report = resume_status(binding, args.resume_state, args.output_dir)
             print(json.dumps(report, sort_keys=True))
@@ -1297,7 +1275,6 @@ def main(argv: list[str] | None = None) -> int:
             relay=args.relay,
             submit_only=args.submit_only,
             continue_state_path=args.continue_state,
-            final_segment=args.final_segment,
         )
         print(json.dumps(result, sort_keys=True))
         return 0

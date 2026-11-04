@@ -414,7 +414,6 @@ def test_prepare_rejects_duplicate_artifacts(
         "result_validation_error",
         "version_verification_error",
         "handover",
-        "segment_timeout",
         "pending",
     ],
 )
