@@ -13,12 +13,12 @@ import matplotlib.pyplot as plt
 from renderer import jit
 from renderer.geometry import Camera, normalise, to_homogeneous
 from renderer.pipeline import render
-from renderer.shader import (
+from renderer.shader import Shader
+from renderer.shader_types import (
     Fragment,
     FragmentInput,
     PerFragment,
     PerVertex,
-    Shader,
     VertexInput,
 )
 from renderer.shaders.gouraud import (

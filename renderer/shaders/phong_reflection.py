@@ -16,14 +16,14 @@ from .._meta_utils import typed_jaxtyped as jaxtyped
 from .._meta_utils import typed_jit as jit
 from ..geometry import Camera, normalise, to_homogeneous
 from ..model import MergedModel
-from ..shader import (
+from ..shader import Shader
+from ..shader_types import (
     Fragment,
     FragmentInput,
     InterpolationInput,
     PerFragment,
     PerVertex,
     PrimitiveInput,
-    Shader,
     VertexInput,
 )
 from ..types import (

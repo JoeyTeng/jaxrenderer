@@ -13,14 +13,14 @@ from .._meta_utils import add_tracing_name, is_array_type
 from .._meta_utils import typed_jaxtyped as jaxtyped
 from .._meta_utils import typed_jit as jit
 from ..geometry import to_homogeneous
-from ..shader import (
+from ..shader import Shader
+from ..shader_types import (
     Fragment,
     FragmentInput,
     InterpolationInput,
     PerFragment,
     PerVertex,
     PrimitiveInput,
-    Shader,
     VertexInput,
 )
 from ..types import FALSE_ARRAY, TRUE_ARRAY, BoolV, Vec4f

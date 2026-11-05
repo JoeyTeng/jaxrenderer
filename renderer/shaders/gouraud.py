@@ -11,12 +11,12 @@ from .._meta_utils import add_tracing_name, is_array_type, typed_array
 from .._meta_utils import typed_jaxtyped as jaxtyped
 from .._meta_utils import typed_jit as jit
 from ..geometry import normalise, to_homogeneous
-from ..shader import (
+from ..shader import Shader
+from ..shader_types import (
     Fragment,
     FragmentInput,
     PerFragment,
     PerVertex,
-    Shader,
     VertexInput,
 )
 from ..types import TRUE_ARRAY, Colour, FloatV, LightSource, Vec3f, Vec4f

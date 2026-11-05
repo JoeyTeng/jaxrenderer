@@ -4,6 +4,9 @@
 vertex data and render targets. The stages remain batched within one rendering
 call; there is no separate transparent rendering pass.
 
+The stage input and output types are defined in `renderer.shader_types`.
+`renderer.shader` continues to re-export those names for existing imports.
+
 Each stage method receives one frozen, keyword-only pytree dataclass. The record
 keeps related stage values together while preserving their GLSL names.
 
@@ -42,7 +45,7 @@ selection to its inherited implementation:
 from dataclasses import replace
 from typing import override
 
-from renderer.shader import PrimitiveInput
+from renderer.shader_types import PrimitiveInput
 from renderer.types import TRUE_ARRAY
 
 

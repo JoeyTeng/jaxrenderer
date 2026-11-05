@@ -11,16 +11,15 @@ from .model import Model, ModelObject, batch_models, merge_objects
 from .pipeline import render
 from .renderer import CameraParameters, LightParameters, Renderer, ShadowParameters
 from .scene import GUID, Scene
-from .shader import (
+from .shader import PassthroughShader, Shader
+from .shader_types import (
     Fragment,
     FragmentCollection,
     FragmentInput,
     InterpolationInput,
     MixInput,
     MixerOutput,
-    PassthroughShader,
     PrimitiveInput,
-    Shader,
     VertexInput,
 )
 from .shapes.capsule import UpAxis, create_capsule

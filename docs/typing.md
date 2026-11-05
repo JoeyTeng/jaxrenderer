@@ -14,4 +14,6 @@ Shader stages receive frozen, keyword-only pytree input records, while fragment
 outputs, destination pixels and framebuffer targets share one target-layout
 type. Custom shaders should follow the
 [shader contract](shader-contract.md), including the `PassthroughShader`
-default and `MixInput.destination` for custom mixers.
+default and `MixInput.destination` for custom mixers. These contract types are
+defined in `renderer.shader_types` and remain re-exported from
+`renderer.shader` for existing imports.

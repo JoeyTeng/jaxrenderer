@@ -26,14 +26,14 @@ from ..geometry import (
     to_cartesian,
     to_homogeneous,
 )
-from ..shader import (
+from ..shader import Shader
+from ..shader_types import (
     ID,
     Fragment,
     FragmentInput,
     InterpolationInput,
     PerFragment,
     PerVertex,
-    Shader,
     VertexInput,
 )
 from ..types import (

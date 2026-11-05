@@ -18,12 +18,12 @@ from .._meta_utils import (
 from .._meta_utils import typed_jaxtyped as jaxtyped
 from .._meta_utils import typed_jit as jit
 from ..geometry import Camera, normalise, to_homogeneous
-from ..shader import (
+from ..shader import Shader
+from ..shader_types import (
     Fragment,
     FragmentInput,
     PerFragment,
     PerVertex,
-    Shader,
     VertexInput,
 )
 from ..types import TRUE_ARRAY, Colour, LightSource, Texture, Vec2f, Vec3f, Vec4f
