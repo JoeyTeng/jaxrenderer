@@ -17,16 +17,21 @@ from ._meta_utils import add_tracing_name, is_array_type, typed_array
 from ._meta_utils import typed_jaxtyped as jaxtyped
 from ._meta_utils import typed_jit as jit
 from .geometry import Camera, Interpolation, Viewport, interpolate
-from .shader import (
+from .shader import Shader
+from .shader_types import (
     ID,
     Fragment,
+    FragmentInput,
+    InterpolationInput,
+    MixInput,
     MixedExtraT,
     MixerOutput,
     PerFragment,
     PerVertex,
-    Shader,
+    PrimitiveInput,
     ShaderExtraInputT,
     VaryingT,
+    VertexInput,
 )
 from .types import (
     BoolV,
@@ -295,9 +300,11 @@ def _postprocessing(
         ) -> tuple[PerFragment, Fragment[MixedExtraT]]:
             # PROCESS: Interpolation
             varying: VaryingT = shader.interpolate(
-                values=values,
-                barycentric_screen=barycentric_screen,
-                barycentric_clip=barycentric_clip,
+                inputs=InterpolationInput(
+                    values=values,
+                    barycentric_screen=barycentric_screen,
+                    barycentric_clip=barycentric_clip,
+                )
             )
             assert isinstance(varying, tuple)
 
@@ -305,11 +312,13 @@ def _postprocessing(
             per_frag: PerFragment
             extra_fragment_output: Fragment[MixedExtraT]
             per_frag, extra_fragment_output = shader.fragment(
-                gl_FragCoord=gl_FragCoord,
-                gl_FrontFacing=gl_FrontFacing,
-                gl_PointCoord=gl_PointCoord,
-                varying=varying,
-                extra=extra,  # pyright: ignore[reportUnknownArgumentType]  # PyTree bound is opaque to Pyright
+                inputs=FragmentInput(
+                    gl_FragCoord=gl_FragCoord,
+                    gl_FrontFacing=gl_FrontFacing,
+                    gl_PointCoord=gl_PointCoord,
+                    varying=varying,
+                    extra=extra,  # pyright: ignore[reportUnknownArgumentType]  # PyTree bound is opaque to Pyright
+                )
             )
             assert isinstance(per_frag, PerFragment)
             assert isinstance(extra_fragment_output, Fragment)
@@ -337,12 +346,30 @@ def _postprocessing(
 
         # END OF `_interpolate_fragment_shading`
 
-        args = jax.vmap(_per_primitive_preprocess)(
+        preprocessed = jax.vmap(_per_primitive_preprocess)(
             per_primitive,
             varyings,
         )
+        (
+            gl_FragCoord,
+            gl_FrontFacing,
+            gl_PointCoord,
+            keeps,
+            values,
+            barycentric_screen,
+            barycentric_clip,
+        ) = preprocessed
         chosen_args = shader.primitive_chooser(
-            *args, collection=shader.fragment_collection
+            inputs=PrimitiveInput(
+                gl_FragCoord=gl_FragCoord,
+                gl_FrontFacing=gl_FrontFacing,
+                gl_PointCoord=gl_PointCoord,
+                keeps=keeps,
+                values=values,
+                barycentric_screen=barycentric_screen,
+                barycentric_clip=barycentric_clip,
+                collection=shader.fragment_collection,
+            )
         )
 
         built_in: PerFragment
@@ -368,7 +395,12 @@ def _postprocessing(
             targets=tree_map(_destination_leaf, buffers.targets),
         )
         mixed_output, attachments = shader.mix(
-            gl_Depths, keeps, extra_outputs, destination=destination
+            inputs=MixInput(
+                gl_FragDepth=gl_Depths,
+                keeps=keeps,
+                extra=extra_outputs,
+                destination=destination,
+            )
         )
         assert isinstance(mixed_output, MixerOutput)
         assert isinstance(attachments, tuple)
@@ -538,10 +570,12 @@ def render(
         per_vertex: PerVertex
         varying: VaryingT
         per_vertex, varying = shader.vertex(
-            gl_VertexID,
-            gl_InstanceID,
-            camera,
-            extra,  # pyright: ignore[reportUnknownArgumentType]  # PyTree bound is opaque to Pyright
+            inputs=VertexInput(
+                gl_VertexID=gl_VertexID,
+                gl_InstanceID=gl_InstanceID,
+                camera=camera,
+                extra=extra,  # pyright: ignore[reportUnknownArgumentType]  # PyTree bound is opaque to Pyright
+            )
         )
         assert isinstance(per_vertex, PerVertex)
         assert isinstance(varying, tuple)

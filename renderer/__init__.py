@@ -11,12 +11,16 @@ from .model import Model, ModelObject, batch_models, merge_objects
 from .pipeline import render
 from .renderer import CameraParameters, LightParameters, Renderer, ShadowParameters
 from .scene import GUID, Scene
-from .shader import (
+from .shader import PassthroughShader, Shader
+from .shader_types import (
     Fragment,
     FragmentCollection,
+    FragmentInput,
+    InterpolationInput,
+    MixInput,
     MixerOutput,
-    PassthroughShader,
-    Shader,
+    PrimitiveInput,
+    VertexInput,
 )
 from .shapes.capsule import UpAxis, create_capsule
 from .shapes.cube import create_cube
@@ -48,12 +52,15 @@ __all__ = [
     "create_cube",
     "Fragment",
     "FragmentCollection",
+    "FragmentInput",
     "GUID",
+    "InterpolationInput",
     "JaxFloating",
     "JaxInteger",
     "jit",
     "LightParameters",
     "LightSource",
+    "MixInput",
     "MixerOutput",
     "merge_objects",
     "Model",
@@ -61,6 +68,7 @@ __all__ = [
     "normalise",
     "PassthroughShader",
     "PixelState",
+    "PrimitiveInput",
     "quaternion_mul",
     "quaternion",
     "render",
@@ -73,5 +81,6 @@ __all__ = [
     "Texture",
     "transpose_for_display",
     "UpAxis",
+    "VertexInput",
     "Vec3f",
 ]

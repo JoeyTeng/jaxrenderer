@@ -1,24 +1,29 @@
 """Runtime behaviour of the core shader stages."""
 
+from dataclasses import replace
 from typing import NamedTuple, override
 
+import jax
 from jax import Array
 from jaxtyping import Bool, Float
 import numpy as np
 import pytest
 
-from renderer._meta_utils import typed_asarray
+from renderer._meta_utils import typed_asarray, typed_grad, typed_jit
 from renderer.shader import (
     Fragment,
     FragmentCollection,
+    InterpolationInput,
+    MixInput,
     MixerOutput,
     PassthroughShader,
+    PrimitiveInput,
 )
 from renderer.shaders.gouraud import (
     GouraudExtraMixerOutput,
     GouraudShader,
 )
-from renderer.types import PixelState
+from renderer.types import TRUE_ARRAY, PixelState
 
 
 class _Varying(NamedTuple):
@@ -30,25 +35,38 @@ class _TestShader(PassthroughShader[tuple[Array, ...], _Varying]):
     pass
 
 
+class _DoubleSidedShader(_TestShader):
+    @staticmethod
+    @override
+    def primitive_chooser(
+        inputs: PrimitiveInput[_Varying],
+    ) -> tuple[
+        Float[Array, "kept_primitives 4"],
+        Bool[Array, "kept_primitives"],
+        Float[Array, "kept_primitives 2"],
+        Bool[Array, "kept_primitives"],
+        _Varying,
+        Float[Array, "kept_primitives 3"],
+        Float[Array, "kept_primitives 3"],
+    ]:
+        return _TestShader.primitive_chooser(replace(inputs, double_sided=TRUE_ARRAY))
+
+
 class _DestinationMixShader(_TestShader):
     @staticmethod
     @override
-    def mix(
-        gl_FragDepth: Float[Array, "primitives"],
-        keeps: Bool[Array, "primitives"],
-        extra: Fragment[_Varying],
-        *,
-        destination: PixelState[_Varying],
-    ) -> tuple[MixerOutput, _Varying]:
+    def mix(inputs: MixInput[_Varying]) -> tuple[MixerOutput, _Varying]:
         return (
             MixerOutput(
-                keep=keeps[0],
-                zbuffer=destination.zbuffer + gl_FragDepth[0],
+                keep=inputs.keeps[0],
+                zbuffer=inputs.destination.zbuffer + inputs.gl_FragDepth[0],
                 write_depth=_array(False, dtype=np.bool_),
             ),
             _Varying(
-                colour=destination.targets.colour + extra.targets.colour[0],
-                uv=destination.targets.uv + extra.targets.uv[0],
+                colour=(
+                    inputs.destination.targets.colour + inputs.extra.targets.colour[0]
+                ),
+                uv=inputs.destination.targets.uv + inputs.extra.targets.uv[0],
             ),
         )
 
@@ -75,13 +93,15 @@ def test_primitive_chooser_keeps_nearest_front_facing_candidate_and_structure() 
     barycentric_clip = barycentric_screen + 10.0
 
     chosen = _TestShader.primitive_chooser(
-        gl_FragCoord=frag_coord,
-        gl_FrontFacing=_array([False, True, True, True], dtype=np.bool_),
-        gl_PointCoord=point_coord,
-        keeps=_array([True, False, True, True], dtype=np.bool_),
-        values=values,
-        barycentric_screen=barycentric_screen,
-        barycentric_clip=barycentric_clip,
+        PrimitiveInput(
+            gl_FragCoord=frag_coord,
+            gl_FrontFacing=_array([False, True, True, True], dtype=np.bool_),
+            gl_PointCoord=point_coord,
+            keeps=_array([True, False, True, True], dtype=np.bool_),
+            values=values,
+            barycentric_screen=barycentric_screen,
+            barycentric_clip=barycentric_clip,
+        )
     )
 
     assert chosen[0].shape == (1, 4)
@@ -101,14 +121,16 @@ def test_primitive_chooser_keeps_nearest_front_facing_candidate_and_structure() 
         _array([True, False, False, False], dtype=np.bool_),
     ):
         chosen = _TestShader.primitive_chooser(
-            gl_FragCoord=frag_coord,
-            gl_FrontFacing=_array([False, True, True, True], dtype=np.bool_),
-            gl_PointCoord=point_coord,
-            keeps=_array([True, False, True, True], dtype=np.bool_),
-            values=values,
-            barycentric_screen=barycentric_screen,
-            barycentric_clip=barycentric_clip,
-            double_sided=double_sided,
+            PrimitiveInput(
+                gl_FragCoord=frag_coord,
+                gl_FrontFacing=_array([False, True, True, True], dtype=np.bool_),
+                gl_PointCoord=point_coord,
+                keeps=_array([True, False, True, True], dtype=np.bool_),
+                values=values,
+                barycentric_screen=barycentric_screen,
+                barycentric_clip=barycentric_clip,
+                double_sided=double_sided,
+            )
         )
 
         assert chosen[0].shape == (1, 4)
@@ -141,14 +163,16 @@ def test_all_collection_retains_batch_slots_and_returns_eligibility_mask() -> No
     barycentric_clip = barycentric_screen + 10.0
 
     chosen = _TestShader.primitive_chooser(
-        gl_FragCoord=frag_coord,
-        gl_FrontFacing=_array([False, True, True, True], dtype=np.bool_),
-        gl_PointCoord=point_coord,
-        keeps=_array([True, False, True, True], dtype=np.bool_),
-        values=values,
-        barycentric_screen=barycentric_screen,
-        barycentric_clip=barycentric_clip,
-        collection=FragmentCollection.ALL,
+        PrimitiveInput(
+            gl_FragCoord=frag_coord,
+            gl_FrontFacing=_array([False, True, True, True], dtype=np.bool_),
+            gl_PointCoord=point_coord,
+            keeps=_array([True, False, True, True], dtype=np.bool_),
+            values=values,
+            barycentric_screen=barycentric_screen,
+            barycentric_clip=barycentric_clip,
+            collection=FragmentCollection.ALL,
+        )
     )
 
     assert chosen[0].shape == (4, 4)
@@ -171,11 +195,66 @@ def test_interpolate_preserves_namedtuple_and_uses_smooth_weights() -> None:
     barycentric_screen = _array([0.2, 0.3, 0.5])
     barycentric_clip = _array([0.6, 0.1, 0.3])
 
-    result = _TestShader.interpolate(values, barycentric_screen, barycentric_clip)
+    result = _TestShader.interpolate(
+        InterpolationInput(
+            values=values,
+            barycentric_screen=barycentric_screen,
+            barycentric_clip=barycentric_clip,
+        )
+    )
 
     assert isinstance(result, _Varying)
     np.testing.assert_allclose(result.colour, [8.0, 13.6])
     np.testing.assert_allclose(result.uv, [3.0, 5.0])
+
+
+def test_interpolation_input_supports_jit_vmap_and_autodiff() -> None:
+    inputs = InterpolationInput(
+        values=_Varying(
+            colour=_array([[[1.0], [2.0], [4.0]], [[2.0], [4.0], [8.0]]]),
+            uv=_array([[[0.0], [2.0], [4.0]], [[1.0], [3.0], [5.0]]]),
+        ),
+        barycentric_screen=_array([[0.2, 0.3, 0.5], [0.5, 0.25, 0.25]]),
+        barycentric_clip=_array([[0.6, 0.1, 0.3], [0.2, 0.3, 0.5]]),
+    )
+    interpolate_batch = typed_jit(jax.vmap(_TestShader.interpolate))
+    result = interpolate_batch(inputs)
+
+    assert isinstance(result, _Varying)
+    assert result.colour.shape == (2, 1)
+
+    def total_colour(scale: Array) -> Array:
+        scaled_inputs = replace(
+            inputs,
+            values=inputs.values._replace(colour=inputs.values.colour * scale),
+        )
+        return interpolate_batch(scaled_inputs).colour.sum()
+
+    np.testing.assert_allclose(
+        typed_grad(total_colour)(_array(1.0)), result.colour.sum()
+    )
+
+
+def test_primitive_chooser_replace_forwards_to_inherited_stage() -> None:
+    inputs = PrimitiveInput(
+        gl_FragCoord=_array([[0.0, 0.0, 0.1, 1.0], [0.0, 0.0, 0.2, 1.0]]),
+        gl_FrontFacing=_array([False, True], dtype=np.bool_),
+        gl_PointCoord=_array(np.zeros((2, 2), dtype=np.float32)),
+        keeps=_array([True, True], dtype=np.bool_),
+        values=_Varying(
+            colour=_array([[1.0], [2.0]]),
+            uv=_array([[3.0], [4.0]]),
+        ),
+        barycentric_screen=_array([[1.0, 0.0, 0.0], [1.0, 0.0, 0.0]]),
+        barycentric_clip=_array([[1.0, 0.0, 0.0], [1.0, 0.0, 0.0]]),
+        collection=FragmentCollection.ALL,
+    )
+
+    chosen = _DoubleSidedShader.primitive_chooser(inputs)
+
+    np.testing.assert_array_equal(chosen[0], inputs.gl_FragCoord)
+    np.testing.assert_array_equal(chosen[1], inputs.gl_FrontFacing)
+    np.testing.assert_array_equal(chosen[3], [True, True])
 
 
 def test_fragment_defaults_to_opaque_alpha() -> None:
@@ -199,7 +278,12 @@ def test_mix_chooses_nearest_kept_candidate_and_empty_uses_destination() -> None
     )
 
     selected, selected_targets = _TestShader.mix(
-        depths, keeps, extra, destination=destination
+        MixInput(
+            gl_FragDepth=depths,
+            keeps=keeps,
+            extra=extra,
+            destination=destination,
+        )
     )
 
     assert selected.keep
@@ -210,10 +294,12 @@ def test_mix_chooses_nearest_kept_candidate_and_empty_uses_destination() -> None
     np.testing.assert_array_equal(selected_targets.uv, extra.targets.uv[2])
 
     empty, empty_targets = _TestShader.mix(
-        depths,
-        _array([False, False, False], dtype=np.bool_),
-        extra,
-        destination=destination,
+        MixInput(
+            gl_FragDepth=depths,
+            keeps=_array([False, False, False], dtype=np.bool_),
+            extra=extra,
+            destination=destination,
+        )
     )
 
     assert not empty.keep
@@ -221,15 +307,17 @@ def test_mix_chooses_nearest_kept_candidate_and_empty_uses_destination() -> None
     assert isinstance(empty_targets, _Varying)
 
     zero_candidates, zero_targets = _TestShader.mix(
-        _array([], dtype=np.float32),
-        _array([], dtype=np.bool_),
-        Fragment(
-            targets=_Varying(
-                colour=_array(np.zeros((0, 1), dtype=np.float32)),
-                uv=_array(np.zeros((0, 1), dtype=np.float32)),
-            )
+        MixInput(
+            gl_FragDepth=_array([], dtype=np.float32),
+            keeps=_array([], dtype=np.bool_),
+            extra=Fragment(
+                targets=_Varying(
+                    colour=_array(np.zeros((0, 1), dtype=np.float32)),
+                    uv=_array(np.zeros((0, 1), dtype=np.float32)),
+                )
+            ),
+            destination=destination,
         ),
-        destination=destination,
     )
     assert not zero_candidates.keep
     assert not zero_candidates.write_depth
@@ -249,10 +337,12 @@ def test_gouraud_inherits_typed_mix_output() -> None:
     )
 
     output, targets = GouraudShader.mix(
-        _array([0.25]),
-        _array([True], dtype=np.bool_),
-        fragment,
-        destination=destination,
+        MixInput(
+            gl_FragDepth=_array([0.25]),
+            keeps=_array([True], dtype=np.bool_),
+            extra=fragment,
+            destination=destination,
+        )
     )
 
     assert output.keep
@@ -269,10 +359,12 @@ def test_custom_mix_reads_destination_and_can_suppress_depth_write() -> None:
     )
 
     output, targets = _DestinationMixShader.mix(
-        _array([0.2]),
-        _array([True], dtype=np.bool_),
-        extra,
-        destination=destination,
+        MixInput(
+            gl_FragDepth=_array([0.2]),
+            keeps=_array([True], dtype=np.bool_),
+            extra=extra,
+            destination=destination,
+        )
     )
 
     assert output.keep
@@ -293,11 +385,13 @@ def test_primitive_chooser_rejects_non_boolean_facing_flags() -> None:
 
     with pytest.raises((AssertionError, TypeError)):
         _ = _TestShader.primitive_chooser(
-            gl_FragCoord=frag_coord,
-            gl_FrontFacing=_array([1, 0], dtype=np.int32),
-            gl_PointCoord=point_coord,
-            keeps=_array([True, True], dtype=np.bool_),
-            values=values,
-            barycentric_screen=barycentric,
-            barycentric_clip=barycentric,
+            PrimitiveInput(
+                gl_FragCoord=frag_coord,
+                gl_FrontFacing=_array([1, 0], dtype=np.int32),
+                gl_PointCoord=point_coord,
+                keeps=_array([True, True], dtype=np.bool_),
+                values=values,
+                barycentric_screen=barycentric,
+                barycentric_clip=barycentric,
+            )
         )

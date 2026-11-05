@@ -1,3 +1,4 @@
+from dataclasses import replace
 from functools import partial
 from typing import NamedTuple, override
 
@@ -11,9 +12,18 @@ from jaxtyping import (
 from .._meta_utils import add_tracing_name, is_array_type
 from .._meta_utils import typed_jaxtyped as jaxtyped
 from .._meta_utils import typed_jit as jit
-from ..geometry import Camera, to_homogeneous
-from ..shader import ID, Fragment, FragmentCollection, PerFragment, PerVertex, Shader
-from ..types import FALSE_ARRAY, TRUE_ARRAY, BoolV, Vec2f, Vec3f, Vec4f
+from ..geometry import to_homogeneous
+from ..shader import Shader
+from ..shader_types import (
+    Fragment,
+    FragmentInput,
+    InterpolationInput,
+    PerFragment,
+    PerVertex,
+    PrimitiveInput,
+    VertexInput,
+)
+from ..types import FALSE_ARRAY, TRUE_ARRAY, BoolV, Vec4f
 
 
 class DepthExtraInput(NamedTuple):
@@ -45,23 +55,20 @@ class DepthShader(
     @partial(jit, inline=True)
     @add_tracing_name
     def vertex(
-        gl_VertexID: ID,
-        gl_InstanceID: ID,
-        camera: Camera,
-        extra: DepthExtraInput,
+        inputs: VertexInput[DepthExtraInput],
     ) -> tuple[PerVertex, DepthExtraFragmentData]:
         # Use gl_VertexID to index in `extra` buffer.
-        position: Vec4f = to_homogeneous(extra.position[gl_VertexID])
-        gl_Position: Vec4f = camera.to_clip(position)
+        position: Vec4f = to_homogeneous(inputs.extra.position[inputs.gl_VertexID])
+        gl_Position: Vec4f = inputs.camera.to_clip(position)
         assert is_array_type(gl_Position, Vec4f)
 
         return (
             PerVertex(gl_Position=gl_Position),
             DepthExtraFragmentData(
                 double_sided=jnp.broadcast_to(
-                    extra.double_sided,
-                    extra.position.shape[:1],
-                )[gl_VertexID],
+                    inputs.extra.double_sided,
+                    inputs.extra.position.shape[:1],
+                )[inputs.gl_VertexID],
             ),
         )
 
@@ -71,28 +78,17 @@ class DepthShader(
     @add_tracing_name
     @override
     def interpolate(
-        values: DepthExtraFragmentData,
-        barycentric_screen: Vec3f,
-        barycentric_clip: Vec3f,
+        inputs: InterpolationInput[DepthExtraFragmentData],
     ) -> DepthExtraFragmentData:
-        return values._replace(double_sided=values.double_sided[0])
+        return inputs.values._replace(double_sided=inputs.values.double_sided[0])
 
     @staticmethod
     @jaxtyped
-    @partial(jit, static_argnames=("collection",), inline=True)
+    @partial(jit, inline=True)
     @add_tracing_name
     @override
     def primitive_chooser(
-        gl_FragCoord: Float[Array, "primitives 4"],
-        gl_FrontFacing: Bool[Array, "primitives"],
-        gl_PointCoord: Float[Array, "primitives 2"],
-        keeps: Bool[Array, "primitives"],
-        values: DepthExtraFragmentData,
-        barycentric_screen: Float[Array, "primitives 3"],
-        barycentric_clip: Float[Array, "primitives 3"],
-        *,
-        double_sided: Bool[Array, "primitives"] | BoolV = FALSE_ARRAY,
-        collection: FragmentCollection = FragmentCollection.NEAREST,
+        inputs: PrimitiveInput[DepthExtraFragmentData],
     ) -> tuple[
         Float[Array, "kept_primitives 4"],
         Bool[Array, "kept_primitives"],
@@ -107,15 +103,10 @@ class DepthShader(
             DepthExtraFragmentData,
             DepthExtraMixerOutput,
         ].primitive_chooser(
-            gl_FragCoord,
-            gl_FrontFacing,
-            gl_PointCoord,
-            keeps,
-            values,
-            barycentric_screen,
-            barycentric_clip,
-            double_sided=double_sided | values.double_sided[:, 0],
-            collection=collection,
+            inputs=replace(
+                inputs,
+                double_sided=(inputs.double_sided | inputs.values.double_sided[:, 0]),
+            )
         )
 
     @staticmethod
@@ -124,15 +115,11 @@ class DepthShader(
     @add_tracing_name
     @override
     def fragment(
-        gl_FragCoord: Vec4f,
-        gl_FrontFacing: BoolV,
-        gl_PointCoord: Vec2f,
-        varying: DepthExtraFragmentData,
-        extra: DepthExtraInput,
+        inputs: FragmentInput[DepthExtraInput, DepthExtraFragmentData],
     ) -> tuple[PerFragment, Fragment[DepthExtraMixerOutput]]:
         return (
             PerFragment(
-                keeps=gl_FrontFacing | varying.double_sided,
+                keeps=inputs.gl_FrontFacing | inputs.varying.double_sided,
                 use_default_depth=TRUE_ARRAY,
             ),
             Fragment(targets=DepthExtraMixerOutput()),

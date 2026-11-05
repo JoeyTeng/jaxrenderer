@@ -10,7 +10,10 @@ The renderer-specific `JaxFloating` and `JaxInteger` aliases remain available fr
 
 Renderer modules use native annotation behaviour without `from __future__ import annotations`. Self-references remain explicitly quoted for Python 3.12 and 3.13. Annotations are evaluated eagerly on those versions and lazily on Python 3.14; use `typing.get_type_hints` for resolved runtime annotations rather than relying on string values in `__annotations__`.
 
-Shader fragment outputs, destination pixels and framebuffer targets now share
-one target-layout type. Custom shaders should follow the
-[fragment and mixing contract](shader-contract.md), including the
-`PassthroughShader` default and the `destination` argument for custom mixers.
+Shader stages receive frozen, keyword-only pytree input records, while fragment
+outputs, destination pixels and framebuffer targets share one target-layout
+type. Custom shaders should follow the
+[shader contract](shader-contract.md), including the `PassthroughShader`
+default and `MixInput.destination` for custom mixers. These contract types are
+defined in `renderer.shader_types` and remain re-exported from
+`renderer.shader` for existing imports.

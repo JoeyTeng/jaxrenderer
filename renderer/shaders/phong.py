@@ -18,8 +18,15 @@ from .._meta_utils import (
 from .._meta_utils import typed_jaxtyped as jaxtyped
 from .._meta_utils import typed_jit as jit
 from ..geometry import Camera, normalise, to_homogeneous
-from ..shader import ID, Fragment, PerFragment, PerVertex, Shader
-from ..types import TRUE_ARRAY, BoolV, Colour, LightSource, Texture, Vec2f, Vec3f, Vec4f
+from ..shader import Shader
+from ..shader_types import (
+    Fragment,
+    FragmentInput,
+    PerFragment,
+    PerVertex,
+    VertexInput,
+)
+from ..types import TRUE_ARRAY, Colour, LightSource, Texture, Vec2f, Vec3f, Vec4f
 
 
 class PhongTextureExtraInput(NamedTuple):
@@ -75,22 +82,19 @@ class PhongTextureShader(
     @partial(jit, inline=True)
     @add_tracing_name
     def vertex(
-        gl_VertexID: ID,
-        gl_InstanceID: ID,
-        camera: Camera,
-        extra: PhongTextureExtraInput,
+        inputs: VertexInput[PhongTextureExtraInput],
     ) -> tuple[PerVertex, PhongTextureExtraFragmentData]:
         # Use gl_VertexID to index in `extra` buffer.
-        position: Vec4f = to_homogeneous(extra.position[gl_VertexID])
-        gl_Position: Vec4f = camera.to_clip(position)
+        position: Vec4f = to_homogeneous(inputs.extra.position[inputs.gl_VertexID])
+        gl_Position: Vec4f = inputs.camera.to_clip(position)
         assert is_array_type(gl_Position, Vec4f)
 
         # assume normal here is in world space. If it is in model space, it
         # must be transformed by the inverse transpose of the model matrix.
         # Ref: https://github.com/ssloy/tinyrenderer/wiki/Lesson-5:-Moving-the-camera#transformation-of-normal-vectors
         normal: Vec3f = Camera.apply_vec(
-            normalise(extra.normal[gl_VertexID]),
-            camera.world_to_eye_norm,
+            normalise(inputs.extra.normal[inputs.gl_VertexID]),
+            inputs.camera.world_to_eye_norm,
         )
         assert is_array_type(normal, Vec3f)
 
@@ -98,7 +102,7 @@ class PhongTextureShader(
             PerVertex(gl_Position=gl_Position),
             PhongTextureExtraFragmentData(
                 normal=normal,
-                uv=extra.uv[gl_VertexID],
+                uv=inputs.extra.uv[inputs.gl_VertexID],
             ),
         )
 
@@ -107,26 +111,25 @@ class PhongTextureShader(
     @partial(jit, inline=True)
     @add_tracing_name
     def fragment(
-        gl_FragCoord: Vec4f,
-        gl_FrontFacing: BoolV,
-        gl_PointCoord: Vec2f,
-        varying: PhongTextureExtraFragmentData,
-        extra: PhongTextureExtraInput,
+        inputs: FragmentInput[
+            PhongTextureExtraInput,
+            PhongTextureExtraFragmentData,
+        ],
     ) -> tuple[PerFragment, Fragment[PhongTextureExtraMixerOutput]]:
         # repeat texture
-        uv = lax.floor(varying.uv).astype(int)
-        uv = uv % typed_asarray(extra.texture.shape[:2])
-        texture_colour: Colour = extra.texture[uv[0], uv[1]]
+        uv = lax.floor(inputs.varying.uv).astype(int)
+        uv = uv % typed_asarray(inputs.extra.texture.shape[:2])
+        texture_colour: Colour = inputs.extra.texture[uv[0], uv[1]]
 
         # light colour * intensity
-        light_colour: Colour = extra.light.colour * lax.dot(  # pyright: ignore[reportUnknownMemberType]
-            normalise(varying.normal),
-            normalise(extra.light.direction),
+        light_colour: Colour = inputs.extra.light.colour * lax.dot(  # pyright: ignore[reportUnknownMemberType]
+            normalise(inputs.varying.normal),
+            normalise(inputs.extra.light.direction),
         )
 
         return (
             PerFragment(
-                keeps=gl_FrontFacing,
+                keeps=inputs.gl_FrontFacing,
                 use_default_depth=TRUE_ARRAY,
             ),
             Fragment(
