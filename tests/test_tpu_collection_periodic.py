@@ -606,7 +606,7 @@ def test_equivalent_verified_terminal_proofs_choose_stable_collector_identity() 
     assert selected["collector_run_id"] == f"{COLLECTOR_RUN}.2"
 
 
-def test_full_collection_artifact_uses_100_mib_limit(
+def test_full_collection_artifact_exceeds_legacy_2_mib_limit(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     name = (
@@ -699,9 +699,12 @@ def test_discover_returns_exact_candidates_and_matrix(
             }
         ]
     }
-    lines = github_output.read_text(encoding="utf-8").splitlines()
-    assert lines[0] == "has_sources=true"
-    assert json.loads(lines[1].removeprefix("matrix=")) == result["matrix"]
+    output_values = dict(
+        line.split("=", maxsplit=1)
+        for line in github_output.read_text(encoding="utf-8").splitlines()
+    )
+    assert output_values["has_sources"] == "true"
+    assert json.loads(output_values["matrix"]) == result["matrix"]
 
 
 def test_discover_caps_batch_and_rotates_over_all_eligible_sources(

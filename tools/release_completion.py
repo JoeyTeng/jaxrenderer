@@ -220,6 +220,8 @@ def _artifact_metadata(
     except (collection_gate.CollectionGateError, TypeError) as error:
         raise CompletionError("original GitHub artefact metadata is invalid") from error
     metadata = _object(value, "original GitHub artefact metadata is malformed")
+    if metadata.get("name") != name:
+        raise CompletionError("original GitHub artefact name changed")
     digest = metadata.get("digest")
     size = metadata.get("size_in_bytes")
     owner = metadata.get("workflow_run")
@@ -251,6 +253,25 @@ def _artifact_digest(metadata: dict[str, object]) -> str:
     if not isinstance(value, str) or DIGEST_RE.fullmatch(value) is None:
         raise CompletionError("original artefact digest is malformed")
     return value
+
+
+def _assert_artifact_pin(
+    metadata: dict[str, object],
+    binding: dict[str, object],
+    prefix: str,
+) -> None:
+    size_field = f"{prefix}_artifact_size"
+    label = "distribution" if prefix == "release_dist" else prefix.replace("_", " ")
+    if (
+        _artifact_id(metadata) != binding.get(f"{prefix}_artifact_id")
+        or metadata.get("name") != binding.get(f"{prefix}_artifact_name")
+        or _artifact_digest(metadata) != binding.get(f"{prefix}_artifact_digest")
+        or (
+            size_field in binding
+            and metadata.get("size_in_bytes") != binding.get(size_field)
+        )
+    ):
+        raise CompletionError(f"{label} artefact identity changed")
 
 
 def _collector_run_identity(
@@ -793,8 +814,6 @@ def _source_artifact_identity(
         and recorded_candidate_id != candidate_artifact["id"]
     ):
         raise CompletionError("candidate artefact identity changed")
-    if candidate_artifact.get("name") != candidate_name:
-        raise CompletionError("candidate artefact name changed")
     marker_name = source.get("marker_artifact_name")
     if not isinstance(marker_name, str):
         marker_name = (
@@ -1030,8 +1049,6 @@ def prepare(
         collector_sha,
         expected_attempt=collector_try,
     )
-    if collection_artifact.get("name") != collection_artifact_name:
-        raise CompletionError("periodic collection artefact name changed")
     if source_fields == frozenset(collection_gate.SOURCE_BASE_FIELDS):
         if (
             source.get("_source_conclusion") != "failure"
@@ -1073,8 +1090,6 @@ def prepare(
         max_archive_bytes=MAX_ARCHIVE_BYTES,
         expected_attempt=attempt,
     )
-    if dist_artifact.get("name") != dist_artifact_name:
-        raise CompletionError("original release distribution artefact name changed")
     output_dir.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(
         prefix="jaxrenderer-release-completion-", dir=output_dir.parent
@@ -1315,13 +1330,7 @@ def verify(bundle_dir: Path, dist_dir: Path) -> dict[str, object]:
         collector_sha,
         expected_attempt=collector_attempt,
     )
-    if (
-        _artifact_id(collection_artifact) != binding["collector_artifact_id"]
-        or _artifact_digest(collection_artifact) != binding["collector_artifact_digest"]
-        or collection_artifact.get("size_in_bytes")
-        != binding["collector_artifact_size"]
-    ):
-        raise CompletionError("periodic collection artefact identity changed")
+    _assert_artifact_pin(collection_artifact, binding, "collector")
     source_dir = bundle_dir / "collection" / "source"
     try:
         source, tpu_binding, state = collection_gate.revalidate(
@@ -1369,16 +1378,7 @@ def verify(bundle_dir: Path, dist_dir: Path) -> dict[str, object]:
     )
     if terminal_marker_artifact is None:
         raise CompletionError("periodic terminal marker is missing or unconfirmed")
-    if (
-        _artifact_id(terminal_marker_artifact) != binding["terminal_marker_artifact_id"]
-        or terminal_marker_artifact.get("name")
-        != binding["terminal_marker_artifact_name"]
-        or _artifact_digest(terminal_marker_artifact)
-        != binding["terminal_marker_artifact_digest"]
-        or terminal_marker_artifact.get("size_in_bytes")
-        != binding["terminal_marker_artifact_size"]
-    ):
-        raise CompletionError("periodic terminal marker artefact identity changed")
+    _assert_artifact_pin(terminal_marker_artifact, binding, "terminal_marker")
     candidate, candidate_raw = _source_candidate(source_dir, source, tpu_binding)
     if (
         candidate["mode"] != binding["candidate_mode"]
@@ -1388,14 +1388,10 @@ def verify(bundle_dir: Path, dist_dir: Path) -> dict[str, object]:
     ):
         raise CompletionError("frozen completion evidence changed")
     candidate_artifact, marker_artifact = _source_artifact_identity(source, candidate)
+    _assert_artifact_pin(candidate_artifact, binding, "candidate")
+    _assert_artifact_pin(marker_artifact, binding, "marker")
     if (
-        _artifact_id(candidate_artifact) != binding["candidate_artifact_id"]
-        or candidate_artifact.get("name") != binding["candidate_artifact_name"]
-        or _artifact_digest(candidate_artifact) != binding["candidate_artifact_digest"]
-        or _artifact_id(marker_artifact) != binding["marker_artifact_id"]
-        or marker_artifact.get("name") != binding["marker_artifact_name"]
-        or _artifact_digest(marker_artifact) != binding["marker_artifact_digest"]
-        or source.get("binding_artifact_id") != binding["binding_artifact_id"]
+        source.get("binding_artifact_id") != binding["binding_artifact_id"]
         or source.get("controller_artifact_id") != binding["controller_artifact_id"]
     ):
         raise CompletionError("original source artefact identities changed")
@@ -1423,13 +1419,9 @@ def verify(bundle_dir: Path, dist_dir: Path) -> dict[str, object]:
         max_archive_bytes=MAX_ARCHIVE_BYTES,
         expected_attempt=source_attempt,
     )
-    if (
-        dist_name != f"release-dist-{source_attempt}"
-        or _artifact_id(dist_artifact) != binding["release_dist_artifact_id"]
-        or _artifact_digest(dist_artifact) != binding["release_dist_artifact_digest"]
-        or dist_artifact.get("size_in_bytes") != binding["release_dist_artifact_size"]
-    ):
+    if dist_name != f"release-dist-{source_attempt}":
         raise CompletionError("original distribution artefact identity changed")
+    _assert_artifact_pin(dist_artifact, binding, "release_dist")
     manifest = _read_json(bundle_dir / "dist-manifest.json", limit=256 * 1024)
     if (
         manifest.get("schema_version") != 1
