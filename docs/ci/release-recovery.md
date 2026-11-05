@@ -20,18 +20,21 @@ whose package version matches the tag, and whose version is absent from PyPI.
 An unavailable or ambiguous check blocks the workflow. It never moves the tag,
 creates another release or changes the source version.
 
-The workflow and controller come from the dispatched `master` commit; the build,
+The `Prepare release validation` workflow and controller come from the dispatched `master` commit; the build,
 CPU checks and accelerator tests use the original tag's frozen commit. A separate
 candidate binding records both commits, the tag object, release identity, version,
 repository and workflow attempt. The ordinary accelerator bindings retain the
 candidate commit and the same run and attempt.
 
-Each recovery builds once and reruns all CPU, installed-wheel, Modal GPU and
-Kaggle TPU gates. Before upload it rechecks the candidate binding and tag, then
-downloads that attempt's validated distributions without rebuilding. Publication
-still requires the `PyPI` environment's approval and credential. There is no paid
-fallback or automatic retry. A successful GitHub Release alone does not establish
-that the version has reached PyPI.
+Each recovery builds once and reruns CPU, installed-wheel and Modal GPU gates,
+then submits a Kaggle TPU run. A successful submission is recorded as pending
+validation. Delayed collection supports recovery runs with distinct controller
+and candidate commits: the recovery marker binds the original tag candidate to
+the repaired controller workflow. Completion rechecks the published release,
+tag, candidate, collection and original distributions before requesting fresh
+approval in the `PyPI` environment. There is no paid fallback or automatic
+retry. A successful GitHub Release alone does not establish that the version
+has reached PyPI.
 
 ## A delayed TPU run
 
@@ -41,19 +44,16 @@ the saved binding and controller state with the
 before any new submission. This query neither submits a notebook nor validates a
 completed result.
 
-Within a new recovery attempt, TPU confirmation uses the same
-[four-job relay](README.md#account-and-environment-setup) as ordinary releases.
-The `prepare` job submits once and saves its controller state; the four relay
-jobs run the same continuation check and may hand over within the attempt. The
-separate final finish gate requires a complete validated result. Recovery does
-not resume the original failed Actions run or reuse its notebook's result in a
-new attempt.
+Within a new recovery attempt, TPU confirmation submits once and saves its
+controller state. It does not wait for the regression or claim a validation
+pass. Recovery does not resume the original failed Actions run.
 
-The legacy delayed-result collectors require matching controller and candidate
-commits. Recovery runs record a `recovery-source-binding-<attempt>` marker and
-are excluded from periodic discovery. Neither manual nor periodic collection
-currently supports recovery runs. A collected receipt cannot complete a later
-publication attempt's TPU gate.
+Recovery runs record a `recovery-source-binding-<attempt>` marker. Manual and
+periodic collectors use that marker to validate the original candidate when
+the controller SHA differs from the candidate SHA. A verified delayed result
+can complete that recovery attempt; it does not change the original failed
+publishing run, and the `PyPI` upload still requires fresh environment
+approval.
 
 ## Kaggle quota output
 

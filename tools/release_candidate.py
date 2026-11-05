@@ -408,6 +408,45 @@ def verify(binding_path: Path, recovery_tag: str | None) -> CandidateBinding:
     return current
 
 
+def verify_frozen(binding_path: Path) -> CandidateBinding:
+    """Recheck an authenticated original binding without selecting a new run."""
+    binding = _read_binding(binding_path)
+    commit = binding["source_commit"]
+    version = binding["version"]
+    if binding["mode"] == "rehearsal":
+        if _version_at_commit(commit) != version:
+            raise CandidateError(
+                "candidate version changed after the binding was prepared"
+            )
+        return binding
+
+    tag = cast(str, binding["tag"])
+    release_id, live_tag, live_ref = _release_for_tag(tag)
+    if (
+        release_id != binding["release_id"]
+        or live_tag != tag
+        or live_ref != binding["tag_ref"]
+    ):
+        raise CandidateError(
+            "published release identity changed after the binding was prepared"
+        )
+    tag_object_sha, live_commit = _resolve_tag(tag)
+    if tag_object_sha != binding["tag_object_sha"] or live_commit != commit:
+        raise CandidateError(
+            "published release tag changed after the binding was prepared"
+        )
+    try:
+        release_tpu_gate.verify_master_history(commit)
+    except release_tpu_gate.ReleaseGateError as error:
+        raise CandidateError("release commit is no longer on master history") from error
+    if _version_at_commit(commit) != version or version != tag.removeprefix("v"):
+        raise CandidateError("release version changed after the binding was prepared")
+    if binding["mode"] == "release" and binding["controller_sha"] != commit:
+        raise CandidateError("release controller does not match its published tag")
+    _require_pypi_version_absent(version)
+    return binding
+
+
 def prepare(
     recovery_tag: str | None, output: Path, github_output: Path
 ) -> CandidateBinding:

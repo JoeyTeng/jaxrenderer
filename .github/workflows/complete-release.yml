@@ -1,0 +1,154 @@
+name: Complete validated release
+
+on:
+  workflow_call:
+    inputs:
+      source_run_id:
+        description: Original publishing workflow run ID
+        required: true
+        type: string
+      source_attempt:
+        description: Original publishing workflow attempt
+        required: true
+        type: string
+      commit:
+        description: Original controller commit SHA
+        required: true
+        type: string
+  workflow_dispatch:
+    inputs:
+      source_run_id:
+        description: Original publishing workflow run ID
+        required: true
+        type: string
+      source_attempt:
+        description: Original publishing workflow attempt
+        required: true
+        type: string
+      commit:
+        description: Original controller commit SHA
+        required: true
+        type: string
+      collector_run_id:
+        description: Periodic collector run ID containing the result
+        required: true
+        type: string
+      collector_attempt:
+        description: Periodic collector workflow attempt
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  prepare:
+    if: github.ref == 'refs/heads/master'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      ready: ${{ steps.prepare.outputs.ready }}
+      publish: ${{ steps.prepare.outputs.publish }}
+      version: ${{ steps.prepare.outputs.version }}
+      head_sha: ${{ steps.prepare.outputs.head_sha }}
+      mode: ${{ steps.prepare.outputs.mode }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.14"
+      - uses: astral-sh/setup-uv@v10.2.0
+        with:
+          version: "0.12.20"
+          enable-cache: true
+      - name: Download this run's validated delayed TPU collection
+        if: inputs.collector_run_id == ''
+        uses: actions/download-artifact@v7
+        with:
+          name: tpu-periodic-${{ inputs.commit }}-${{ inputs.source_run_id }}-${{ inputs.source_attempt }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: collection/
+      - name: Download a saved delayed TPU collection
+        if: inputs.collector_run_id != ''
+        uses: actions/download-artifact@v7
+        with:
+          name: tpu-periodic-${{ inputs.commit }}-${{ inputs.source_run_id }}-${{ inputs.source_attempt }}-${{ inputs.collector_run_id }}-${{ inputs.collector_attempt }}
+          path: collection/
+          run-id: ${{ inputs.collector_run_id }}
+          github-token: ${{ github.token }}
+      - name: Bind a successful TPU collection to the original release
+        id: prepare
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_RUN_ID: ${{ inputs.source_run_id }}
+          SOURCE_ATTEMPT: ${{ inputs.source_attempt }}
+          SOURCE_COMMIT: ${{ inputs.commit }}
+          COLLECTOR_RUN_ID: ${{ inputs.collector_run_id }}
+          COLLECTOR_ATTEMPT: ${{ inputs.collector_attempt }}
+        run: |
+          args=()
+          if [[ -n "$COLLECTOR_RUN_ID" ]]; then
+            args+=(--collector-run "$COLLECTOR_RUN_ID" --collector-attempt "$COLLECTOR_ATTEMPT")
+          fi
+          python -m tools.release_completion prepare \
+            --source-run "$SOURCE_RUN_ID" \
+            --source-attempt "$SOURCE_ATTEMPT" \
+            --commit "$SOURCE_COMMIT" \
+            --collection-dir collection \
+            --output-dir completion \
+            --github-output "$GITHUB_OUTPUT" "${args[@]}"
+      - name: Retain the completion evidence
+        if: steps.prepare.outputs.ready == 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: tpu-release-completion-${{ inputs.commit }}-${{ inputs.source_run_id }}-${{ inputs.source_attempt }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: completion/
+          if-no-files-found: error
+          retention-days: 30
+
+  publish:
+    needs: prepare
+    if: ${{ needs.prepare.outputs.ready == 'true' && needs.prepare.outputs.publish == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: PyPI
+    concurrency:
+      group: release-version-${{ needs.prepare.outputs.version }}
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.14"
+      - uses: astral-sh/setup-uv@v10.2.0
+        with:
+          version: "0.12.20"
+      - uses: actions/download-artifact@v7
+        with:
+          name: tpu-release-completion-${{ inputs.commit }}-${{ inputs.source_run_id }}-${{ inputs.source_attempt }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: completion/
+      - uses: actions/download-artifact@v7
+        with:
+          name: release-dist-${{ inputs.source_attempt }}
+          path: dist/
+          run-id: ${{ inputs.source_run_id }}
+          github-token: ${{ github.token }}
+      - name: Recheck the exact source evidence and tag immediately before upload
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_RUN_ID: ${{ inputs.source_run_id }}
+          SOURCE_ATTEMPT: ${{ inputs.source_attempt }}
+          SOURCE_COMMIT: ${{ inputs.commit }}
+        run: >-
+          python -m tools.release_completion verify
+          --bundle-dir completion --dist-dir dist
+      - name: Publish the original validated distributions
+        env:
+          UV_PUBLISH_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
+        run: uv publish

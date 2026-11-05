@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import argparse
+from datetime import datetime
 import json
+import math
 import os
 from pathlib import Path
 import re
@@ -13,11 +15,18 @@ import sys
 from typing import cast
 import zipfile
 
-from tools import accelerator_gate, kaggle_ci, kaggle_collect, release_tpu_gate
+from tools import (
+    accelerator_gate,
+    kaggle_ci,
+    kaggle_collect,
+    release_candidate,
+    release_tpu_gate,
+)
 
 REPOSITORY = release_tpu_gate.REPOSITORY
 SOURCE_WORKFLOW = ".github/workflows/pypi.yml"
 MAX_ARCHIVE_BYTES = 2 * 1024 * 1024
+MAX_SOURCE_ARTIFACT_BYTES = 100 * 1024 * 1024
 MAX_JSON_BYTES = 64 * 1024
 REQUIRED_JOBS = {
     "prepare",
@@ -38,7 +47,7 @@ TPU_SEGMENT_JOBS = (
     "tpu / tpu-segment-2",
     "tpu / tpu-segment-3",
 )
-SOURCE_FIELDS = {
+SOURCE_BASE_FIELDS = {
     "source_run_id",
     "source_attempt",
     "head_sha",
@@ -47,6 +56,14 @@ SOURCE_FIELDS = {
     "binding_artifact_id",
     "controller_artifact_id",
 }
+SOURCE_CANDIDATE_FIELDS = {
+    "candidate_artifact_id",
+    "candidate_artifact_name",
+    "marker_artifact_id",
+    "marker_artifact_name",
+}
+SOURCE_FIELDS = SOURCE_BASE_FIELDS
+PENDING_JOB_NAMES = ("pending",)
 
 
 class CollectionGateError(RuntimeError):
@@ -109,7 +126,7 @@ def _context() -> str:
 
 
 def _source_snapshot(run_id: int, attempt: int, commit: str) -> dict[str, object]:
-    """Require one failed publishing attempt whose only gate failure was TPU."""
+    """Require a pending async submission or a legacy TPU-only timeout."""
     if not accelerator_gate.SHA_RE.fullmatch(commit):
         raise CollectionGateError("source commit must be a full lowercase SHA")
     route = f"repos/{REPOSITORY}/actions/runs/{run_id}/attempts/{attempt}"
@@ -136,9 +153,11 @@ def _source_snapshot(run_id: int, attempt: int, commit: str) -> dict[str, object
         or run["run_attempt"] != attempt
         or run.get("head_sha") != commit
         or run.get("path") != SOURCE_WORKFLOW
+        or not isinstance(run.get("event"), str)
         or run.get("event") not in {"workflow_dispatch", "release"}
         or run.get("status") != "completed"
-        or run.get("conclusion") != "failure"
+        or not isinstance(run.get("conclusion"), str)
+        or run.get("conclusion") not in {"failure", "success"}
         or not isinstance(run.get("repository"), dict)
         or str(repository.get("full_name", "")).casefold() != REPOSITORY.casefold()
         or not isinstance(run.get("head_repository"), dict)
@@ -179,64 +198,105 @@ def _source_snapshot(run_id: int, attempt: int, commit: str) -> dict[str, object
         job = jobs[name]
         if job.get("status") != "completed":
             raise CollectionGateError(f"source required job is incomplete: {name}")
-        if job.get("conclusion") in {"failure", "cancelled", "skipped"}:
-            raise IneligibleSource(f"source required job did not pass: {name}")
-        if job.get("conclusion") != "success":
-            raise CollectionGateError(f"source required job did not pass: {name}")
-    tpu = jobs.get("tpu / tpu", {})
-    if not tpu:
-        raise CollectionGateError("source TPU job metadata is missing")
-    if tpu.get("status") != "completed":
-        raise CollectionGateError("source TPU job metadata is incomplete")
-    tpu_conclusion = tpu.get("conclusion")
-    if tpu_conclusion not in {"failure", "success", "skipped", "cancelled"}:
-        raise CollectionGateError("source TPU job conclusion is unrecognised")
-
-    segments: list[dict[str, object] | None] = []
-    failed_segments: list[int] = []
-    for index, name in enumerate(TPU_SEGMENT_JOBS):
-        job = jobs.get(name)
-        segments.append(job)
-        if job is None:
-            continue
-        if job.get("status") != "completed":
-            raise CollectionGateError("source TPU segment job metadata is incomplete")
         conclusion = job.get("conclusion")
-        if conclusion == "failure":
-            failed_segments.append(index)
-        elif conclusion == "cancelled":
-            raise IneligibleSource("source TPU segment was cancelled")
-        elif conclusion not in {"success", "skipped"}:
-            raise CollectionGateError("source TPU segment conclusion is unrecognised")
+        if not isinstance(conclusion, str):
+            raise CollectionGateError(
+                f"source required job conclusion is malformed: {name}"
+            )
+        if conclusion in {"failure", "cancelled", "skipped"}:
+            raise IneligibleSource(f"source required job did not pass: {name}")
+        if conclusion != "success":
+            raise CollectionGateError(f"source required job did not pass: {name}")
+    if run.get("conclusion") == "success":
+        pending_jobs = [name for name in PENDING_JOB_NAMES if name in jobs]
+        if len(pending_jobs) != 1:
+            raise IneligibleSource("source has no unique pending TPU completion job")
+        pending = jobs[pending_jobs[0]]
+        if (
+            pending.get("status") != "completed"
+            or pending.get("conclusion") != "success"
+        ):
+            raise IneligibleSource("source pending TPU completion job did not pass")
+        if "tpu / tpu" in jobs or any(name in jobs for name in TPU_SEGMENT_JOBS):
+            raise IneligibleSource(
+                "pending source unexpectedly contains a TPU wait job"
+            )
+        collection_kind = "pending"
+    else:
+        tpu = jobs.get("tpu / tpu", {})
+        if not tpu:
+            raise IneligibleSource("failed source has no legacy TPU wait job")
+        if tpu.get("status") != "completed":
+            raise CollectionGateError("source TPU job metadata is incomplete")
+        tpu_conclusion = tpu.get("conclusion")
+        if not isinstance(tpu_conclusion, str) or tpu_conclusion not in {
+            "failure",
+            "success",
+            "skipped",
+            "cancelled",
+        }:
+            raise CollectionGateError("source TPU job conclusion is unrecognised")
 
-    if failed_segments:
-        if len(failed_segments) != 1 or tpu_conclusion != "skipped":
-            raise IneligibleSource("source TPU stages have an invalid failure sequence")
-        failed_index = failed_segments[0]
-        for index, job in enumerate(segments):
-            if job is None or index == failed_index:
+        segments: list[dict[str, object] | None] = []
+        failed_segments: list[int] = []
+        for index, name in enumerate(TPU_SEGMENT_JOBS):
+            job = jobs.get(name)
+            segments.append(job)
+            if job is None:
                 continue
-            expected = "success" if index < failed_index else "skipped"
-            if job.get("conclusion") != expected:
+            if job.get("status") != "completed":
+                raise CollectionGateError(
+                    "source TPU segment job metadata is incomplete"
+                )
+            conclusion = job.get("conclusion")
+            if not isinstance(conclusion, str):
+                raise CollectionGateError(
+                    "source TPU segment conclusion is unrecognised"
+                )
+            if conclusion == "failure":
+                failed_segments.append(index)
+            elif conclusion == "cancelled":
+                raise IneligibleSource("source TPU segment was cancelled")
+            elif conclusion not in {"success", "skipped"}:
+                raise CollectionGateError(
+                    "source TPU segment conclusion is unrecognised"
+                )
+
+        if failed_segments:
+            if len(failed_segments) != 1 or tpu_conclusion != "skipped":
                 raise IneligibleSource(
                     "source TPU stages have an invalid failure sequence"
                 )
-    elif tpu_conclusion != "failure":
-        raise IneligibleSource("source TPU job did not fail")
+            failed_index = failed_segments[0]
+            for index, job in enumerate(segments):
+                if job is None or index == failed_index:
+                    continue
+                expected = "success" if index < failed_index else "skipped"
+                if job.get("conclusion") != expected:
+                    raise IneligibleSource(
+                        "source TPU stages have an invalid failure sequence"
+                    )
+        elif tpu_conclusion != "failure":
+            raise IneligibleSource("source TPU job did not fail")
+        collection_kind = "legacy"
 
     for name, job in jobs.items():
         if name == "tpu / tpu" or name in TPU_SEGMENT_JOBS:
             continue
         if job.get("status") != "completed":
             raise CollectionGateError("source contains incomplete job metadata")
-        if job.get("conclusion") in {"failure", "cancelled"}:
+        conclusion = job.get("conclusion")
+        if not isinstance(conclusion, str):
+            raise CollectionGateError("source job conclusion is malformed")
+        if conclusion in {"failure", "cancelled"}:
             raise IneligibleSource("source has another failed job")
-        if job.get("conclusion") not in {"success", "skipped"}:
+        if conclusion not in {"success", "skipped"}:
             raise CollectionGateError("source has an unrecognised job conclusion")
+    run["_collection_kind"] = collection_kind
     return run
 
 
-def _artifact_metadata(run_id: int, name: str, commit: str) -> dict[str, object]:
+def _artifact_inventory(run_id: int) -> list[object]:
     page = accelerator_gate.gh_api(
         f"repos/{REPOSITORY}/actions/runs/{run_id}/artifacts?per_page=100"
     )
@@ -259,11 +319,30 @@ def _artifact_metadata(run_id: int, name: str, commit: str) -> dict[str, object]
         raise CollectionGateError(
             "source artefact inventory is incomplete or too large"
         )
+    return artifact_list
+
+
+def _find_artifact_metadata(
+    run_id: int,
+    name: str,
+    commit: str,
+    *,
+    max_size_bytes: int = MAX_ARCHIVE_BYTES,
+    inventory: list[object] | None = None,
+) -> dict[str, object] | None:
+    if (
+        type(max_size_bytes) is not int
+        or not 0 < max_size_bytes <= MAX_SOURCE_ARTIFACT_BYTES
+    ):
+        raise CollectionGateError("source artefact size limit is invalid")
+    artifact_list = _artifact_inventory(run_id) if inventory is None else inventory
     matches = [
         cast(dict[str, object], item)
         for item in artifact_list
         if isinstance(item, dict) and cast(dict[str, object], item).get("name") == name
     ]
+    if not matches:
+        return None
     if len(matches) != 1:
         raise CollectionGateError("source must have exactly one named artefact")
     item = matches[0]
@@ -274,7 +353,7 @@ def _artifact_metadata(run_id: int, name: str, commit: str) -> dict[str, object]
         type(artifact_id) is not int
         or artifact_id <= 0
         or type(size) is not int
-        or not 0 < size <= MAX_ARCHIVE_BYTES
+        or not 0 < size <= max_size_bytes
         or item.get("expired") is not False
         or not isinstance(owner, dict)
         or cast(dict[str, object], owner).get("id") != run_id
@@ -284,6 +363,33 @@ def _artifact_metadata(run_id: int, name: str, commit: str) -> dict[str, object]
             "source artefact identity, size or availability is invalid"
         )
     return item
+
+
+def _artifact_metadata(
+    run_id: int,
+    name: str,
+    commit: str,
+    *,
+    max_size_bytes: int = MAX_ARCHIVE_BYTES,
+    inventory: list[object] | None = None,
+) -> dict[str, object]:
+    item = _find_artifact_metadata(
+        run_id, name, commit, max_size_bytes=max_size_bytes, inventory=inventory
+    )
+    if item is None:
+        raise CollectionGateError("source must have exactly one named artefact")
+    return item
+
+
+def artifact_metadata(
+    run_id: int,
+    name: str,
+    commit: str,
+    *,
+    max_size_bytes: int = MAX_ARCHIVE_BYTES,
+) -> dict[str, object]:
+    """Validate one named source artefact against its workflow run owner."""
+    return _artifact_metadata(run_id, name, commit, max_size_bytes=max_size_bytes)
 
 
 def _artifact_id(metadata: dict[str, object]) -> int:
@@ -366,14 +472,94 @@ def download_member(artifact_id: int, member_name: str, destination: Path) -> No
 
 
 def _validate_source_files(
-    source_dir: Path, source: dict[str, object]
+    source_dir: Path,
+    source: dict[str, object],
+    *,
+    source_conclusion: str | None = None,
 ) -> dict[str, object]:
     source_identity = f"{source['source_run_id']}.{source['source_attempt']}"
+    attempt = positive_id(str(source["source_attempt"]))
+    source_fields = set(source)
+    has_candidate = source_fields == SOURCE_BASE_FIELDS | SOURCE_CANDIDATE_FIELDS
+    if frozenset(source_fields) not in {
+        frozenset(SOURCE_BASE_FIELDS),
+        frozenset(SOURCE_BASE_FIELDS | SOURCE_CANDIDATE_FIELDS),
+    }:
+        raise CollectionGateError(
+            f"source {source_identity} manifest has an unsupported schema"
+        )
+    for field in ("binding_artifact_id", "controller_artifact_id"):
+        value = source.get(field)
+        if type(value) is not int or value <= 0:
+            raise CollectionGateError(
+                f"source {source_identity} artefact identity is invalid"
+            )
+
+    candidate: dict[str, object] | None = None
+    marker_name: str | None = None
+    if has_candidate:
+        candidate_name = f"candidate-binding-{attempt}"
+        candidate_marker_name = source.get("candidate_artifact_name")
+        marker_name_value = source.get("marker_artifact_name")
+        if candidate_marker_name != candidate_name:
+            raise CollectionGateError(
+                f"source {source_identity} candidate artefact name is invalid"
+            )
+        if not isinstance(marker_name_value, str) or marker_name_value not in {
+            f"release-pending-{attempt}",
+            f"recovery-source-binding-{attempt}",
+        }:
+            raise CollectionGateError(
+                f"source {source_identity} marker artefact name is invalid"
+            )
+        for field in ("candidate_artifact_id", "marker_artifact_id"):
+            value = source.get(field)
+            if type(value) is not int or value <= 0:
+                raise CollectionGateError(
+                    f"source {source_identity} artefact identity is invalid"
+                )
+        candidate_path = source_dir / "candidate-binding.json"
+        marker_path = source_dir / "marker-binding.json"
+        candidate_bytes = _read_bounded_bytes(candidate_path)
+        marker_bytes = _read_bounded_bytes(marker_path)
+        if candidate_bytes != marker_bytes:
+            raise CollectionGateError(
+                f"source {source_identity} marker does not match its candidate"
+            )
+        try:
+            candidate = dict(
+                release_candidate.validate_binding(read_json(candidate_path))
+            )
+        except release_candidate.CandidateError as error:
+            raise CollectionGateError(
+                f"source {source_identity} candidate binding is invalid"
+            ) from error
+        marker_name = marker_name_value
+        if (
+            candidate.get("controller_sha") != source.get("head_sha")
+            or candidate.get("run_id") != source_identity
+        ):
+            raise CollectionGateError(
+                f"source {source_identity} candidate does not match its controller"
+            )
+        mode = candidate.get("mode")
+        if marker_name == f"recovery-source-binding-{attempt}":
+            if mode != "recovery":
+                raise CollectionGateError(
+                    f"source {source_identity} recovery marker is not a recovery candidate"
+                )
+        elif mode == "release" and candidate.get("head_sha") != source.get("head_sha"):
+            raise CollectionGateError(
+                f"source {source_identity} release candidate does not match its controller"
+            )
+
     binding = release_tpu_gate.validate_binding(read_json(source_dir / "binding.json"))
     expected = {
         "kind": "release",
         "head_repository": REPOSITORY,
-        "head_sha": source["head_sha"],
+        "head_sha": candidate["head_sha"]
+        if candidate is not None
+        else source["head_sha"],
         "run_id": f"{source['source_run_id']}.{source['source_attempt']}",
     }
     if binding != expected:
@@ -414,6 +600,10 @@ def _validate_source_files(
             f"source {source_identity} controller binding is invalid"
         )
     outcome = state.get("outcome")
+    if not isinstance(outcome, str):
+        raise CollectionGateError(
+            f"source {source_identity} controller outcome is unknown"
+        )
     if outcome in {"queue_timeout", "execution_timeout"}:
         if (
             type(state.get("submitted_version")) is not int
@@ -422,13 +612,23 @@ def _validate_source_files(
             raise CollectionGateError(
                 f"source {source_identity} timed-out controller did not submit version 1"
             )
-        if (
-            state.get("status")
-            not in kaggle_ci.IN_PROGRESS | kaggle_ci.TERMINAL_SUCCESS
+        status = state.get("status")
+        if not isinstance(status, str) or status not in (
+            kaggle_ci.IN_PROGRESS | kaggle_ci.TERMINAL_SUCCESS
         ):
             raise CollectionGateError(
                 f"source {source_identity} timed-out controller status is not eligible for collection"
             )
+    elif outcome == "handover":
+        if (
+            not has_candidate
+            or marker_name != f"release-pending-{attempt}"
+            or source_conclusion != "success"
+        ):
+            raise IneligibleSource(
+                f"source {source_identity} handover is not a timeout or successful pending source"
+            )
+        _validate_handover_state(state, dict(binding), source_identity)
     elif outcome in {
         "preflight_error",
         "submission_error_unknown",
@@ -440,7 +640,6 @@ def _validate_source_files(
         "output_retrieval_error",
         "result_validation_error",
         "version_verification_error",
-        "handover",
         "pending",
         "success",
         "status_query_error",
@@ -455,6 +654,112 @@ def _validate_source_files(
     return dict(binding)
 
 
+def _read_bounded_bytes(path: Path) -> bytes:
+    try:
+        if (
+            path.is_symlink()
+            or not path.is_file()
+            or path.stat().st_size > MAX_JSON_BYTES
+        ):
+            raise CollectionGateError("evidence must be a small regular JSON file")
+        return path.read_bytes()
+    except OSError as error:
+        raise CollectionGateError("could not read collection evidence") from error
+
+
+def _validate_kernel_identity(
+    state: dict[str, object], binding: dict[str, object], source_identity: str
+) -> None:
+    try:
+        _ = kaggle_collect.kernel_identity(binding, state.get("kernel_id"))
+    except kaggle_collect.CollectionError as error:
+        raise CollectionGateError(
+            f"source {source_identity} controller identity is invalid"
+        ) from error
+
+
+def _validate_handover_state(
+    state: dict[str, object], binding: dict[str, object], source_identity: str
+) -> None:
+    status = state.get("status")
+    phase = state.get("phase")
+    if (
+        type(state.get("submitted_version")) is not int
+        or state["submitted_version"] != 1
+        or not isinstance(status, str)
+        or status not in kaggle_ci.IN_PROGRESS | {"submitted"}
+        or not isinstance(phase, str)
+        or phase not in {"queue", "execution"}
+        or state.get("last_error") is not None
+    ):
+        raise CollectionGateError(
+            f"source {source_identity} handover state is malformed"
+        )
+    timestamps: dict[str, datetime] = {}
+    for field in ("submitted_at", "updated_at", "phase_started_at"):
+        value = state.get(field)
+        if not isinstance(value, str):
+            raise CollectionGateError(
+                f"source {source_identity} handover timestamp is malformed"
+            )
+        try:
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError as error:
+            raise CollectionGateError(
+                f"source {source_identity} handover timestamp is malformed"
+            ) from error
+        if parsed.tzinfo is None:
+            raise CollectionGateError(
+                f"source {source_identity} handover timestamp has no timezone"
+            )
+        timestamps[field] = parsed
+    if (
+        timestamps["submitted_at"] > timestamps["updated_at"]
+        or timestamps["phase_started_at"] > timestamps["updated_at"]
+    ):
+        raise CollectionGateError(
+            f"source {source_identity} handover timestamps are inconsistent"
+        )
+    execution_started = state.get("execution_started_at")
+    if execution_started is not None:
+        if not isinstance(execution_started, str):
+            raise CollectionGateError(
+                f"source {source_identity} handover execution timestamp is malformed"
+            )
+        try:
+            parsed_execution = datetime.fromisoformat(
+                execution_started.replace("Z", "+00:00")
+            )
+        except ValueError as error:
+            raise CollectionGateError(
+                f"source {source_identity} handover execution timestamp is malformed"
+            ) from error
+        if (
+            parsed_execution.tzinfo is None
+            or parsed_execution > timestamps["updated_at"]
+        ):
+            raise CollectionGateError(
+                f"source {source_identity} handover execution timestamp is inconsistent"
+            )
+    expected_phase = "execution" if execution_started is not None else "queue"
+    if phase != expected_phase:
+        raise CollectionGateError(
+            f"source {source_identity} handover phase is inconsistent"
+        )
+    for field in ("queue_elapsed_seconds", "execution_elapsed_seconds"):
+        value = state.get(field)
+        if (
+            isinstance(value, bool)
+            or not isinstance(value, (int, float))
+            or not math.isfinite(value)
+            or value < 0
+        ):
+            raise CollectionGateError(
+                f"source {source_identity} handover elapsed time is malformed"
+            )
+    _validate_kernel_identity(state, binding, source_identity)
+
+
 def prepare(
     source_run: str,
     source_attempt: str,
@@ -466,13 +771,43 @@ def prepare(
     run_id, attempt = positive_id(source_run), positive_id(source_attempt)
     if collector == f"{run_id}.{attempt}":
         raise CollectionGateError("collection must use a separate workflow attempt")
-    _ = _source_snapshot(run_id, attempt, commit)
+    snapshot = _source_snapshot(run_id, attempt, commit)
+    collection_kind = snapshot["_collection_kind"]
+    inventory = _artifact_inventory(run_id)
     binding_artifact = _artifact_metadata(
-        run_id, f"tpu-release-binding-{attempt}", commit
+        run_id, f"tpu-release-binding-{attempt}", commit, inventory=inventory
     )
-    controller_artifact = _artifact_metadata(
-        run_id, f"release-tpu-{commit}-{attempt}", commit
-    )
+    pending_marker_name = f"release-pending-{attempt}"
+    recovery_marker_name = f"recovery-source-binding-{attempt}"
+    if collection_kind == "pending":
+        marker_name = pending_marker_name
+        marker_artifact = _find_artifact_metadata(
+            run_id, marker_name, commit, inventory=inventory
+        )
+        if marker_artifact is None:
+            raise IneligibleSource("source has no pending TPU marker artefact")
+    else:
+        pending_marker = _find_artifact_metadata(
+            run_id, pending_marker_name, commit, inventory=inventory
+        )
+        if pending_marker is not None:
+            raise IneligibleSource(
+                "failed legacy source unexpectedly has a pending TPU marker"
+            )
+        marker_name = recovery_marker_name
+        marker_artifact = _find_artifact_metadata(
+            run_id, marker_name, commit, inventory=inventory
+        )
+
+    candidate_artifact: dict[str, object] | None = None
+    if marker_artifact is not None:
+        candidate_name = f"candidate-binding-{attempt}"
+        candidate_artifact = _artifact_metadata(
+            run_id, candidate_name, commit, inventory=inventory
+        )
+    else:
+        candidate_name = ""
+
     output_dir.mkdir(parents=True, exist_ok=False)
     source: dict[str, object] = {
         "source_run_id": run_id,
@@ -481,8 +816,57 @@ def prepare(
         "collector_run_id": collector,
         "collector_sha": os.environ["GITHUB_SHA"],
         "binding_artifact_id": _artifact_id(binding_artifact),
-        "controller_artifact_id": _artifact_id(controller_artifact),
     }
+    candidate_sha = commit
+    if candidate_artifact is not None and marker_artifact is not None:
+        source.update(
+            candidate_artifact_id=_artifact_id(candidate_artifact),
+            candidate_artifact_name=candidate_name,
+            marker_artifact_id=_artifact_id(marker_artifact),
+            marker_artifact_name=marker_name,
+        )
+        download_member(
+            _artifact_id(candidate_artifact),
+            "candidate-binding.json",
+            output_dir / "candidate-binding.json",
+        )
+        download_member(
+            _artifact_id(marker_artifact),
+            "candidate-binding.json",
+            output_dir / "marker-binding.json",
+        )
+        candidate_bytes = _read_bounded_bytes(output_dir / "candidate-binding.json")
+        marker_bytes = _read_bounded_bytes(output_dir / "marker-binding.json")
+        if candidate_bytes != marker_bytes:
+            raise CollectionGateError(
+                "source candidate marker does not match candidate"
+            )
+        try:
+            candidate = release_candidate.validate_binding(
+                read_json(output_dir / "candidate-binding.json")
+            )
+        except release_candidate.CandidateError as error:
+            raise CollectionGateError("source candidate binding is invalid") from error
+        if (
+            candidate["controller_sha"] != commit
+            or candidate["run_id"] != f"{run_id}.{attempt}"
+        ):
+            raise CollectionGateError("source candidate does not match its controller")
+        if marker_name == recovery_marker_name and candidate["mode"] != "recovery":
+            raise CollectionGateError(
+                "source recovery marker is not a recovery candidate"
+            )
+        if candidate["mode"] == "release" and candidate["head_sha"] != commit:
+            raise CollectionGateError(
+                "source release candidate does not match its controller"
+            )
+        candidate_sha = candidate["head_sha"]
+
+    controller_artifact_name = f"release-tpu-{candidate_sha}-{attempt}"
+    controller_artifact = _artifact_metadata(
+        run_id, controller_artifact_name, commit, inventory=inventory
+    )
+    source["controller_artifact_id"] = _artifact_id(controller_artifact)
     download_member(
         _artifact_id(binding_artifact),
         "tpu-release-binding.json",
@@ -493,7 +877,9 @@ def prepare(
         "kaggle-controller-state.json",
         output_dir / "kaggle-controller-state.json",
     )
-    _ = _validate_source_files(output_dir, source)
+    _ = _validate_source_files(
+        output_dir, source, source_conclusion=cast(str, snapshot["conclusion"])
+    )
     _write_json(output_dir / "collection-source.json", source)
     with github_output.open("a", encoding="utf-8") as stream:
         _ = stream.write(
@@ -504,14 +890,37 @@ def prepare(
 
 def revalidate(
     source_dir: Path,
+    *,
+    expected_collector_run_id: str | None = None,
+    expected_collector_sha: str | None = None,
 ) -> tuple[dict[str, object], dict[str, object], dict[str, object]]:
-    """Recheck the exact prepared source attempt and its original artefact IDs."""
-    collector = _context()
+    """Recheck original source evidence under the current collector context.
+
+    Explicit collector overrides support replay only after the caller has
+    authenticated that historic collector attempt and its source artefact.
+    """
+    current_collector = _context()
+    if (expected_collector_run_id is None) != (expected_collector_sha is None):
+        raise CollectionGateError("expected collector identity must be complete")
+    if expected_collector_run_id is None:
+        expected_collector = current_collector
+        expected_sha = os.environ["GITHUB_SHA"]
+    else:
+        expected_collector = expected_collector_run_id
+        expected_sha = cast(str, expected_collector_sha)
+        if not release_tpu_gate.RUN_ID_RE.fullmatch(expected_collector) or not (
+            accelerator_gate.SHA_RE.fullmatch(expected_sha)
+        ):
+            raise CollectionGateError("expected collector identity is malformed")
     source = read_json(source_dir / "collection-source.json")
     if (
-        set(source) != SOURCE_FIELDS
-        or source.get("collector_run_id") != collector
-        or source.get("collector_sha") != os.environ["GITHUB_SHA"]
+        frozenset(source)
+        not in {
+            frozenset(SOURCE_BASE_FIELDS),
+            frozenset(SOURCE_BASE_FIELDS | SOURCE_CANDIDATE_FIELDS),
+        }
+        or source.get("collector_run_id") != expected_collector
+        or source.get("collector_sha") != expected_sha
     ):
         raise CollectionGateError(
             "collection source receipt belongs to another collector"
@@ -521,22 +930,82 @@ def revalidate(
     commit = source["head_sha"]
     if not isinstance(commit, str):
         raise CollectionGateError("source SHA is malformed")
-    _ = _source_snapshot(run_id, attempt, commit)
-    for field, name in (
+    snapshot = _source_snapshot(run_id, attempt, commit)
+    inventory = _artifact_inventory(run_id)
+    source_fields = set(source)
+    has_candidate = source_fields == SOURCE_BASE_FIELDS | SOURCE_CANDIDATE_FIELDS
+    collection_kind = snapshot["_collection_kind"]
+    pending_marker_name = f"release-pending-{attempt}"
+    recovery_marker_name = f"recovery-source-binding-{attempt}"
+    marker_name: str | None = None
+    if collection_kind == "pending":
+        marker_name = pending_marker_name
+        if not has_candidate:
+            raise CollectionGateError("pending source has no frozen candidate marker")
+    else:
+        pending_marker = _find_artifact_metadata(
+            run_id, pending_marker_name, commit, inventory=inventory
+        )
+        if pending_marker is not None:
+            raise CollectionGateError("failed source unexpectedly has a pending marker")
+        recovery_marker = _find_artifact_metadata(
+            run_id, recovery_marker_name, commit, inventory=inventory
+        )
+        if recovery_marker is None:
+            if has_candidate:
+                raise CollectionGateError("legacy source candidate marker disappeared")
+        else:
+            marker_name = recovery_marker_name
+            if not has_candidate:
+                raise CollectionGateError(
+                    "legacy recovery marker has no frozen candidate"
+                )
+    if has_candidate and source.get("marker_artifact_name") != marker_name:
+        raise CollectionGateError("source marker artefact name changed")
+    if not has_candidate and marker_name is not None:
+        raise CollectionGateError("source marker requires a frozen candidate")
+
+    binding = _validate_source_files(
+        source_dir, source, source_conclusion=cast(str, snapshot["conclusion"])
+    )
+    artifact_names = [
         ("binding_artifact_id", f"tpu-release-binding-{attempt}"),
-        ("controller_artifact_id", f"release-tpu-{commit}-{attempt}"),
-    ):
-        if _artifact_metadata(run_id, name, commit)["id"] != source[field]:
+        (
+            "controller_artifact_id",
+            f"release-tpu-{binding['head_sha']}-{attempt}",
+        ),
+    ]
+    if has_candidate:
+        artifact_names.extend(
+            (
+                ("candidate_artifact_id", f"candidate-binding-{attempt}"),
+                ("marker_artifact_id", cast(str, marker_name)),
+            )
+        )
+    for field, name in artifact_names:
+        if (
+            _artifact_metadata(run_id, name, commit, inventory=inventory)["id"]
+            != source[field]
+        ):
             raise CollectionGateError("original source artefact identity changed")
-    binding = _validate_source_files(source_dir, source)
     state = read_json(source_dir / "kaggle-controller-state.json")
+    source["_source_conclusion"] = snapshot["conclusion"]
     return source, binding, state
 
 
 def finish(
-    source_dir: Path, output_dir: Path, provider_success: bool
+    source_dir: Path,
+    output_dir: Path,
+    provider_success: bool,
+    *,
+    expected_collector_run_id: str | None = None,
+    expected_collector_sha: str | None = None,
 ) -> dict[str, object]:
-    source, binding, state = revalidate(source_dir)
+    source, binding, state = revalidate(
+        source_dir,
+        expected_collector_run_id=expected_collector_run_id,
+        expected_collector_sha=expected_collector_sha,
+    )
     collector = str(source["collector_run_id"])
     report = read_json(output_dir / "kaggle-collection-report.json")
     if (
@@ -569,7 +1038,7 @@ def finish(
         "success": True,
         "validation_only": True,
         "release_gate_credit": False,
-        "source_conclusion": "failure",
+        "source_conclusion": source["_source_conclusion"],
     }
     _write_json(output_dir / "collection-receipt.json", receipt)
     summary_path = os.environ.get("GITHUB_STEP_SUMMARY")

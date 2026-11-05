@@ -1,4 +1,4 @@
-name: Build, validate and publish
+name: Prepare release validation
 
 on:
   release:
@@ -148,88 +148,21 @@ jobs:
       commit: ${{ needs.prepare.outputs.head_sha }}
     secrets: inherit
 
-  publish:
+  pending:
     needs: [prepare, cpu, build, gpu, tpu]
-    if: ${{ success() && needs.prepare.outputs.publish == 'true' }}
+    if: ${{ success() }}
     runs-on: ubuntu-latest
-    timeout-minutes: 10
-    environment: PyPI
+    timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v7
-        with:
-          ref: ${{ github.sha }}
-          persist-credentials: false
-      - uses: actions/setup-python@v7
-        with:
-          python-version: "3.14"
-      - uses: astral-sh/setup-uv@v10.2.0
-        with:
-          version: "0.12.20"
-      - uses: actions/download-artifact@v7
-        with:
-          name: release-binding-${{ github.run_attempt }}
       - uses: actions/download-artifact@v7
         with:
           name: candidate-binding-${{ github.run_attempt }}
-      - name: Recheck the tag and frozen workflow attempt
-        env:
-          GH_TOKEN: ${{ github.token }}
-          RELEASE_COMMIT: ${{ needs.prepare.outputs.head_sha }}
-          RECOVERY_TAG: ${{ inputs.release_tag }}
+      - name: Record validation as pending TPU collection
         run: |
-          python -m tools.release_candidate verify --binding candidate-binding.json \
-            --recovery-tag "$RECOVERY_TAG"
-          python -m tools.release_tpu_gate prepare --commit "$RELEASE_COMMIT" \
-            --output publish-binding.json --github-output "$GITHUB_OUTPUT"
-          cmp release-binding.json publish-binding.json
-      - uses: actions/download-artifact@v7
+          printf 'CPU, build and GPU gates passed; TPU validation is pending collection.\n' >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v7
         with:
-          name: release-dist-${{ github.run_attempt }}
-          path: dist/
-      - name: Publish the validated distributions
-        env:
-          UV_PUBLISH_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
-        run: uv publish
-
-  rehearsal:
-    needs: [prepare, cpu, build, gpu, tpu]
-    if: ${{ success() && needs.prepare.outputs.publish == 'false' }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          ref: ${{ github.sha }}
-          persist-credentials: false
-      - uses: actions/setup-python@v7
-        with:
-          python-version: "3.14"
-      - uses: actions/download-artifact@v7
-        with:
-          name: release-binding-${{ github.run_attempt }}
-      - uses: actions/download-artifact@v7
-        with:
-          name: candidate-binding-${{ github.run_attempt }}
-      - name: Recheck the frozen workflow attempt
-        env:
-          GH_TOKEN: ${{ github.token }}
-          RELEASE_COMMIT: ${{ needs.prepare.outputs.head_sha }}
-          RECOVERY_TAG: ${{ inputs.release_tag }}
-        run: |
-          python -m tools.release_candidate verify --binding candidate-binding.json \
-            --recovery-tag "$RECOVERY_TAG"
-          python -m tools.release_tpu_gate prepare --commit "$RELEASE_COMMIT" \
-            --output rehearsal-binding.json --github-output "$GITHUB_OUTPUT"
-          cmp release-binding.json rehearsal-binding.json
-      - uses: actions/download-artifact@v7
-        with:
-          name: release-dist-${{ github.run_attempt }}
-          path: dist/
-      - name: Summarise the validated release rehearsal
-        env:
-          CANDIDATE_SHA: ${{ needs.prepare.outputs.head_sha }}
-          PACKAGE_VERSION: ${{ needs.prepare.outputs.version }}
-          RUN_ATTEMPT: ${{ github.run_attempt }}
-        run: |
-          printf 'Release rehearsal passed for %s, package version %s, workflow attempt %s.\n' \
-            "$CANDIDATE_SHA" "$PACKAGE_VERSION" "$RUN_ATTEMPT" >> "$GITHUB_STEP_SUMMARY"
+          name: release-pending-${{ github.run_attempt }}
+          path: candidate-binding.json
+          if-no-files-found: error
+          retention-days: 30
