@@ -19,7 +19,14 @@ from renderer._meta_utils import (
 )
 from renderer.geometry import Camera, normalise, to_homogeneous
 from renderer.pipeline import render
-from renderer.shader import ID, Fragment, PerFragment, PerVertex, Shader
+from renderer.shader import (
+    Fragment,
+    FragmentInput,
+    PerFragment,
+    PerVertex,
+    Shader,
+    VertexInput,
+)
 from renderer.shaders.gouraud import (
     GouraudExtraInput,
     GouraudExtraMixerOutput,
@@ -27,7 +34,6 @@ from renderer.shaders.gouraud import (
 )
 from renderer.types import (
     TRUE_ARRAY,
-    BoolV,
     Buffers,
     Colour,
     FloatV,
@@ -177,28 +183,28 @@ class _Shader(Shader[ExtraInput, ExtraFragmentData, ExtraMixerOutput]):
     @jaxtyped
     @jit
     def vertex(
-        gl_VertexID: ID,
-        gl_InstanceID: ID,
-        camera: Camera,
-        extra: ExtraInput,
+        inputs: VertexInput[ExtraInput],
     ) -> tuple[PerVertex, ExtraFragmentData]:
         # Use gl_VertexID to index in `extra` buffer.
-        position: Vec4f = to_homogeneous(extra.position[gl_VertexID])
-        gl_Position: Vec4f = camera.to_clip(position)
+        position: Vec4f = to_homogeneous(inputs.extra.position[inputs.gl_VertexID])
+        gl_Position: Vec4f = inputs.camera.to_clip(position)
         assert is_array_type(gl_Position, Vec4f)
 
-        normal: Vec3f = normalise(extra.normal[gl_VertexID])
-        intensity: FloatV = jnp.dot(normal, normalise(extra.light.direction))
+        normal: Vec3f = normalise(inputs.extra.normal[inputs.gl_VertexID])
+        intensity: FloatV = jnp.dot(
+            normal,
+            normalise(inputs.extra.light.direction),
+        )
         assert is_array_type(intensity, FloatV)
 
         light_colour: Colour
-        light_colour = extra.light.colour * intensity
+        light_colour = inputs.extra.light.colour * intensity
 
         return (
             PerVertex(gl_Position=gl_Position),
             ExtraFragmentData(
-                colour=light_colour * extra.colour[gl_VertexID],
-                uv=extra.uv[gl_VertexID],
+                colour=light_colour * inputs.extra.colour[inputs.gl_VertexID],
+                uv=inputs.extra.uv[inputs.gl_VertexID],
             ),
         )
 
@@ -206,15 +212,10 @@ class _Shader(Shader[ExtraInput, ExtraFragmentData, ExtraMixerOutput]):
     @jaxtyped
     @jit
     def fragment(
-        gl_FragCoord: Vec4f,
-        gl_FrontFacing: BoolV,
-        gl_PointCoord: Vec2f,
-        varying: ExtraFragmentData,
-        extra: ExtraInput,
+        inputs: FragmentInput[ExtraInput, ExtraFragmentData],
     ) -> tuple[PerFragment, Fragment[ExtraMixerOutput]]:
-        del gl_FragCoord, gl_FrontFacing, gl_PointCoord, extra
-        texture_colour: Colour = varying.colour
-        a = typed_modf(varying.uv)[0] < 0.5
+        texture_colour: Colour = inputs.varying.colour
+        a = typed_modf(inputs.varying.uv)[0] < 0.5
         texture_colour = jnp.where(
             a[0] != a[1],
             texture_colour,

@@ -14,9 +14,14 @@ from .scene import GUID, Scene
 from .shader import (
     Fragment,
     FragmentCollection,
+    FragmentInput,
+    InterpolationInput,
+    MixInput,
     MixerOutput,
     PassthroughShader,
+    PrimitiveInput,
     Shader,
+    VertexInput,
 )
 from .shapes.capsule import UpAxis, create_capsule
 from .shapes.cube import create_cube
@@ -48,12 +53,15 @@ __all__ = [
     "create_cube",
     "Fragment",
     "FragmentCollection",
+    "FragmentInput",
     "GUID",
+    "InterpolationInput",
     "JaxFloating",
     "JaxInteger",
     "jit",
     "LightParameters",
     "LightSource",
+    "MixInput",
     "MixerOutput",
     "merge_objects",
     "Model",
@@ -61,6 +69,7 @@ __all__ = [
     "normalise",
     "PassthroughShader",
     "PixelState",
+    "PrimitiveInput",
     "quaternion_mul",
     "quaternion",
     "render",
@@ -73,5 +82,6 @@ __all__ = [
     "Texture",
     "transpose_for_display",
     "UpAxis",
+    "VertexInput",
     "Vec3f",
 ]

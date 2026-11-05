@@ -2,29 +2,26 @@ from typing import NamedTuple, override
 
 from jax import Array
 import jax.numpy as jnp
-from jaxtyping import Bool, Float
 import numpy as np
 
 from renderer import Buffers, Camera, render
 from renderer._meta_utils import typed_asarray, typed_full
 from renderer.geometry import Viewport
 from renderer.shader import (
-    ID,
     Fragment,
     FragmentCollection,
+    FragmentInput,
+    MixInput,
     MixerOutput,
     PerFragment,
     PerVertex,
     Shader,
+    VertexInput,
 )
 from renderer.types import (
     FALSE_ARRAY,
     TRUE_ARRAY,
-    BoolV,
     Canvas,
-    PixelState,
-    Vec2f,
-    Vec4f,
     ZBuffer,
 )
 
@@ -48,55 +45,41 @@ class _Targets(NamedTuple):
 class _MultiTargetShader(Shader[_Inputs, _Varyings, _Targets]):
     @staticmethod
     @override
-    def vertex(
-        gl_VertexID: ID,
-        gl_InstanceID: ID,
-        camera: Camera,
-        extra: _Inputs,
-    ) -> tuple[PerVertex, _Varyings]:
-        del gl_InstanceID, camera
+    def vertex(inputs: VertexInput[_Inputs]) -> tuple[PerVertex, _Varyings]:
         return (
-            PerVertex(gl_Position=extra.positions[gl_VertexID]),
+            PerVertex(gl_Position=inputs.extra.positions[inputs.gl_VertexID]),
             _Varyings(
-                colour=extra.colours[gl_VertexID],
-                scalar=extra.scalar_values[gl_VertexID],
+                colour=inputs.extra.colours[inputs.gl_VertexID],
+                scalar=inputs.extra.scalar_values[inputs.gl_VertexID],
             ),
         )
 
     @staticmethod
     @override
     def fragment(
-        gl_FragCoord: Vec4f,
-        gl_FrontFacing: BoolV,
-        gl_PointCoord: Vec2f,
-        varying: _Varyings,
-        extra: _Inputs,
+        inputs: FragmentInput[_Inputs, _Varyings],
     ) -> tuple[PerFragment, Fragment[_Targets]]:
-        del gl_FragCoord, gl_FrontFacing, gl_PointCoord, extra
         return (
             PerFragment(use_default_depth=TRUE_ARRAY),
-            Fragment(targets=_Targets(colour=varying.colour, scalar=varying.scalar)),
+            Fragment(
+                targets=_Targets(
+                    colour=inputs.varying.colour,
+                    scalar=inputs.varying.scalar,
+                )
+            ),
         )
 
 
 class _TargetOnlyShader(_MultiTargetShader):
     @staticmethod
     @override
-    def mix(
-        gl_FragDepth: Float[Array, "primitives"],
-        keeps: Bool[Array, "primitives"],
-        extra: Fragment[_Targets],
-        *,
-        destination: PixelState[_Targets],
-    ) -> tuple[MixerOutput, _Targets]:
-        output, targets = _MultiTargetShader.mix(
-            gl_FragDepth, keeps, extra, destination=destination
-        )
+    def mix(inputs: MixInput[_Targets]) -> tuple[MixerOutput, _Targets]:
+        output, targets = _MultiTargetShader.mix(inputs)
         return (
             output._replace(write_depth=FALSE_ARRAY),
             _Targets(
-                colour=targets.colour + destination.targets.colour,
-                scalar=targets.scalar + destination.targets.scalar,
+                colour=targets.colour + inputs.destination.targets.colour,
+                scalar=targets.scalar + inputs.destination.targets.scalar,
             ),
         )
 
@@ -104,19 +87,11 @@ class _TargetOnlyShader(_MultiTargetShader):
 class _DepthOnlyShader(_MultiTargetShader):
     @staticmethod
     @override
-    def mix(
-        gl_FragDepth: Float[Array, "primitives"],
-        keeps: Bool[Array, "primitives"],
-        extra: Fragment[_Targets],
-        *,
-        destination: PixelState[_Targets],
-    ) -> tuple[MixerOutput, _Targets]:
-        output, _targets = _MultiTargetShader.mix(
-            gl_FragDepth, keeps, extra, destination=destination
-        )
+    def mix(inputs: MixInput[_Targets]) -> tuple[MixerOutput, _Targets]:
+        output, _targets = _MultiTargetShader.mix(inputs)
         return (
             output._replace(keep=FALSE_ARRAY),
-            destination.targets,
+            inputs.destination.targets,
         )
 
 
@@ -126,19 +101,19 @@ class _AllCandidatesShader(_MultiTargetShader):
     @staticmethod
     @override
     def fragment(
-        gl_FragCoord: Vec4f,
-        gl_FrontFacing: BoolV,
-        gl_PointCoord: Vec2f,
-        varying: _Varyings,
-        extra: _Inputs,
+        inputs: FragmentInput[_Inputs, _Varyings],
     ) -> tuple[PerFragment, Fragment[_Targets]]:
-        del gl_FrontFacing, gl_PointCoord, extra
         return (
             PerFragment(
-                keeps=gl_FragCoord[2] >= 0.5,
+                keeps=inputs.gl_FragCoord[2] >= 0.5,
                 use_default_depth=TRUE_ARRAY,
             ),
-            Fragment(targets=_Targets(colour=varying.colour, scalar=varying.scalar)),
+            Fragment(
+                targets=_Targets(
+                    colour=inputs.varying.colour,
+                    scalar=inputs.varying.scalar,
+                )
+            ),
         )
 
 

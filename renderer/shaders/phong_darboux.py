@@ -26,10 +26,18 @@ from ..geometry import (
     to_cartesian,
     to_homogeneous,
 )
-from ..shader import ID, Fragment, PerFragment, PerVertex, Shader
+from ..shader import (
+    ID,
+    Fragment,
+    FragmentInput,
+    InterpolationInput,
+    PerFragment,
+    PerVertex,
+    Shader,
+    VertexInput,
+)
 from ..types import (
     TRUE_ARRAY,
-    BoolV,
     Colour,
     FaceIndices,
     LightSource,
@@ -116,11 +124,12 @@ class PhongTextureDarbouxShader(
     @partial(jit, inline=True)
     @add_tracing_name
     def vertex(
-        gl_VertexID: ID,
-        gl_InstanceID: ID,
-        camera: Camera,
-        extra: PhongTextureDarbouxExtraInput,
+        inputs: VertexInput[PhongTextureDarbouxExtraInput],
     ) -> tuple[PerVertex, PhongTextureDarbouxExtraFragmentData]:
+        gl_VertexID = inputs.gl_VertexID
+        gl_InstanceID = inputs.gl_InstanceID
+        camera = inputs.camera
+        extra = inputs.extra
         # Use gl_VertexID to index in `extra` buffer.
         assert is_array_type(gl_VertexID, ID), gl_VertexID
         assert is_array_type(gl_InstanceID, ID), gl_InstanceID
@@ -172,10 +181,12 @@ class PhongTextureDarbouxShader(
     @partial(jit, inline=True)
     @add_tracing_name
     def interpolate(
-        values: PhongTextureDarbouxExtraFragmentData,
-        barycentric_screen: Vec3f,
-        barycentric_clip: Vec3f,
+        inputs: InterpolationInput[PhongTextureDarbouxExtraFragmentData],
     ) -> PhongTextureDarbouxExtraFragmentData:
+        values = inputs.values
+        barycentric_screen = inputs.barycentric_screen
+        barycentric_clip = inputs.barycentric_clip
+
         def smooth_interpolation(value: Array) -> Array:
             return interpolate(
                 value,
@@ -211,12 +222,14 @@ class PhongTextureDarbouxShader(
     @partial(jit, inline=True)
     @add_tracing_name
     def fragment(
-        gl_FragCoord: Vec4f,
-        gl_FrontFacing: BoolV,
-        gl_PointCoord: Vec2f,
-        varying: PhongTextureDarbouxExtraFragmentData,
-        extra: PhongTextureDarbouxExtraInput,
+        inputs: FragmentInput[
+            PhongTextureDarbouxExtraInput,
+            PhongTextureDarbouxExtraFragmentData,
+        ],
     ) -> tuple[PerFragment, Fragment[PhongTextureDarbouxExtraMixerOutput]]:
+        gl_FrontFacing = inputs.gl_FrontFacing
+        varying = inputs.varying
+        extra = inputs.extra
         assert isinstance(varying, PhongTextureDarbouxExtraFragmentData), (
             f"Expected PhongTextureDarbouxExtraFragmentData, got {varying}"
         )

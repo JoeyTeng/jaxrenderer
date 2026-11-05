@@ -1,14 +1,64 @@
-# Fragment outputs and mixing
+# Shader inputs, fragment outputs and mixing
 
-`Shader[InputT, VaryingT, TargetsT]` separates material inputs, interpolated
+`Shader[ExtraT, VaryingT, TargetsT]` separates material inputs, interpolated
 vertex data and render targets. The stages remain batched within one rendering
 call; there is no separate transparent rendering pass.
 
-| Stage | Output |
-| --- | --- |
-| `vertex` and `interpolate` | `VaryingT`, such as UVs and normals |
-| `fragment` | `PerFragment` and `Fragment[TargetsT]` |
-| `mix` | `MixerOutput` and `TargetsT` |
+Each stage method receives one frozen, keyword-only pytree dataclass. The record
+keeps related stage values together while preserving their GLSL names.
+
+| Method | Input record and fields | Output |
+| --- | --- | --- |
+| `vertex` | `VertexInput[ExtraT]`: `gl_VertexID`, `gl_InstanceID`, `camera`, `extra` | `PerVertex` and `VaryingT` |
+| `primitive_chooser` | `PrimitiveInput[VaryingT]`: `gl_FragCoord`, `gl_FrontFacing`, `gl_PointCoord`, `keeps`, `values`, `barycentric_screen`, `barycentric_clip`, `double_sided`, `collection` | The selected candidate fields in their existing tuple form |
+| `interpolate` | `InterpolationInput[VaryingT]`: `values`, `barycentric_screen`, `barycentric_clip` | `VaryingT` |
+| `fragment` | `FragmentInput[ExtraT, VaryingT]`: `gl_FragCoord`, `gl_FrontFacing`, `gl_PointCoord`, `varying`, `extra` | `PerFragment` and `Fragment[TargetsT]` |
+| `mix` | `MixInput[TargetsT]`: `gl_FragDepth`, `keeps`, `extra: Fragment[TargetsT]`, `destination: PixelState[TargetsT]` | `MixerOutput` and `TargetsT` |
+
+The scalar or per-candidate `double_sided` value defaults to false. The
+`collection` mode defaults to `FragmentCollection.NEAREST`; it is static JAX
+metadata because it determines whether the chooser returns one candidate slot
+or the full statically sized batch. Changing the mode selects a separate JIT
+trace. Array and other dynamic values remain pytree leaves and can be traced.
+Use `dataclasses.replace` to make a modified copy of an input record; it
+preserves the concrete record type. Pyright does not fully type-check values
+passed as `replace` field updates.
+Register each concrete subclass of an input record with
+`jax.tree_util.register_dataclass` before passing it to JAX.
+
+The pipeline maps stage work over vertices, primitives and pixels while
+keeping shared inputs such as `camera` and `extra` outside those mapped axes.
+When applying `jax.vmap` to a stage yourself, use a matching `in_axes` pytree
+and set shared fields to `None`; map only the per-vertex, per-candidate or
+per-pixel fields. Fragment processing remains batched: `NEAREST` reduces the
+candidate set to one slot, while `ALL` preserves every candidate slot and
+passes its eligibility through `keeps`. The opaque mixer still selects the
+nearest kept fragment in that batch.
+
+For example, a subclass can change chooser input while delegating the actual
+selection to its inherited implementation:
+
+```python
+from dataclasses import replace
+from typing import override
+
+from renderer.shader import PrimitiveInput
+from renderer.types import TRUE_ARRAY
+
+
+class DoubleSidedShader(BaseShader):
+    @staticmethod
+    @override
+    def primitive_chooser(inputs: PrimitiveInput[VaryingT]):
+        return BaseShader.primitive_chooser(
+            replace(inputs, double_sided=TRUE_ARRAY)
+        )
+```
+
+Here `BaseShader` is an existing shader subclass whose chooser is inherited.
+`replace` retains its static `collection` value, so chooser mode stays fixed
+for JAX compilation. This only changes chooser eligibility; fragment-stage
+discard rules still apply.
 
 `Fragment.targets` contains the values intended for the render targets.
 `Fragment.alpha` carries opacity separately and defaults to a floating-point one.
@@ -43,9 +93,9 @@ opaque mixer; a shader does not need a mix override merely to package a colour.
   mask, allowing fragment processing and mixing to consider multiple layers.
   The candidate axis stays statically sized for JAX; inactive slots are masked.
 
-The collection mode is passed to `primitive_chooser` through its keyword-only
-`collection` argument. Custom chooser overrides must forward it while preserving
-their material-specific visibility rules, including double-sided geometry.
+The collection mode is carried by `PrimitiveInput.collection`. Custom chooser
+overrides should preserve it when forwarding modified records, along with any
+material-specific visibility rules such as double-sided geometry.
 
 Selection happens before fragment processing. In nearest mode, a later discard
 or modified fragment depth cannot bring back a candidate already removed by
@@ -58,11 +108,11 @@ fragment depths and final keep flags.
 The mixing signature is:
 
 ```python
-def mix(gl_FragDepth, keeps, extra, *, destination):
+def mix(inputs: MixInput[TargetsT]):
     ...
 ```
 
-`extra` is a batched `Fragment[TargetsT]`. `destination` is a
+`inputs.extra` is a batched `Fragment[TargetsT]`. `inputs.destination` is a
 `PixelState[TargetsT]` containing the current pixel's `targets` and `zbuffer`.
 The mixer returns target values and a `MixerOutput` containing:
 
@@ -99,14 +149,18 @@ for the existing limits around visibility changes and discontinuities.
 
 ## Migrating a custom shader
 
-1. Return `Fragment(targets=...)` with the declared target layout from `fragment`.
-2. Remove a mix override that only selects a fragment and converts its layout.
-3. For a genuine custom mixer, accept `destination`, consume `extra.targets`, and
-   return explicit target and depth write decisions.
-4. Give `Buffers.targets` the same layout, such as the shader's public output
+1. Update all five stage overrides and call sites to accept their corresponding
+   input record and read stage fields from `inputs`.
+2. Return `Fragment(targets=...)` with the declared target layout from `fragment`.
+3. Remove a mix override that only selects a fragment and converts its layout.
+4. For a genuine custom mixer, accept `MixInput[TargetsT]`, consume
+   `inputs.extra.targets` and `inputs.destination`, and return explicit target
+   and depth write decisions.
+5. Give `Buffers.targets` the same layout, such as the shader's public output
    NamedTuple, rather than an unrelated plain tuple.
-5. Forward `collection` from custom chooser overrides. Choose `ALL` when the
-   mixing algorithm needs more than the nearest geometry candidate.
+6. Preserve `PrimitiveInput.collection` when forwarding records from custom
+   chooser overrides. Choose `ALL` when the mixing algorithm needs more than the
+   nearest geometry candidate.
 
 The high-level `Renderer` API continues to accept and return its single-canvas
 tuple; it adapts that layout at the material-specific pipeline boundary.

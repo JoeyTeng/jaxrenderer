@@ -13,7 +13,14 @@ import matplotlib.pyplot as plt
 from renderer import jit
 from renderer.geometry import Camera, normalise, to_homogeneous
 from renderer.pipeline import render
-from renderer.shader import ID, Fragment, PerFragment, PerVertex, Shader
+from renderer.shader import (
+    Fragment,
+    FragmentInput,
+    PerFragment,
+    PerVertex,
+    Shader,
+    VertexInput,
+)
 from renderer.shaders.gouraud import (
     GouraudExtraInput,
     GouraudExtraMixerOutput,
@@ -21,7 +28,6 @@ from renderer.shaders.gouraud import (
 )
 from renderer.types import (
     TRUE_ARRAY,
-    BoolV,
     Buffers,
     Colour,
     FloatV,
@@ -122,11 +128,11 @@ class _Shader(Shader[ExtraInput, ExtraFragmentData, ExtraMixerOutput]):
     @jaxtyped
     @jit
     def vertex(
-        gl_VertexID: ID,
-        gl_InstanceID: ID,
-        camera: Camera,
-        extra: ExtraInput,
+        inputs: VertexInput[ExtraInput],
     ) -> tuple[PerVertex, ExtraFragmentData]:
+        gl_VertexID = inputs.gl_VertexID
+        camera = inputs.camera
+        extra = inputs.extra
         # Use gl_VertexID to index in `extra` buffer.
         position: Vec4f = to_homogeneous(extra.position[gl_VertexID])
         gl_Position: Vec4f = camera.to_clip(position)
@@ -154,14 +160,10 @@ class _Shader(Shader[ExtraInput, ExtraFragmentData, ExtraMixerOutput]):
     @jaxtyped
     @jit
     def fragment(
-        gl_FragCoord: Vec4f,
-        gl_FrontFacing: BoolV,
-        gl_PointCoord: Vec2f,
-        varying: ExtraFragmentData,
-        extra: ExtraInput,
+        inputs: FragmentInput[ExtraInput, ExtraFragmentData],
     ) -> tuple[PerFragment, Fragment[ExtraMixerOutput]]:
-        texture_colour: Colour = varying.colour
-        a = jnp.modf(varying.uv)[0] < 0.5  # pyright: ignore[reportUnknownMemberType]
+        texture_colour: Colour = inputs.varying.colour
+        a = jnp.modf(inputs.varying.uv)[0] < 0.5  # pyright: ignore[reportUnknownMemberType]
         texture_colour = jnp.where(
             a[0] != a[1],
             texture_colour,

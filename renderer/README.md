@@ -1,6 +1,6 @@
 # Key Implementations of the Renderer
 
-This document describes the key implementations of the renderer. For the implementations of the shaders, refer to [shaders/README.md](shaders/README.md).
+This document describes the key implementations of the renderer. For the implementations of the shaders, refer to [shaders/README.md](shaders/README.md). Custom shader stage inputs are described in the [shader contract](../docs/shader-contract.md).
 
 ## Pipeline Design
 
@@ -12,11 +12,11 @@ Some example implementations of shaders are provided in `renderer/shaders`.
 
 ### Vertex Specification
 
-This can be passed as `VertexShaderExtraInputT` to `render`, and they will be passed directly to the `Shader.vertex` method. The input should be stored as several batched buffers (`jnp.array`) with the batch axis as the axis 0, to be used for downstream `vmap` operations. See example implementations for more details.
+This can be passed as `VertexShaderExtraInputT` to `render` and is available as `VertexInput.extra` in `Shader.vertex`. The pipeline maps over vertex IDs while keeping `camera` and `extra` shared. Store vertex attributes as batched buffers (`jnp.array`) with the vertex axis at axis 0. See example implementations for more details.
 
 ### Vertex Processing
 
-Implemented by `Shader.vertex`. An implementation **must** be provided. This function takes in the vertex specification and outputs the vertex position in the clip space, as well as other user-defined per-vertex attributes such as colour, normal, etc.
+Implemented by `Shader.vertex`. An implementation **must** be provided. It receives one `VertexInput` record and outputs the vertex position in clip space, as well as other user-defined per-vertex attributes such as colour and normal.
 
 References:
 
@@ -50,21 +50,18 @@ Currently no anti-aliasing strategy is supported.
 
 #### Optional Early Depth Test
 
-This is an additional stage in this pipeline which may be analogical to the early depth test in OpenGL. It is implemented in `Shader.primitive_chooser`. The default implementation is provided, which assumes that the depth is just the interpolated `z` value in the eye space. It just picks the values of the single primitive that is closest to the camera and is not discarded in the previous pipeline.
+This is an additional stage in this pipeline which may be analogous to the early depth test in OpenGL. It is implemented in `Shader.primitive_chooser`, which receives one `PrimitiveInput` record. The default implementation picks the eligible candidate with the minimum window-space depth.
 
-Custom implementations can overload to change this behaviour to achieve special effects like occlusion, transparency, etc. Note that the number of returned primitives must be static, i.e., same for all fragments, as required by `jax.jit`.
+Custom implementations can change this behaviour for effects such as occlusion or multi-layer processing. The returned candidate count must be static for JAX compilation. `PrimitiveInput.collection` is static metadata: `NEAREST` selects one candidate slot, while `ALL` retains every candidate slot and passes eligibility in `keeps`.
 
-`Shader.primitive_chooser` also accepts an optional keyword-only `double_sided`
-mask, either a scalar or one boolean per primitive. The default chooser lets
-marked back-facing primitives compete for the closest depth while preserving
-their original `gl_FrontFacing` value. Overrides should retain this optional
-keyword in their signature for type compatibility; the renderer does not pass
-it automatically. The built-in double-sided shaders combine it with their
-per-object visibility flags.
+`PrimitiveInput.double_sided` is a scalar or per-candidate mask that lets marked
+back-facing primitives compete for the closest depth while preserving their
+original `gl_FrontFacing` value. The built-in double-sided shaders combine it
+with their per-object visibility flags.
 
 #### Interpolation of Attributes
 
-Interpolation of all attributes for each fragment is defined by `Shader.interpolate`. The default implementation is provided, which simply linearly interpolates the attributes in the clip space according to the barycentric coordinates of the fragment. This behaviour is wrapped as a convenient function `interpolate` and mode `Interpolation.SMOOTH`. The interpolated values are then passed to the fragment shader. Currently only `Interpolation.SMOOTH` and `Interpolation.FLAT` are supported.
+Interpolation of all attributes for each fragment is defined by `Shader.interpolate`, which receives one `InterpolationInput` record. The default implementation interpolates attributes according to the fragment's barycentric coordinates using `Interpolation.SMOOTH`. Currently only `Interpolation.SMOOTH` and `Interpolation.FLAT` are supported.
 
 Reference:
 
@@ -72,7 +69,7 @@ Reference:
 
 ### Fragment Processing
 
-This is done by `Shader.fragment`. A default implementation is provided, which simply returns the `z` component of the fragment position in the screen space as the depth, and directly returns all extra attributes.
+This is done by `Shader.fragment`, which receives one `FragmentInput` record. `Shader` requires a fragment implementation. `PassthroughShader` provides a default that wraps the interpolated values in an opaque `Fragment` and requests the screen-space depth from `gl_FragCoord`.
 
 Reference:
 
@@ -83,11 +80,11 @@ Reference:
 
 #### Depth Test
 
-This is not explicitly done in the pipeline, but is implicitly done by the default implementation of `Shader.mix`, which only takes the fragment with the largest depth value.
+This is not a separate pipeline stage. The default `Shader.mix` selects the nearest kept fragment with minimum depth. Custom mixers receive one `MixInput` record, including the current `destination` pixel.
 
 #### Colour Blending
 
-This can be achieved by changing `Shader.mix` function as well. The value from previous buffer is not available though.
+Custom colour blending can be implemented in `Shader.mix` using the candidate batch and `MixInput.destination`. Alpha blending is not part of the default mixer.
 
 ## Implementation Details
 
@@ -97,8 +94,8 @@ This can be achieved by changing `Shader.mix` function as well. The value from p
 - Effect of batched vs non-batched rendering on triangles. Non-batched pure `fori_loop`-based implementation is consistently faster, see [Colab](https://colab.research.google.com/drive/13p3US19TrVOTtLFkGKgg08KYzMb4747w?usp=sharing). This may be due to the extra GPU memory allocation required in `vmap`-ed implementation
 - Effect of memory donation to suggest memory reuse, see [Colab](https://colab.research.google.com/drive/1VT7nvHV7au2oncMUjbZVNkPjZm0cN1wM?usp=sharing). The improvement is marginal.
 
-### Why use `NamedTuple` but not `dataclasses`, etc
+### Why use `NamedTuple` and registered dataclasses
 
-See experiment code [here in Colab](https://colab.research.google.com/drive/19b4VpAevvTVj_Ry9tEj88Q91ECXsku6z?usp=sharing). Basically tuples are well supported (and thus `NamedTuple`) by JAX as a [PyTree](https://jax.readthedocs.io/en/latest/pytrees.html) out of box, but `dataclass` is not.
+Shader inputs use frozen dataclasses registered as JAX [PyTrees](https://jax.readthedocs.io/en/latest/pytrees.html), with static metadata for chooser mode. `NamedTuple` remains useful for shader outputs and user-defined varying or target layouts. See experiment code [here in Colab](https://colab.research.google.com/drive/19b4VpAevvTVj_Ry9tEj88Q91ECXsku6z?usp=sharing).
 
 Notice that [it is impossible to inherit from subclass of `NamedTuple`](https://github.com/python/typing/issues/427).

@@ -17,11 +17,17 @@ from .._meta_utils import (
 )
 from .._meta_utils import typed_jaxtyped as jaxtyped
 from .._meta_utils import typed_jit as jit
-from ..geometry import Camera, normalise, to_homogeneous
-from ..shader import ID, Fragment, PerFragment, PerVertex, Shader
+from ..geometry import normalise, to_homogeneous
+from ..shader import (
+    Fragment,
+    FragmentInput,
+    PerFragment,
+    PerVertex,
+    Shader,
+    VertexInput,
+)
 from ..types import (
     TRUE_ARRAY,
-    BoolV,
     Colour,
     FloatV,
     LightSource,
@@ -77,34 +83,31 @@ class GouraudTextureShader(
     @partial(jit, inline=True)
     @add_tracing_name
     def vertex(
-        gl_VertexID: ID,
-        gl_InstanceID: ID,
-        camera: Camera,
-        extra: GouraudTextureExtraInput,
+        inputs: VertexInput[GouraudTextureExtraInput],
     ) -> tuple[PerVertex, GouraudTextureExtraFragmentData]:
         # Use gl_VertexID to index in `extra` buffer.
-        position: Vec4f = to_homogeneous(extra.position[gl_VertexID])
-        gl_Position: Vec4f = camera.to_clip(position)
+        position: Vec4f = to_homogeneous(inputs.extra.position[inputs.gl_VertexID])
+        gl_Position: Vec4f = inputs.camera.to_clip(position)
         assert is_array_type(gl_Position, Vec4f)
 
         # assume normal here is in world space. If it is in model space, it
         # must be transformed by the inverse transpose of the model matrix.
         # Ref: https://github.com/ssloy/tinyrenderer/wiki/Lesson-5:-Moving-the-camera#transformation-of-normal-vectors
-        normal: Vec3f = normalise(extra.normal[gl_VertexID])
+        normal: Vec3f = normalise(inputs.extra.normal[inputs.gl_VertexID])
         intensity: FloatV = jnp.dot(
             normal,
-            normalise(extra.light.direction),
+            normalise(inputs.extra.light.direction),
         )
         assert is_array_type(intensity, FloatV)
 
         light_colour: Colour
-        light_colour = extra.light.colour * intensity
+        light_colour = inputs.extra.light.colour * intensity
 
         return (
             PerVertex(gl_Position=gl_Position),
             GouraudTextureExtraFragmentData(
                 colour=light_colour,
-                uv=extra.uv[gl_VertexID],
+                uv=inputs.extra.uv[inputs.gl_VertexID],
             ),
         )
 
@@ -113,23 +116,22 @@ class GouraudTextureShader(
     @partial(jit, inline=True)
     @add_tracing_name
     def fragment(
-        gl_FragCoord: Vec4f,
-        gl_FrontFacing: BoolV,
-        gl_PointCoord: Vec2f,
-        varying: GouraudTextureExtraFragmentData,
-        extra: GouraudTextureExtraInput,
+        inputs: FragmentInput[
+            GouraudTextureExtraInput,
+            GouraudTextureExtraFragmentData,
+        ],
     ) -> tuple[PerFragment, Fragment[GouraudTextureExtraMixerOutput]]:
         # repeat texture
-        uv = lax.floor(varying.uv).astype(int)
-        uv = uv % typed_asarray(extra.texture.shape[:2])
-        texture_colour: Colour = extra.texture[uv[0], uv[1]]
-        light_colour: Colour = varying.colour
+        uv = lax.floor(inputs.varying.uv).astype(int)
+        uv = uv % typed_asarray(inputs.extra.texture.shape[:2])
+        texture_colour: Colour = inputs.extra.texture[uv[0], uv[1]]
+        light_colour: Colour = inputs.varying.colour
 
         return (
             PerFragment(
                 keeps=typed_array(
                     (
-                        gl_FrontFacing,
+                        inputs.gl_FrontFacing,
                         (light_colour >= 0).all(),
                     )
                 ).all(),

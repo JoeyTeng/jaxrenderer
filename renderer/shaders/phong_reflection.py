@@ -1,3 +1,4 @@
+from dataclasses import replace
 from functools import partial
 from typing import NamedTuple, override
 
@@ -15,7 +16,16 @@ from .._meta_utils import typed_jaxtyped as jaxtyped
 from .._meta_utils import typed_jit as jit
 from ..geometry import Camera, normalise, to_homogeneous
 from ..model import MergedModel
-from ..shader import ID, Fragment, FragmentCollection, PerFragment, PerVertex, Shader
+from ..shader import (
+    Fragment,
+    FragmentInput,
+    InterpolationInput,
+    PerFragment,
+    PerVertex,
+    PrimitiveInput,
+    Shader,
+    VertexInput,
+)
 from ..types import (
     FALSE_ARRAY,
     TRUE_ARRAY,
@@ -106,11 +116,11 @@ class PhongReflectionTextureShader(
     @partial(jit, inline=True)
     @add_tracing_name
     def vertex(
-        gl_VertexID: ID,
-        gl_InstanceID: ID,
-        camera: Camera,
-        extra: PhongReflectionTextureExtraInput,
+        inputs: VertexInput[PhongReflectionTextureExtraInput],
     ) -> tuple[PerVertex, PhongReflectionTextureExtraFragmentData]:
+        gl_VertexID = inputs.gl_VertexID
+        camera = inputs.camera
+        extra = inputs.extra
         # Use gl_VertexID to index in `extra` buffer.
         position: Vec4f = to_homogeneous(extra.position[gl_VertexID])
         gl_Position: Vec4f = camera.to_clip(position)
@@ -144,18 +154,15 @@ class PhongReflectionTextureShader(
     @partial(jit, inline=True)
     @add_tracing_name
     def interpolate(
-        values: PhongReflectionTextureExtraFragmentData,
-        barycentric_screen: Vec3f,
-        barycentric_clip: Vec3f,
+        inputs: InterpolationInput[PhongReflectionTextureExtraFragmentData],
     ) -> PhongReflectionTextureExtraFragmentData:
+        values = inputs.values
         varying: PhongReflectionTextureExtraFragmentData = Shader[
             PhongReflectionTextureExtraInput,
             PhongReflectionTextureExtraFragmentData,
             PhongReflectionTextureExtraFragmentData,
         ].interpolate(
-            values=values,
-            barycentric_screen=barycentric_screen,
-            barycentric_clip=barycentric_clip,
+            inputs=inputs,
         )
         # all three values should be the same, just pick the first.
         varying = varying._replace(
@@ -168,20 +175,11 @@ class PhongReflectionTextureShader(
 
     @staticmethod
     @jaxtyped
-    @partial(jit, static_argnames=("collection",), inline=True)
+    @partial(jit, inline=True)
     @add_tracing_name
     @override
     def primitive_chooser(
-        gl_FragCoord: Float[Array, "primitives 4"],
-        gl_FrontFacing: Bool[Array, "primitives"],
-        gl_PointCoord: Float[Array, "primitives 2"],
-        keeps: Bool[Array, "primitives"],
-        values: PhongReflectionTextureExtraFragmentData,
-        barycentric_screen: Float[Array, "primitives 3"],
-        barycentric_clip: Float[Array, "primitives 3"],
-        *,
-        double_sided: Bool[Array, "primitives"] | BoolV = FALSE_ARRAY,
-        collection: FragmentCollection = FragmentCollection.NEAREST,
+        inputs: PrimitiveInput[PhongReflectionTextureExtraFragmentData],
     ) -> tuple[
         Float[Array, "kept_primitives 4"],
         Bool[Array, "kept_primitives"],
@@ -196,15 +194,10 @@ class PhongReflectionTextureShader(
             PhongReflectionTextureExtraFragmentData,
             PhongReflectionTextureExtraFragmentData,
         ].primitive_chooser(
-            gl_FragCoord,
-            gl_FrontFacing,
-            gl_PointCoord,
-            keeps,
-            values,
-            barycentric_screen,
-            barycentric_clip,
-            double_sided=double_sided | values.double_sided[:, 0],
-            collection=collection,
+            inputs=replace(
+                inputs,
+                double_sided=(inputs.double_sided | inputs.values.double_sided[:, 0]),
+            )
         )
 
     @staticmethod
@@ -212,12 +205,13 @@ class PhongReflectionTextureShader(
     @partial(jit, inline=True)
     @add_tracing_name
     def fragment(
-        gl_FragCoord: Vec4f,
-        gl_FrontFacing: BoolV,
-        gl_PointCoord: Vec2f,
-        varying: PhongReflectionTextureExtraFragmentData,
-        extra: PhongReflectionTextureExtraInput,
+        inputs: FragmentInput[
+            PhongReflectionTextureExtraInput,
+            PhongReflectionTextureExtraFragmentData,
+        ],
     ) -> tuple[PerFragment, Fragment[PhongReflectionTextureExtraMixerOutput]]:
+        varying = inputs.varying
+        extra = inputs.extra
 
         # texture
         texture_index = varying.texture_index.astype(int)
@@ -267,7 +261,7 @@ class PhongReflectionTextureShader(
 
         return (
             PerFragment(
-                keeps=gl_FrontFacing | varying.double_sided,
+                keeps=inputs.gl_FrontFacing | varying.double_sided,
                 use_default_depth=TRUE_ARRAY,
             ),
             Fragment(
