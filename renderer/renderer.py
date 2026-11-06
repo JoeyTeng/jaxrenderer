@@ -1,6 +1,5 @@
-from collections.abc import Sequence
 from functools import partial
-from typing import NamedTuple, Optional, TypeAlias, Union
+from typing import Optional, TypeAlias
 
 import jax
 import jax.lax as lax
@@ -18,14 +17,28 @@ from ._meta_utils import (
     typed_array,
     typed_asarray,
     typed_full,
-    typed_ones,
     typed_zeros,
 )
 from ._meta_utils import typed_jaxtyped as jaxtyped
 from ._meta_utils import typed_jit as jit
 from .geometry import Camera, Projection, View, Viewport, normalise
-from .model import MergedModel, ModelObject, merge_objects
+from .model import MergedModel, merge_objects
 from .pipeline import render
+from .renderer_types import (
+    CameraImageInput as CameraImageInput,
+)
+from .renderer_types import (
+    CameraParameters as CameraParameters,
+)
+from .renderer_types import (
+    LightParameters as LightParameters,
+)
+from .renderer_types import (
+    RenderInput as RenderInput,
+)
+from .renderer_types import (
+    ShadowParameters as ShadowParameters,
+)
 from .shaders.phong_reflection import (
     PhongReflectionTextureExtraInput,
     PhongReflectionTextureExtraMixerOutput,
@@ -52,82 +65,6 @@ from .types import (
 
 DoubleSidedFaces: TypeAlias = Bool[Array, "faces"]
 """Whether to render both sides of each face (triangle primitive)."""
-
-
-class CameraParameters(NamedTuple):
-    """Parameters for rendering from camera.
-
-    Default values come from [erwincoumans/tinyrenderer::TinyRendererCamera](https://github.com/erwincoumans/tinyrenderer/blob/89e8adafb35ecf5134e7b17b71b0f825939dc6d9/python/pytinyrenderer.cc#L56)
-    """
-
-    viewWidth: int = 640
-    """width of the viewport."""
-    viewHeight: int = 480
-    """height of the viewport."""
-    viewDepth: float = 1.0
-    """depth of the rendered view."""
-    near: float = 0.01
-    """near clipping plane."""
-    far: float = 1000.0
-    """far clipping plane."""
-    hfov: float = 58.0
-    """horizontal field of view, in degrees."""
-    vfov: float = 45.0
-    """vertical field of view, in degrees."""
-    position: Union[Vec3f, tuple[float, float, float]] = typed_ones(3)
-    """position of the camera in world space."""
-    target: Union[Vec3f, tuple[float, float, float]] = typed_zeros(3)
-    """target of the camera."""
-    up: Union[Vec3f, tuple[float, float, float]] = typed_array((0.0, 0.0, 1.0))
-    """up direction of the camera."""
-
-
-class LightParameters(NamedTuple):
-    """Parameters for directional light in rendering.
-
-    Default values come from [erwincoumans/tinyrenderer::TinyRenderLight](https://github.com/erwincoumans/tinyrenderer/blob/89e8adafb35ecf5134e7b17b71b0f825939dc6d9/python/pytinyrenderer.cc#L74).
-    """
-
-    direction: Vec3f = normalise(typed_array((0.57735, 0.57735, 0.57735)))
-    """in world space, as it goes from that position to origin (camera).
-
-    For example, if direction = camera's eye, full specular will be applied to
-    triangles with normal towards camera.
-    """
-    colour: Colour = typed_ones(3)
-    """Light source to render."""
-    ambient: Colour = typed_array((0.6, 0.6, 0.6))
-    """Ambient colour. This is added to the final colour of the object."""
-    diffuse: Colour = typed_array((0.35, 0.35, 0.35))
-    """Diffuse coefficient per colour channel. This is multiplied to the
-        diffuse texture colour of the object.
-    """
-    specular: Colour = typed_array((0.05, 0.05, 0.05))
-    """Specular coefficient per colour channel. This is multiplied to the
-        computed specular light colour.
-    """
-
-
-class ShadowParameters(NamedTuple):
-    """Parameters for rendering shadow map.
-
-    Default values come from:
-      - [erwincoumans/tinyrenderer::TinyRenderLight](https://github.com/erwincoumans/tinyrenderer/blob/89e8adafb35ecf5134e7b17b71b0f825939dc6d9/python/pytinyrenderer.cc#L74).
-      - for `up`, [erwincoumans/tinyrenderer::renderObject](https://github.com/erwincoumans/tinyrenderer/blob/89e8adafb35ecf5134e7b17b71b0f825939dc6d9/tinyrenderer.cpp#L372).
-    """
-
-    centre: Vec3f = typed_zeros(3)
-    """centre of the scene, same as object's camera's centre."""
-    up: Vec3f = typed_array((0.0, 0.0, 1.0))
-    """up direction of the scene, same as object's camera's up."""
-    strength: Colour = 1 - typed_array((0.4, 0.4, 0.4))
-    """Strength of shadow. Must be in [0, 1]. 0 means no shadow, 1 means fully
-        black shadow.  See `Shadow.strength` for more details.
-    """
-    offset: float = 0.05
-    """Offset to avoid self-shadowing / z-fighting. This will be subtracted to
-        the shadow map, making the shadows further away from the light.
-    """
 
 
 class Renderer:
@@ -229,33 +166,32 @@ class Renderer:
     @jaxtyped
     @partial(
         jit,
-        static_argnames=("cls", "loop_unroll"),
-        donate_argnums=(4,),
+        static_argnames=("cls",),
+        donate_argnames=("buffers",),
         inline=True,
     )
     @add_tracing_name
     def render(
         cls,
-        model: MergedModel,
-        light: LightParameters,
-        camera: Camera,
+        inputs: RenderInput,
         buffers: Buffers[tuple[Canvas]],
-        shadow_param: Optional[ShadowParameters] = None,
-        loop_unroll: int = 1,
     ) -> Buffers[tuple[Canvas]]:
-        """Render the scene with the given camera.
+        """Render a merged model into the provided working buffers.
 
         Parameters:
-          - model: merged model of all the objects to render.
-          - light: the light to render the scene with.
-          - camera: the camera to render the scene with.
-          - buffers: the buffers to render the scene with.
-          - shadow_param: the shadow parameters to render the scene with. Keep
-            it None to disable shadows.
-          - loop_unroll: passed directly to `render`. See `pipeline:render`.
+          - inputs: render configuration and model arrays; creating or replacing
+            this record does not copy its arrays.
+          - buffers: initial zbuffer and canvas, donated to JAX and consumed by
+            this call. Do not reuse the input buffers afterward.
 
-        Returns: Buffers, with zbuffer and (coloured image, ).
+        Returns: A new Buffers record with the rendered zbuffer and canvas.
         """
+        model = inputs.model
+        light = inputs.light
+        camera = inputs.camera
+        shadow_param = inputs.shadow_param
+        loop_unroll = inputs.loop_unroll
+
         # flatten so each vertex has its own "extra"
         position = model.verts[model.faces.reshape((-1,))]
         normal = model.norms[model.faces_norm.reshape((-1,))]
@@ -372,78 +308,64 @@ class Renderer:
     @jaxtyped
     @partial(
         jit,
-        static_argnames=("cls", "width", "height", "loop_unroll"),
+        static_argnames=("cls",),
         inline=True,
     )
     @add_tracing_name
     def get_camera_image(
         cls,
-        objects: Sequence[ModelObject],
-        light: LightParameters,
-        camera: Union[Camera, CameraParameters],
-        width: int,
-        height: int,
-        colour_default: Colour = typed_array(  # pyright: ignore[reportCallInDefaultInitializer]
-            (1.0, 1.0, 1.0),
-            dtype=jnp.single,
-        ),
-        zbuffer_default: NumV = typed_array(  # pyright: ignore[reportCallInDefaultInitializer]
-            1,
-            dtype=jnp.single,
-        ),
-        shadow_param: Optional[ShadowParameters] = None,
-        loop_unroll: int = 1,
+        inputs: CameraImageInput,
     ) -> Canvas:
         """Render the scene with the given camera.
 
-        If `objects` is empty, return a canvas filled with `colour_default`
-        without processing the camera, light, or rendering pipeline.
+        If `inputs.objects` is empty, return a canvas filled with
+        `inputs.colour_default` without processing the camera, light, or
+        rendering pipeline. Replacing the input record does not copy its arrays.
 
-        The dtype of `colour_default` and `zbuffer_default` will be used as the
+        The dtype of `colour_default` and `zbuffer_default` is used as the
         dtype of canvas and zbuffer.
 
         Parameters:
-          - objects: the objects to render.
-          - light: the light to render the scene with.
-          - camera: the camera to render the scene with.
-          - width, height: the size of the image to render.
-          - colour_default: default colours to fill the image with.
-          - zbuffer_default: default zbuffer values to fill with.
-          - shadow_param: the shadow parameters to render the scene with. Keep
-            it None to disable shadows.
-          - loop_unroll: passed directly to `render`. See `pipeline:render`.
+          - inputs: objects, camera, lighting, framebuffer size, and render
+            options.
 
         Returns: The rendered canvas, or the configured background canvas when
           there are no objects.
         """
+        width = inputs.width
+        height = inputs.height
+        colour_default = inputs.colour_default
+        zbuffer_default = inputs.zbuffer_default
+
         buffers: Buffers[tuple[Canvas]] = cls.create_buffers(
             width=width,
             height=height,
             colour_default=colour_default,
             zbuffer_default=zbuffer_default,
         )
-        if not objects:
+        if not inputs.objects:
             return buffers.targets[0]
 
         _camera: Camera
-        if isinstance(camera, CameraParameters):
-            _camera = cls.create_camera_from_parameters(camera)
+        if isinstance(inputs.camera, CameraParameters):
+            _camera = cls.create_camera_from_parameters(inputs.camera)
         else:
-            _camera = camera
+            _camera = inputs.camera
 
         assert isinstance(_camera, Camera), f"{_camera}"
 
         light = tree_map(
             typed_asarray,
-            light,
+            inputs.light,
             # only flatten one layer
             is_leaf=lambda x: not isinstance(x, LightParameters),
         )
         assert isinstance(light, LightParameters), f"{light}"
 
-        model: MergedModel = merge_objects(objects)
+        model: MergedModel = merge_objects(inputs.objects)
         assert isinstance(model, MergedModel), f"{model}"
 
+        shadow_param = inputs.shadow_param
         if shadow_param is not None:
             shadow_param = tree_map(
                 typed_asarray,
@@ -454,12 +376,14 @@ class Renderer:
 
         canvas: Canvas
         _, (canvas,) = cls.render(
-            model=model,
-            light=light,
-            camera=_camera,
+            inputs=RenderInput(
+                model=model,
+                light=light,
+                camera=_camera,
+                shadow_param=shadow_param,
+                loop_unroll=inputs.loop_unroll,
+            ),
             buffers=buffers,
-            shadow_param=shadow_param,
-            loop_unroll=loop_unroll,
         )
         assert is_array_type(canvas, Canvas), f"{canvas}"
 

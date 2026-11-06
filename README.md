@@ -55,6 +55,8 @@ For CI workflows and render regression guidance, see [CI documentation](docs/ci/
 
 > Please note that the package is imported with name `renderer` rather than the PyPI package name `jaxrenderer`. This may change in the future though.
 
+Examples on `master` use the [development API and matching source installation](docs/renderer-inputs.md); released versions have their own tagged documentation.
+
 Some example scripts are provided in [examples](examples) folder. You may find the [demo notebook](notebooks/Demo.ipynb) useful as well. In the demo, there is batch rendering and differentiable rendering examples.
 
 The following is a simple example of rendering a cube with a texture map:
@@ -78,21 +80,25 @@ cube = renderer.create_cube(
 
 # Render the cube
 image = renderer.Renderer.get_camera_image(
-    objects=[renderer.ModelObject(model=cube)],
-    # Simply use defaults
-    camera=renderer.CameraParameters(
-        viewWidth=ImageWidth,
-        viewHeight=ImageHeight,
-        position=jnp.array([2.0, 4.0, 1.0], dtype=jnp.single),
-    ),
-    # Simply use defaults
-    light=renderer.LightParameters(),
-    width=ImageWidth,
-    height=ImageHeight,
+    renderer.CameraImageInput(
+        objects=[renderer.ModelObject(model=cube)],
+        # Simply use defaults
+        camera=renderer.CameraParameters(
+            viewWidth=ImageWidth,
+            viewHeight=ImageHeight,
+            position=jnp.array([2.0, 4.0, 1.0], dtype=jnp.single),
+        ),
+        # Simply use defaults
+        light=renderer.LightParameters(),
+        width=ImageWidth,
+        height=ImageHeight,
+    )
 )
 ```
 
 You may refer to [demo](https://colab.research.google.com/github/JoeyTeng/jaxrenderer/blob/master/notebooks/Demo.ipynb) for more complex examples, including differentiable rendering and batch rendering.
+
+For input records, inheritance and buffer ownership, see [Renderer inputs](docs/renderer-inputs.md).
 
 For zero-scale normals, input diagnostics and derivative caveats, see [Numerical behaviour](docs/numerical-behaviour.md).
 

@@ -13,6 +13,7 @@ from renderer import (
     GUID,
     CameraParameters,
     LightParameters,
+    RenderInput,
     Renderer,
     Scene,
     ShadowParameters,
@@ -90,11 +91,13 @@ camera = Renderer.create_camera_from_parameters(camera_params)
 
 _, (images,) = jax.vmap(
     lambda model, buffer: Renderer.render(  # pyright: ignore
-        model=model,  # pyright: ignore[reportUnknownArgumentType]
-        light=light,
-        camera=camera,
+        inputs=RenderInput(
+            model=model,  # pyright: ignore[reportUnknownArgumentType]
+            light=light,
+            camera=camera,
+            shadow_param=shadow_param,
+        ),
         buffers=buffer,  # pyright: ignore[reportUnknownArgumentType]
-        shadow_param=shadow_param,
     )
 )(batch_models(merged_models), buffers)
 

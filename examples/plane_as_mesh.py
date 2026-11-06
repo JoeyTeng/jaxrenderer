@@ -3,6 +3,7 @@ import jax.numpy as jnp
 import matplotlib.pyplot as plt
 
 from renderer import (
+    CameraImageInput,
     CameraParameters,
     LightParameters,
     Model,
@@ -95,12 +96,14 @@ scene = scene.set_object_orientation(
 )
 
 img = Renderer.get_camera_image(
-    objects=[scene.objects[plane_instance_id]],
-    light=light,
-    camera=camera,
-    width=width,
-    height=height,
-    shadow_param=ShadowParameters(),
+    CameraImageInput(
+        objects=[scene.objects[plane_instance_id]],
+        light=light,
+        camera=camera,
+        width=width,
+        height=height,
+        shadow_param=ShadowParameters(),
+    )
 )
 
 rgb_array = lax.clamp(0.0, img * 255, 255.0).astype(jnp.uint8)

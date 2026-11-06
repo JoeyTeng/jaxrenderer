@@ -28,15 +28,17 @@ def render_cube(width: int = 640, height: int = 480) -> np.ndarray:
         specular_map=jnp.ones((2, 2), dtype=jnp.single) * 2.0,  # pyright: ignore[reportUnknownMemberType]
     )
     image = renderer.Renderer.get_camera_image(
-        objects=[renderer.ModelObject(model=cube)],
-        camera=renderer.CameraParameters(
-            viewWidth=width,
-            viewHeight=height,
-            position=jnp.array([2.0, 4.0, 1.0], dtype=jnp.single),  # pyright: ignore[reportUnknownMemberType]
-        ),
-        light=renderer.LightParameters(),
-        width=width,
-        height=height,
+        renderer.CameraImageInput(
+            objects=[renderer.ModelObject(model=cube)],
+            camera=renderer.CameraParameters(
+                viewWidth=width,
+                viewHeight=height,
+                position=jnp.array([2.0, 4.0, 1.0], dtype=jnp.single),  # pyright: ignore[reportUnknownMemberType]
+            ),
+            light=renderer.LightParameters(),
+            width=width,
+            height=height,
+        )
     )
     return np.asarray(jax.device_get(renderer.transpose_for_display(image)))
 
@@ -142,13 +144,15 @@ def render_head_frames(
             rotation_matrix=rotation_matrix(axis, degrees)
         )
         image = renderer.Renderer.get_camera_image(
-            objects=[instance],
-            camera=camera,
-            light=light,
-            width=width,
-            height=height,
-            shadow_param=shadow,
-            colour_default=jnp.zeros(3, dtype=jnp.single),  # pyright: ignore[reportUnknownMemberType]
+            renderer.CameraImageInput(
+                objects=[instance],
+                camera=camera,
+                light=light,
+                width=width,
+                height=height,
+                shadow_param=shadow,
+                colour_default=jnp.zeros(3, dtype=jnp.single),  # pyright: ignore[reportUnknownMemberType]
+            )
         )
         image = jnp.clip(image, 0.0, 1.0)
         yield np.asarray(jax.device_get(renderer.transpose_for_display(image)))

@@ -9,6 +9,7 @@ import matplotlib.image as mimage
 import matplotlib.pyplot as plt
 
 from renderer import (
+    CameraImageInput,
     CameraParameters,
     LightParameters,
     Renderer,
@@ -71,23 +72,27 @@ shadow_param = ShadowParameters()
 images: list[UInt8[Array, "width height channels"]] = []
 
 img = Renderer.get_camera_image(
-    objects=[scene.objects[cube_1]],
-    light=light,
-    camera=camera,
-    width=width,
-    height=height,
-    shadow_param=shadow_param,
+    CameraImageInput(
+        objects=[scene.objects[cube_1]],
+        light=light,
+        camera=camera,
+        width=width,
+        height=height,
+        shadow_param=shadow_param,
+    )
 )
 rgb_array = lax.clamp(0.0, img * 255, 255.0).astype(jnp.uint8)
 images.append(rgb_array)
 
 img = Renderer.get_camera_image(
-    objects=[scene.objects[cube_2]],
-    light=light,
-    camera=camera,
-    width=width,
-    height=height,
-    shadow_param=shadow_param,
+    CameraImageInput(
+        objects=[scene.objects[cube_2]],
+        light=light,
+        camera=camera,
+        width=width,
+        height=height,
+        shadow_param=shadow_param,
+    )
 )
 rgb_array = lax.clamp(0.0, img * 255, 255.0).astype(jnp.uint8)
 images.append(rgb_array)

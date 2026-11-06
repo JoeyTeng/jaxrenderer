@@ -9,6 +9,7 @@ import matplotlib.image as mimage
 import matplotlib.pyplot as plt
 
 from renderer import (
+    CameraImageInput,
     CameraParameters,
     LightParameters,
     Renderer,
@@ -104,74 +105,82 @@ CanvasT: TypeAlias = UInt8[Array, "width height"]
 images: list[CanvasT] = []
 
 img = Renderer.get_camera_image(
-    objects=[
-        scene.objects[obj_id]
-        for obj_id in [
-            cube_instance_id,
-            capsulex_instance_id,
-        ]
-    ],
-    light=light,
-    camera=camera,
-    width=width,
-    height=height,
-    shadow_param=shadow_param,
+    CameraImageInput(
+        objects=[
+            scene.objects[obj_id]
+            for obj_id in [
+                cube_instance_id,
+                capsulex_instance_id,
+            ]
+        ],
+        light=light,
+        camera=camera,
+        width=width,
+        height=height,
+        shadow_param=shadow_param,
+    )
 )
 rgb_array = lax.clamp(0.0, img * 255, 255.0).astype(jnp.uint8)
 images.append(rgb_array)
 
 img = Renderer.get_camera_image(
-    objects=[
-        scene.objects[obj_id]
-        for obj_id in [
-            cube_instance_id,
-            capsulex_instance_id,
-            capsuley_instance_id,
-        ]
-    ],
-    light=light,
-    camera=camera,
-    width=width,
-    height=height,
-    shadow_param=shadow_param,
+    CameraImageInput(
+        objects=[
+            scene.objects[obj_id]
+            for obj_id in [
+                cube_instance_id,
+                capsulex_instance_id,
+                capsuley_instance_id,
+            ]
+        ],
+        light=light,
+        camera=camera,
+        width=width,
+        height=height,
+        shadow_param=shadow_param,
+    )
 )
 rgb_array = lax.clamp(0.0, img * 255, 255.0).astype(jnp.uint8)
 images.append(rgb_array)
 
 img = Renderer.get_camera_image(
-    objects=[
-        scene.objects[obj_id]
-        for obj_id in [
-            cube_instance_id,
-            capsulex_instance_id,
-            capsuley_instance_id,
-            capsulez_instance_id,
-        ]
-    ],
-    light=light,
-    camera=camera,
-    width=width,
-    height=height,
-    shadow_param=shadow_param,
+    CameraImageInput(
+        objects=[
+            scene.objects[obj_id]
+            for obj_id in [
+                cube_instance_id,
+                capsulex_instance_id,
+                capsuley_instance_id,
+                capsulez_instance_id,
+            ]
+        ],
+        light=light,
+        camera=camera,
+        width=width,
+        height=height,
+        shadow_param=shadow_param,
+    )
 )
 rgb_array = lax.clamp(0.0, img * 255, 255.0).astype(jnp.uint8)
 images.append(rgb_array)
 
 img = Renderer.get_camera_image(
-    objects=[
-        scene.objects[obj_id]
-        for obj_id in [
-            cube_instance_id,
-            capsulex_instance_id,
-            capsuley_instance_id,
-            capsulez_instance_id,
-        ]
-    ],
-    light=light,
-    camera=camera,
-    width=width,
-    height=height,
-    shadow_param=shadow_param,
+    CameraImageInput(
+        objects=[
+            scene.objects[obj_id]
+            for obj_id in [
+                cube_instance_id,
+                capsulex_instance_id,
+                capsuley_instance_id,
+                capsulez_instance_id,
+            ]
+        ],
+        light=light,
+        camera=camera,
+        width=width,
+        height=height,
+        shadow_param=shadow_param,
+    )
 )
 rgb_array = lax.clamp(0.0, img * 255, 255.0).astype(jnp.uint8)
 images.append(rgb_array)

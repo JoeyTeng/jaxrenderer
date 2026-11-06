@@ -2,6 +2,7 @@ import jax.numpy as jnp
 import pytest
 
 from renderer import (
+    CameraImageInput,
     CameraParameters,
     LightParameters,
     Model,
@@ -35,34 +36,36 @@ def _triangle(
 
 def _render(objects: tuple[ModelObject, ...], *, with_shadows: bool = False):
     return Renderer.get_camera_image(
-        objects=objects,
-        light=LightParameters(
-            direction=typed_array((0.0, 0.0, 1.0)),
-            ambient=typed_array((0.0, 0.0, 0.0)),
-            diffuse=typed_array((1.0, 1.0, 1.0)),
-            specular=typed_array((0.0, 0.0, 0.0)),
-        ),
-        camera=CameraParameters(
-            viewWidth=32,
-            viewHeight=32,
-            position=(0.0, 0.0, 3.0),
-            target=(0.0, 0.0, 0.0),
-            up=(0.0, 1.0, 0.0),
-            hfov=90.0,
-            vfov=90.0,
-        ),
-        width=32,
-        height=32,
-        shadow_param=(
-            ShadowParameters(
-                centre=typed_array((0.0, 0.0, 0.0)),
-                up=typed_array((0.0, 1.0, 0.0)),
-                strength=typed_array((0.0, 0.0, 0.0)),
-                offset=0.0,
-            )
-            if with_shadows
-            else None
-        ),
+        CameraImageInput(
+            objects=objects,
+            light=LightParameters(
+                direction=typed_array((0.0, 0.0, 1.0)),
+                ambient=typed_array((0.0, 0.0, 0.0)),
+                diffuse=typed_array((1.0, 1.0, 1.0)),
+                specular=typed_array((0.0, 0.0, 0.0)),
+            ),
+            camera=CameraParameters(
+                viewWidth=32,
+                viewHeight=32,
+                position=(0.0, 0.0, 3.0),
+                target=(0.0, 0.0, 0.0),
+                up=(0.0, 1.0, 0.0),
+                hfov=90.0,
+                vfov=90.0,
+            ),
+            width=32,
+            height=32,
+            shadow_param=(
+                ShadowParameters(
+                    centre=typed_array((0.0, 0.0, 0.0)),
+                    up=typed_array((0.0, 1.0, 0.0)),
+                    strength=typed_array((0.0, 0.0, 0.0)),
+                    offset=0.0,
+                )
+                if with_shadows
+                else None
+            ),
+        )
     )
 
 
