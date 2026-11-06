@@ -9,7 +9,14 @@ from .geometry import (
 )
 from .model import Model, ModelObject, batch_models, merge_objects
 from .pipeline import render
-from .renderer import CameraParameters, LightParameters, Renderer, ShadowParameters
+from .renderer import Renderer
+from .renderer_types import (
+    CameraImageInput,
+    CameraParameters,
+    LightParameters,
+    RenderInput,
+    ShadowParameters,
+)
 from .scene import GUID, Scene
 from .shader import PassthroughShader, Shader
 from .shader_types import (
@@ -46,6 +53,7 @@ __all__ = [
     "Buffers",
     "build_texture_from_PyTinyrenderer",
     "Camera",
+    "CameraImageInput",
     "CameraParameters",
     "Colour",
     "create_capsule",
@@ -71,6 +79,7 @@ __all__ = [
     "PrimitiveInput",
     "quaternion_mul",
     "quaternion",
+    "RenderInput",
     "render",
     "Renderer",
     "rotation_matrix",

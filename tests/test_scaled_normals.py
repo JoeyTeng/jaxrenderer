@@ -5,6 +5,7 @@ import jax.numpy as jnp
 import numpy as np
 import pytest
 
+from renderer import RenderInput
 from renderer._meta_utils import typed_asarray, typed_grad, typed_jit
 from renderer.geometry import normalise
 from renderer.model import MergedModel, Model, ModelObject, merge_objects
@@ -556,9 +557,11 @@ def test_flattened_cube_keeps_finite_normals_and_renders_foreground() -> None:
         )
     )
     buffers = Renderer.render(
-        model=merged,
-        light=LightParameters(direction=_float_array((1.0, 0.0, 0.0))),
-        camera=camera,
+        inputs=RenderInput(
+            model=merged,
+            light=LightParameters(direction=_float_array((1.0, 0.0, 0.0))),
+            camera=camera,
+        ),
         buffers=Renderer.create_buffers(24, 24),
     )
     canvas: Array = buffers.targets[0]

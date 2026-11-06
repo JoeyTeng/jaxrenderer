@@ -4,6 +4,7 @@ import jax.numpy as jnp
 import matplotlib.pyplot as plt
 
 from renderer import (
+    CameraImageInput,
     CameraParameters,
     LightParameters,
     Renderer,
@@ -70,12 +71,14 @@ scene, sphere_model_id = scene.add_capsule(
 scene, sphere_instance_id = scene.add_object_instance(sphere_model_id)
 with jax.disable_jit(False):
     img = Renderer.get_camera_image(
-        objects=[scene.objects[sphere_instance_id]],
-        light=light,
-        camera=camera,
-        width=width,
-        height=height,
-        shadow_param=ShadowParameters(offset=0.05),
+        CameraImageInput(
+            objects=[scene.objects[sphere_instance_id]],
+            light=light,
+            camera=camera,
+            width=width,
+            height=height,
+            shadow_param=ShadowParameters(offset=0.05),
+        )
     )
 
 rgb_array = lax.clamp(0.0, img * 255, 255.0).astype(jnp.uint8)

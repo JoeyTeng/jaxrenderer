@@ -1,6 +1,7 @@
 import jax.numpy as jnp
 
 from renderer import (
+    CameraImageInput,
     CameraParameters,
     LightParameters,
     Model,
@@ -39,23 +40,25 @@ def test_merged_objects_keep_texture_ownership_with_independent_uv_indices() -> 
         _textured_triangle((0.0, 1.0, 0.0), (0, 1, 2))
     ).replace_with_position(typed_array((0.7, 0.0, 0.0)))
     image = Renderer.get_camera_image(
-        objects=(first, second),
-        light=LightParameters(
-            ambient=typed_ones(3),
-            diffuse=typed_zeros(3),
-            specular=typed_zeros(3),
-        ),
-        camera=CameraParameters(
-            viewWidth=48,
-            viewHeight=32,
-            position=(0.0, 0.0, 3.0),
-            target=(0.0, 0.0, 0.0),
-            up=(0.0, 1.0, 0.0),
-            hfov=90.0,
-            vfov=90.0,
-        ),
-        width=48,
-        height=32,
+        CameraImageInput(
+            objects=(first, second),
+            light=LightParameters(
+                ambient=typed_ones(3),
+                diffuse=typed_zeros(3),
+                specular=typed_zeros(3),
+            ),
+            camera=CameraParameters(
+                viewWidth=48,
+                viewHeight=32,
+                position=(0.0, 0.0, 3.0),
+                target=(0.0, 0.0, 0.0),
+                up=(0.0, 1.0, 0.0),
+                hfov=90.0,
+                vfov=90.0,
+            ),
+            width=48,
+            height=32,
+        )
     )
 
     # Restrict the checks to rendered pixels in each object's half of the image.
